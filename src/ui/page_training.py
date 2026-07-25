@@ -81,7 +81,7 @@ def _render_header(topic: str, status: str) -> None:
     with cols[1]:
         st.metric("状态", status)
     with cols[2]:
-        if st.button("← 返回首页", key="td_back_home", use_container_width=True):
+        if st.button("← 返回首页", key="td_back_home", width='stretch'):
             for key in ("training_id", "page"):
                 if key in st.query_params:
                     del st.query_params[key]
@@ -124,15 +124,15 @@ def _render_links(training: Any) -> None:
     st.subheader("🔗 快捷入口")
     cols = st.columns(3)
     with cols[0]:
-        if st.button("📅 今日训练", key="td_link_daily", use_container_width=True):
+        if st.button("📅 今日训练", key="td_link_daily", width='stretch'):
             st.query_params["page"] = "daily"
             st.rerun()
     with cols[1]:
-        if st.button("🔄 周复盘", key="td_link_review", use_container_width=True):
+        if st.button("🔄 周复盘", key="td_link_review", width='stretch'):
             st.query_params["page"] = "review"
             st.rerun()
     with cols[2]:
-        st.button("✏️ 编辑", key="td_link_edit", use_container_width=True, disabled=True)
+        st.button("✏️ 编辑", key="td_link_edit", width='stretch', disabled=True)
     with st.expander("📂 训练目录", expanded=False):
         st.code(str(training.directory) if training.directory else "（未设置）")
 

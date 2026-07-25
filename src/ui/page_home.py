@@ -119,7 +119,7 @@ def _render_empty_state() -> None:
             "➕ 新建训练",
             key="hm_empty_new_training",
             type="primary",
-            use_container_width=True,
+            width='stretch',
         ):
             st.query_params["page"] = "new_training"
             st.rerun()
@@ -135,7 +135,7 @@ def _render_training_list(dashboard: HomeDashboard) -> None:
     display_df = df.drop(columns=["_id"])
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "基线": st.column_config.ProgressColumn(
@@ -162,7 +162,7 @@ def _render_training_list(dashboard: HomeDashboard) -> None:
             "进入训练 →",
             key="hm_enter_training",
             type="primary",
-            use_container_width=True,
+            width='stretch',
         ):
             st.query_params["training_id"] = str(options[label])
             st.query_params["page"] = "detail"
@@ -177,7 +177,7 @@ def _render_new_training_cta() -> None:
             "➕ 新建训练",
             key="hm_new_training",
             type="primary",
-            use_container_width=True,
+            width='stretch',
         ):
             st.query_params["page"] = "new_training"
             st.rerun()

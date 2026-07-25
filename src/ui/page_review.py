@@ -137,7 +137,7 @@ def _render_actions_section(training_id: int) -> None:
         if st.button(
             "✅ 确认校准",
             key=f"rv_confirm_{training_id}",
-            use_container_width=True,
+            width='stretch',
         ):
             outcome: ReviewOutcome | None = st.session_state.get(_OUTCOME_KEY)
             if outcome is None:
@@ -159,7 +159,7 @@ def _render_actions_section(training_id: int) -> None:
         if st.button(
             "⏭️ 跳过",
             key=f"rv_skip_{training_id}",
-            use_container_width=True,
+            width='stretch',
         ):
             try:
                 with st.spinner("记录跳过..."):

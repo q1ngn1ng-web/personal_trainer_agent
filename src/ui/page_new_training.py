@@ -115,10 +115,10 @@ def _render_step1() -> None:
     col1, col2 = st.columns([1, 1])
     with col1:
         validate_clicked = st.button(
-            "✅ 校验主题", key="nt_validate", type="primary", use_container_width=True
+            "✅ 校验主题", key="nt_validate", type="primary", width='stretch'
         )
     with col2:
-        if st.button("清除", key="nt_reset_step1", use_container_width=True):
+        if st.button("清除", key="nt_reset_step1", width='stretch'):
             st.session_state["nt_topic"] = ""
             st.session_state["nt_validation"] = None
             st.rerun()
@@ -163,7 +163,7 @@ def _render_step2() -> None:
                 kw = generate_keywords(st.session_state["nt_topic"])
         except Exception as exc:
             st.error(f"关键词生成失败：{exc}")
-            if st.button("← 返回", key="nt_step2_back_fail", use_container_width=True):
+            if st.button("← 返回", key="nt_step2_back_fail", width='stretch'):
                 st.session_state["nt_step"] = 1
                 st.rerun()
             return
@@ -203,12 +203,12 @@ def _render_step2() -> None:
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("← 返回", key="nt_step2_back", use_container_width=True):
+        if st.button("← 返回", key="nt_step2_back", width='stretch'):
             st.session_state["nt_step"] = 1
             st.rerun()
     with col2:
         confirm = st.button(
-            "下一步：生成基线诊断题 →", key="nt_go_step3", type="primary", use_container_width=True
+            "下一步：生成基线诊断题 →", key="nt_go_step3", type="primary", width='stretch'
         )
 
     if confirm:
@@ -287,12 +287,12 @@ def _render_step3() -> None:
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("← 返回", key="nt_step3_back", use_container_width=True):
+        if st.button("← 返回", key="nt_step3_back", width='stretch'):
             st.session_state["nt_step"] = 2
             st.rerun()
     with col2:
         submit = st.button(
-            "提交诊断并生成训练 →", key="nt_submit", type="primary", use_container_width=True
+            "提交诊断并生成训练 →", key="nt_submit", type="primary", width='stretch'
         )
 
     if submit:
@@ -369,12 +369,12 @@ def _render_step4() -> None:
             "查看训练详情 →",
             key="nt_goto_training_detail",
             type="primary",
-            use_container_width=True,
+            width='stretch',
         ):
             st.query_params["training_id"] = str(training.id)
             st.rerun()
     with col2:
-        if st.button("再创建一个训练", key="nt_create_another", use_container_width=True):
+        if st.button("再创建一个训练", key="nt_create_another", width='stretch'):
             _reset_state()
             st.rerun()
 
