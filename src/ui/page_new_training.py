@@ -371,6 +371,7 @@ def _render_step4() -> None:
             type="primary",
             width='stretch',
         ):
+            st.query_params["page"] = "detail"
             st.query_params["training_id"] = str(training.id)
             st.rerun()
     with col2:
