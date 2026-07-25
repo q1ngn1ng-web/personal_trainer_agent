@@ -42,7 +42,11 @@ def _training_header(training: Any) -> None:
         days = 0
         if created:
             try:
-                days = (datetime.now(timezone.utc) - datetime.fromisoformat(str(created).replace("Z", "+00:00"))).days
+                parsed = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                # Defensive: see page_daily._parse_created_at for rationale.
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                days = (datetime.now(timezone.utc) - parsed).days
             except ValueError:
                 days = 0
         st.metric(

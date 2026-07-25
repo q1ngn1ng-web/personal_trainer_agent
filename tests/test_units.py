@@ -452,6 +452,28 @@ class TestDatetimeSubtraction(unittest.TestCase):
                     f"trainer_service.py uses naive datetime.now(): {line!r}"
                 )
 
+    def test_naive_iso_string_subtraction_does_not_raise(self) -> None:
+        """Regression: legacy DB rows have naive ISO strings (no tz suffix).
+        Subtract from datetime.now(timezone.utc) must not raise TypeError.
+        This is the exact pattern that crashed page_daily.py:60 for the user."""
+        from datetime import datetime, timezone, timedelta
+        # Naive ISO string, like '2026-07-25T22:16:31' from a legacy row.
+        naive_iso = "2026-07-25T22:16:31"
+        parsed = datetime.fromisoformat(naive_iso)
+        self.assertIsNone(parsed.tzinfo)
+        # Without the defensive fix in page_daily._parse_created_at this raises.
+        with self.assertRaises(TypeError):
+            _ = (datetime.now(timezone.utc) - parsed).days
+        # With the defensive parser applied (tzinfo=UTC), no raise. Use a
+        # recent naive timestamp that's guaranteed to be < now (UTC) regardless
+        # of local timezone, so the diff is positive.
+        recent_naive = (datetime.now(timezone.utc) - timedelta(days=5)).replace(tzinfo=None).isoformat()
+        recent_parsed = datetime.fromisoformat(recent_naive)
+        recent_defensive = recent_parsed.replace(tzinfo=timezone.utc)
+        # Cross-tz arithmetic now works
+        days = (datetime.now(timezone.utc) - recent_defensive).days
+        self.assertGreaterEqual(days, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

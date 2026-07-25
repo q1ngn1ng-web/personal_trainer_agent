@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from src.core.baseline import compute_level
@@ -64,10 +64,14 @@ def _parse_dt(value: Any) -> datetime | None:
         return None
     text = str(value)
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         logger.warning("Could not parse datetime: %r", text)
         return None
+    # Defensive: legacy rows may have naive ISO strings — assume UTC.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _to_date(value: Any) -> date | None:

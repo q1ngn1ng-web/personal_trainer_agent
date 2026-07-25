@@ -42,9 +42,15 @@ def _parse_created_at(value: Any) -> datetime | None:
         return None
     text = str(value)
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+    # Defensive: legacy data stored before the tz-aware convention was added
+    # may have naive ISO strings. Assume UTC for those, otherwise the
+    # datetime.now(timezone.utc) - created_at subtraction raises TypeError.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _training_header(training: Any) -> None:

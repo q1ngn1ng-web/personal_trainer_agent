@@ -26,6 +26,7 @@ _STATUS_BADGE: dict[TrainingStatus, str] = {
 }
 
 
+
 def _format_relative(value: datetime | None) -> str:
     if value is None:
         return "—"
