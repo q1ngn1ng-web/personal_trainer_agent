@@ -273,5 +273,116 @@ class TestMetricsEmpty(unittest.TestCase):
         self.assertIsNone(getattr(metrics, "strongest_topic", None))
 
 
+# ---------------------------------------------------------------------------
+# Timestamp consistency (regression: trainer_service was using naive local time
+# which broke cross-DB sorting vs queries._now() / review_service._now_iso())
+# ---------------------------------------------------------------------------
+@_skip_on_import_error("src.services.trainer_service")
+class TestTimestampConsistency(unittest.TestCase):
+    """Every module's _now_iso must produce timezone-aware UTC ISO strings."""
+
+    def test_trainer_service_now_iso_is_utc_aware(self) -> None:
+        try:
+            from src.services.trainer_service import _now_iso as trainer_now
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"trainer_service unavailable: {exc}")
+        from datetime import datetime
+        iso = trainer_now()
+        parsed = datetime.fromisoformat(iso)
+        self.assertIsNotNone(parsed.tzinfo, f"expected tz-aware, got {iso!r}")
+        # UTC offset should be zero
+        offset = parsed.utcoffset()
+        self.assertIsNotNone(offset)
+        self.assertEqual(offset.total_seconds(), 0)
+
+    def test_queries_now_is_utc_aware(self) -> None:
+        try:
+            from src.db.queries import _now as queries_now
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"queries unavailable: {exc}")
+        from datetime import datetime
+        iso = queries_now()
+        parsed = datetime.fromisoformat(iso)
+        self.assertIsNotNone(parsed.tzinfo, f"expected tz-aware, got {iso!r}")
+        offset = parsed.utcoffset()
+        self.assertIsNotNone(offset)
+        self.assertEqual(offset.total_seconds(), 0)
+
+    def test_review_service_now_iso_is_utc_aware(self) -> None:
+        try:
+            from src.services.review_service import _now_iso as review_now
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"review_service unavailable: {exc}")
+        from datetime import datetime
+        iso = review_now()
+        parsed = datetime.fromisoformat(iso)
+        self.assertIsNotNone(parsed.tzinfo, f"expected tz-aware, got {iso!r}")
+        offset = parsed.utcoffset()
+        self.assertIsNotNone(offset)
+        self.assertEqual(offset.total_seconds(), 0)
+
+    def test_daily_log_service_now_iso_is_utc_aware(self) -> None:
+        try:
+            from src.services.daily_log_service import _now_iso as dlog_now
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"daily_log_service unavailable: {exc}")
+        from datetime import datetime
+        iso = dlog_now()
+        parsed = datetime.fromisoformat(iso)
+        self.assertIsNotNone(parsed.tzinfo, f"expected tz-aware, got {iso!r}")
+        offset = parsed.utcoffset()
+        self.assertIsNotNone(offset)
+        self.assertEqual(offset.total_seconds(), 0)
+
+
+# ---------------------------------------------------------------------------
+# progress_service type coercion (regression: TrainingProgress fields are
+# enum-typed but values come from DB as strings — must be coerced.)
+# ---------------------------------------------------------------------------
+@_skip_on_import_error("src.services.progress_service")
+class TestProgressCoercion(unittest.TestCase):
+    """TrainingProgress must yield real enums / datetimes, not raw DB strings."""
+
+    def test_empty_progress_uses_enums(self) -> None:
+        try:
+            from src.services.progress_service import _empty_progress, TrainingProgress
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"progress_service unavailable: {exc}")
+        from src.core.element import BaselineLevel, TrainingStatus
+        p = _empty_progress(999)
+        self.assertIsInstance(p.status, TrainingStatus)
+        self.assertIsInstance(p.baseline_level, BaselineLevel)
+        self.assertEqual(p.status, TrainingStatus.CREATED)
+        self.assertEqual(p.baseline_level, BaselineLevel.LOW)
+
+    def test_compute_training_progress_handles_known_db_status(self) -> None:
+        """DB CHECK constraint blocks garbage statuses, but valid string statuses
+        must be coerced into the TrainingStatus enum on the way out."""
+        try:
+            from src.services.progress_service import compute_training_progress
+            from src.core.element import TrainingStatus
+            from src.db.queries import create_training
+            from src.db.sqlite import init_db, get_connection
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"imports unavailable: {exc}")
+        init_db()
+        # Insert a row with valid status string; capture the assigned id
+        row = create_training(topic="test_coercion", status="active", baseline_score=3.5)
+        new_id = int(row.id)
+        try:
+            p = compute_training_progress(new_id)
+            self.assertIsInstance(p.status, TrainingStatus)
+            self.assertEqual(p.status, TrainingStatus.ACTIVE)
+            # Also confirm the underlying string was "active", not silently downgraded
+            from src.db.queries import get_training
+            raw = get_training(new_id)
+            self.assertEqual(raw.status, "active")
+        finally:
+            conn = get_connection()
+            conn.execute("DELETE FROM trainings WHERE id = ?", (new_id,))
+            conn.commit()
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,8 @@ _SCORE_DISPLAY: dict[str, str] = {
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    """UTC ISO-8601 timestamp with timezone. Matches src.db.queries._now() format."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _cleanup_dir(path: Path | None) -> None:

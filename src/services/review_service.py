@@ -161,6 +161,7 @@ def _apply_state_changes(
         "schedule": schedule,
         "materials": materials,
         "last_review_at": now_iso,
+        "last_active_at": now_iso,
         "current_week": int(training.current_week or 0) + 1,
     }
     updated = update_training(int(training.id or 0), **updates)
