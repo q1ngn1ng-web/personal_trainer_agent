@@ -52,6 +52,78 @@ _SCORE_DISPLAY: dict[str, str] = {
     "partial": "⚠️半掌握",
     "missing": "❌缺失",
 }
+_MAX_UNITS_FROM_MATERIALS: int = 12  # cap to keep daily card scannable
+
+
+def _populate_schedule_and_recall(
+    schedule_payload: dict[str, Any],
+    materials_payload: dict[str, Any],
+    baseline_questions: BaselineQuestions | None,
+    today: str,
+) -> None:
+    """Mutate ``schedule_payload`` + ``materials_payload`` in place.
+
+    The trainer wizard collects LLM-generated material names and the three baseline
+    questions, but never persisted them in the structured form the daily page
+    needs (``schedule.units`` for ``extract_today_tasks`` and
+    ``materials.recall_units`` for ``get_today_recall_questions``). Derive both
+    here so the day-one UI shows real tasks, not the "今日训练 (待初始化)"
+    placeholder.
+
+    Unit sources, in order:
+      1. 基线诊断题 (one unit, three questions)
+      2. each entry in ``materials.specialized_materials`` (capped)
+    """
+    units: list[dict[str, Any]] = []
+
+    if baseline_questions and baseline_questions.questions:
+        units.append(
+            {
+                "name": "基线诊断题",
+                "dimension": "concept",
+                "review_count": 0,
+                "learned_date": today,
+                "source": "01_基线诊断.md",
+            }
+        )
+
+    for index, mat in enumerate(
+        materials_payload.get("specialized_materials", [])[:_MAX_UNITS_FROM_MATERIALS],
+        start=1,
+    ):
+        name = (str(mat.get("name") or f"专题 {index}")).strip()[:30]
+        units.append(
+            {
+                "name": name,
+                "dimension": "concept",
+                "review_count": 0,
+                "learned_date": today,
+                "source": f"03_资料库.md §{index}",
+            }
+        )
+
+    schedule_payload["units"] = units
+
+    recall_units: list[dict[str, Any]] = []
+    if baseline_questions and baseline_questions.questions:
+        recall_units.append(
+            {
+                "unit": "基线诊断题",
+                "dimension": "concept",
+                "questions": [
+                    {
+                        "qid": f"Q{idx + 1}",
+                        "question": q.question,
+                        "reference": q.reference_answer,
+                        "dimension": q.dimension,
+                    }
+                    for idx, q in enumerate(baseline_questions.questions)
+                ],
+                "last_reviewed_date": None,
+                "review_count": 0,
+            }
+        )
+    materials_payload["recall_units"] = recall_units
 
 
 def _now_iso() -> str:
@@ -499,6 +571,14 @@ def create_training(
             "i1_materials": context["i1_materials"],
             "principles": context["principles"],
         }
+        # Persist structured units + recall questions so the daily page shows
+        # real tasks from day one (instead of the "今日训练 (待初始化)" placeholder).
+        _populate_schedule_and_recall(
+            schedule_payload=schedule_payload,
+            materials_payload=materials_payload,
+            baseline_questions=baseline_questions,
+            today=now[:10],
+        )
         try:
             row = create_training_row(
                 topic=topic,

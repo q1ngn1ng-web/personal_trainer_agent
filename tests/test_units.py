@@ -475,5 +475,128 @@ class TestDatetimeSubtraction(unittest.TestCase):
         self.assertGreaterEqual(days, 0)
 
 
+# ---------------------------------------------------------------------------
+# create_training schedule/recall population (regression: day-one daily page
+# used to show "今日训练 (待初始化)" because schedule.units and
+# materials.recall_units were never populated in DB.)
+# ---------------------------------------------------------------------------
+@_skip_on_import_error("src.services.trainer_service")
+class TestPopulateScheduleAndRecall(unittest.TestCase):
+    """The helper wired into create_training must populate units + recall."""
+
+    def test_units_populated_from_specialized_materials(self) -> None:
+        try:
+            from src.services.trainer_service import _populate_schedule_and_recall
+            from src.services.baseline_service import BaselineQuestion, BaselineQuestions
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"trainer_service unavailable: {exc}")
+        schedule = {"intervals": [1, 3, 7, 15, 30]}
+        materials = {
+            "specialized_materials": [
+                {"name": "协程基础"},
+                {"name": "事件循环"},
+                {"name": "asyncio 实战"},
+            ],
+            "principles": [],
+        }
+        bq = BaselineQuestions(
+            questions=[
+                BaselineQuestion(
+                    dimension="concept",
+                    difficulty=2,
+                    question="Q1?",
+                    reference_answer="A1",
+                ),
+            ],
+            raw={},
+            fallback_used=False,
+        )
+        _populate_schedule_and_recall(schedule, materials, bq, today="2026-07-26")
+        # First unit is the baseline unit, then one per material.
+        units = schedule["units"]
+        self.assertEqual(len(units), 4)
+        self.assertEqual(units[0]["name"], "基线诊断题")
+        self.assertEqual(units[0]["review_count"], 0)
+        self.assertEqual(units[0]["learned_date"], "2026-07-26")
+        self.assertEqual(units[1]["name"], "协程基础")
+        self.assertEqual(units[2]["name"], "事件循环")
+        self.assertEqual(units[3]["name"], "asyncio 实战")
+
+    def test_recall_units_seeded_from_baseline_questions(self) -> None:
+        try:
+            from src.services.trainer_service import _populate_schedule_and_recall
+            from src.services.baseline_service import BaselineQuestion, BaselineQuestions
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"trainer_service unavailable: {exc}")
+        schedule = {}
+        materials = {"specialized_materials": []}
+        bq = BaselineQuestions(
+            questions=[
+                BaselineQuestion(
+                    dimension="concept",
+                    difficulty=2,
+                    question="什么是协程?",
+                    reference_answer="可在执行中暂停的函数",
+                ),
+                BaselineQuestion(
+                    dimension="read",
+                    difficulty=2,
+                    question="读这段事件循环代码",
+                    reference_answer="事件循环调度任务",
+                ),
+                BaselineQuestion(
+                    dimension="write",
+                    difficulty=3,
+                    question="写并发爬虫",
+                    reference_answer="用 aiohttp gather",
+                ),
+            ],
+            raw={},
+            fallback_used=False,
+        )
+        _populate_schedule_and_recall(schedule, materials, bq, today="2026-07-26")
+        recall = materials["recall_units"]
+        self.assertEqual(len(recall), 1)
+        self.assertEqual(recall[0]["unit"], "基线诊断题")
+        self.assertEqual(len(recall[0]["questions"]), 3)
+        self.assertEqual(recall[0]["questions"][0]["qid"], "Q1")
+        # Each question carries its individual dimension (concept/read/write)
+        self.assertEqual(recall[0]["questions"][0]["dimension"], "concept")
+        self.assertEqual(recall[0]["questions"][2]["dimension"], "write")
+
+    def test_handles_no_baseline_questions(self) -> None:
+        """If user skipped baseline answers, helper should still seed units
+        from materials (only no baseline unit)."""
+        try:
+            from src.services.trainer_service import _populate_schedule_and_recall
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"trainer_service unavailable: {exc}")
+        schedule = {}
+        materials = {"specialized_materials": [{"name": "A"}, {"name": "B"}]}
+        _populate_schedule_and_recall(schedule, materials, None, today="2026-07-26")
+        # 0 baseline units + 2 material units = 2
+        self.assertEqual(len(schedule["units"]), 2)
+        # No recall without baseline questions
+        self.assertEqual(materials["recall_units"], [])
+
+    def test_units_capped_at_max(self) -> None:
+        """Protect the daily card from 100+ units on busy trainings."""
+        try:
+            from src.services.trainer_service import _populate_schedule_and_recall, _MAX_UNITS_FROM_MATERIALS
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"trainer_service unavailable: {exc}")
+        schedule = {}
+        # 50 materials → only top _MAX_UNITS_FROM_MATERIALS appear
+        materials = {
+            "specialized_materials": [
+                {"name": f"专题 {i}"} for i in range(50)
+            ],
+        }
+        bq = None
+        _populate_schedule_and_recall(schedule, materials, bq, today="2026-07-26")
+        # Just the materials (no baseline unit) → capped
+        self.assertEqual(len(schedule["units"]), _MAX_UNITS_FROM_MATERIALS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
