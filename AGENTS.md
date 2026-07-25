@@ -62,3 +62,18 @@ openspec list --store store
 openspec new change <id> --store store
 openspec validate --store store
 ```
+
+## Repository Map
+
+> 仓库的总览地图与各子目录的代码地图。**新同学先看 `codemap.md` 再看 `docs/architecture.md`，再按需下钻子目录地图。**
+
+- 总览：[codemap.md](codemap.md) — 仓库地图（Repository Atlas），目录职责表 + 端到端流程 + 新人阅读顺序
+- 架构：[docs/architecture.md](docs/architecture.md) — 分层架构图 + 关键业务流程图 + 模块边界 + 数据存储 + 设计决策
+- 子地图：
+  - [src/codemap.md](src/codemap.md) — `src/` 根目录（入口 / 配置 / 早期路径模块）
+  - [src/core/codemap.md](src/core/codemap.md) — 领域原语层（element / training / baseline / content_dim）
+  - [src/db/codemap.md](src/db/codemap.md) — 持久化层（sqlite / queries / models / tables.sql）
+  - [src/llm/codemap.md](src/llm/codemap.md) — LLM 适配层（client / prompts / schema / validators / retry / fallback）
+  - [src/services/codemap.md](src/services/codemap.md) — 业务编排层（14 个 service）
+  - [src/ui/codemap.md](src/ui/codemap.md) — Streamlit 视图层（5 个 page_*）
+  - [src/cli/codemap.md](src/cli/codemap.md) — CLI 入口（`init-db`）
