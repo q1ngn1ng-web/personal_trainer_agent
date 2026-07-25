@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 import streamlit as st
@@ -57,7 +57,7 @@ def _training_header(training: Any) -> None:
     with col3:
         level = training.baseline_level or "—"
         created_at = _parse_created_at(training.created_at)
-        days = (datetime.now() - created_at).days if created_at else 0
+        days = (datetime.now(timezone.utc) - created_at).days if created_at else 0
         st.metric("档位 / 坚持天数", f"{level} · {days} 天")
 
 

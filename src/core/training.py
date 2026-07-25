@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.core.element import BaselineLevel, TrainingStatus
@@ -37,10 +37,10 @@ class Training:
 
     @property
     def days_since_creation(self) -> int:
-        return (datetime.now() - self.created_at).days
+        return (datetime.now(timezone.utc) - self.created_at).days
 
     def needs_weekly_review(self, now: datetime | None = None) -> bool:
-        reference = now or datetime.now()
+        reference = now or datetime.now(timezone.utc)
         baseline = self.last_review_at or self.created_at
         return (reference - baseline).days >= 7
 

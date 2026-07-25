@@ -171,7 +171,7 @@ def _build_render_context(
     daily_minutes: int,
     total_weeks: int,
 ) -> dict[str, Any]:
-    today = datetime.now().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     overall = scoring.overall_level if scoring else "low"
     baseline_score = _BASELINE_SCORE_MAP.get(overall, 1.0)
 
@@ -600,7 +600,7 @@ def create_training(
             current_week=1,
             last_review_at=None,
             created_at=datetime.fromisoformat(now),
-            last_active_at=datetime.now(),
+            last_active_at=datetime.now(timezone.utc),
         )
         cleanup_target = None  # success → do not remove
         return domain

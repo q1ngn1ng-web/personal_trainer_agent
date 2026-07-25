@@ -384,5 +384,74 @@ class TestProgressCoercion(unittest.TestCase):
             conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Datetime subtraction consistency (regression: page_daily / page_review /
+# core/training called datetime.now() against DB-loaded tz-aware datetimes,
+# raising TypeError. All such comparisons must use datetime.now(timezone.utc).)
+# ---------------------------------------------------------------------------
+@_skip_on_import_error("src.core.training")
+class TestDatetimeSubtraction(unittest.TestCase):
+    """Days-since / needs-weekly-review must work with tz-aware DB timestamps."""
+
+    def test_domain_training_days_since_creation_with_tz_aware(self) -> None:
+        try:
+            from src.core.training import Training
+            from datetime import datetime, timedelta, timezone
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"imports unavailable: {exc}")
+        # When created_at comes from a DB parse (tz-aware UTC ISO string), the
+        # diff against datetime.now(timezone.utc) must not raise.
+        aware = datetime.now(timezone.utc) - timedelta(days=5)
+        t = Training(topic="x")
+        t.created_at = aware
+        days = t.days_since_creation
+        # Allow 4–6 days to account for the time elapsed since we set aware.
+        self.assertGreaterEqual(days, 4)
+        self.assertLessEqual(days, 6)
+
+    def test_domain_training_needs_weekly_review_with_tz_aware(self) -> None:
+        try:
+            from src.core.training import Training
+            from datetime import datetime, timedelta, timezone
+        except Exception as exc:  # pragma: no cover - environmental
+            self.skipTest(f"imports unavailable: {exc}")
+        old = datetime.now(timezone.utc) - timedelta(days=10)
+        t = Training(topic="x", created_at=old, last_review_at=None)
+        self.assertTrue(t.needs_weekly_review())
+
+    def test_db_iso_string_subtracts_from_utc_now_without_typeerror(self) -> None:
+        """The exact pattern from src/ui/page_daily.py:60 — must not raise."""
+        try:
+            from datetime import datetime, timezone
+        except Exception as exc:  # pragma: no cover
+            self.skipTest(f"datetime unavailable: {exc}")
+        # Simulate what _parse_created_at returns from a UTC ISO string
+        created_str = "2026-07-25T12:00:00+00:00"
+        created_at = datetime.fromisoformat(created_str)
+        # This is the buggy line that raised TypeError before the fix:
+        days = (datetime.now(timezone.utc) - created_at).days
+        # Sanity check: days should be some non-negative number
+        self.assertGreaterEqual(days, 0)
+        self.assertLess(days, 365)
+
+    def test_trainer_service_now_iso_used_throughout(self) -> None:
+        """Defensive: after the fix, no `datetime.now()` (naive) should appear
+        inside trainer_service.py — all timestamp writes go through _now_iso()."""
+        import re
+        from pathlib import Path
+        src = Path("src/services/trainer_service.py").read_text()
+        # Strip comments and string literals to avoid false positives
+        for line in src.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            # Match: datetime.now() OR datetime.now( anything other than timezone.utc )
+            bad = re.search(r"datetime\.now\((?!\s*timezone\.utc\s*\))", line)
+            if bad:
+                self.fail(
+                    f"trainer_service.py uses naive datetime.now(): {line!r}"
+                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

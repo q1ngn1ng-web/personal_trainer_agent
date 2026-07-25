@@ -7,7 +7,7 @@ suggestion, and exposes confirm/skip controls that route through the
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import streamlit as st
@@ -42,7 +42,7 @@ def _training_header(training: Any) -> None:
         days = 0
         if created:
             try:
-                days = (datetime.now() - datetime.fromisoformat(str(created).replace("Z", "+00:00"))).days
+                days = (datetime.now(timezone.utc) - datetime.fromisoformat(str(created).replace("Z", "+00:00"))).days
             except ValueError:
                 days = 0
         st.metric(
