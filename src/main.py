@@ -12,15 +12,22 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-import streamlit as st
+# 把项目根目录放到 sys.path 最前，让 `from src.X import Y` 能解析。
+# Streamlit 子进程不一定会继承 uv run 注入的 PYTHONPATH，显式注入最稳。
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 # 项目根目录 = src 的父目录
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = _PROJECT_ROOT
+
+import streamlit as st  # noqa: E402
 
 # 确保 DB schema 在启动时存在
-from src.db.sqlite import init_db
+from src.db.sqlite import init_db  # noqa: E402
 
 init_db()
 
