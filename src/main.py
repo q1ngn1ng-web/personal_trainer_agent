@@ -7,6 +7,8 @@
   - daily + ?training_id   → page_daily
   - review + ?training_id  → page_review
 
+侧边栏（常驻导航）：所有页面都可见，提供主导航 + 训练列表入口。
+
 启动：uv run streamlit run src/main.py
 """
 
@@ -33,6 +35,7 @@ init_db()
 
 
 PAGES: dict[str, callable] = {}
+_SIDEBAR_MAX_TRAININGS: int = 8
 
 
 def _register_pages() -> None:
@@ -55,6 +58,72 @@ def _register_pages() -> None:
     }
 
 
+def _goto(page: str, training_id: int | None = None) -> None:
+    """清空 query_params、设置新目标、触发 rerun。sidebar 跳转统一走这里。"""
+    for key in list(st.query_params.keys()):
+        del st.query_params[key]
+    st.query_params["page"] = page
+    if training_id is not None:
+        st.query_params["training_id"] = str(training_id)
+    st.rerun()
+
+
+def _render_sidebar() -> None:
+    """常驻侧边栏：主导航 + 训练列表入口。所有页面共享。"""
+    from src.db.queries import list_trainings
+
+    current_page = str(st.query_params.get("page", "home"))
+    current_training_id = str(st.query_params.get("training_id", ""))
+
+    with st.sidebar:
+        st.markdown("## 🎯 训练教练")
+        st.caption(f"当前页：`{current_page}`")
+        st.markdown("---")
+
+        # 主导航
+        st.markdown("### 📍 导航")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(
+                "🏠 首页",
+                key="nav_home",
+                width='stretch',
+                type="primary" if current_page == "home" else "secondary",
+            ):
+                _goto(page="home")
+        with col2:
+            if st.button(
+                "➕ 新建",
+                key="nav_new",
+                width='stretch',
+                type="primary" if current_page == "new_training" else "secondary",
+            ):
+                _goto(page="new_training")
+
+        st.markdown("---")
+
+        # 训练列表
+        st.markdown("### 📚 训练列表")
+        trainings = list_trainings()
+        if not trainings:
+            st.caption("（还没有训练）")
+        else:
+            for t in trainings[:_SIDEBAR_MAX_TRAININGS]:
+                is_active = current_training_id == str(t.id)
+                topic_label = (t.topic or "未命名")[:18]
+                prefix = "●" if is_active else "○"
+                if st.button(
+                    f"{prefix} {topic_label}",
+                    key=f"nav_t_{t.id}",
+                    width='stretch',
+                    type="primary" if is_active else "secondary",
+                    help=f"id={t.id} · status={t.status} · baseline={t.baseline_score}",
+                ):
+                    _goto(page="detail", training_id=int(t.id))
+            if len(trainings) > _SIDEBAR_MAX_TRAININGS:
+                st.caption(f"…还有 {len(trainings) - _SIDEBAR_MAX_TRAININGS} 个训练")
+
+
 def main() -> None:
     """Streamlit 入口：按 query param 路由到对应页面。"""
     st.set_page_config(
@@ -65,6 +134,7 @@ def main() -> None:
     )
 
     _register_pages()
+    _render_sidebar()
 
     page = st.query_params.get("page", "home")
 
