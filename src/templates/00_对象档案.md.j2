@@ -1,0 +1,69 @@
+# 对象档案 - {{ topic | default("未命名主题", true) }}
+
+> 生成时间：{{ created_at | default("", true) }}
+
+## 👤 你的画像
+
+| 维度 | 你的状态 |
+|------|---------|
+| 训练主题 | {{ topic | default("", true) }} |
+| 当前基线 | {{ baseline_level | default("", true) }}（{{ baseline_score | default("__", true) }}/5） |
+| 背景 | {{ background | default("", true) }} |
+| 目标水平 | {{ goal_level | default("", true) }} |
+| 每日时间 | {{ daily_minutes | default("__", true) }} 分钟 |
+| 总投入周期 | {{ total_weeks | default("__", true) }} 周 |
+| 应用场景 | {{ scenario | default("", true) }} |
+
+## 🎯 你的"四失"诊断
+
+> 《学记》：或失则多，或失则寡，或失则易，或失则止。知其心，然后能救其失也。
+
+{% set fl = four_losses | default({}, true) %}
+- 多（贪多）？ → {{ "是" if fl.get("多") else "否" }}
+- 寡（狭窄）？ → {{ "是" if fl.get("寡") else "否" }}
+- 易（轻视）？ → {{ "是" if fl.get("易") else "否" }}
+- 止（畏难）？ → {{ "是" if fl.get("止") else "否" }}
+
+**救失方案**：{{ fl.get("notes", "") | default("", true) }}
+
+## 📍 你的"最近发展区"（ZPD）
+
+**已知区（已掌握）**：
+{% for item in zpd_known | default([], true) %}
+- {{ item }}
+{% endfor %}
+{% if not (zpd_known | default([], true)) %}
+- （待补充）
+{% endif %}
+
+**ZPD（跳一跳够得着）**：
+{% for item in zpd_target | default([], true) %}
+- {{ item }}
+{% endfor %}
+{% if not (zpd_target | default([], true)) %}
+- （待补充）
+{% endif %}
+
+**未知区（暂时够不着）**：
+{% for item in zpd_unknown | default([], true) %}
+- {{ item }}
+{% endfor %}
+{% if not (zpd_unknown | default([], true)) %}
+- （待补充）
+{% endif %}
+
+## 🛣️ 训练一眼览
+
+> 接下来 {{ total_weeks | default("?", true) }} 周你要做的事：
+
+{% for stage in weeks_plan | default([], true) %}
+{{ loop.index }}. [第 {{ stage.weeks | default("", true) }} 周] {{ stage.desc | default("", true) }}
+{% endfor %}
+{% if not (weeks_plan | default([], true)) %}
+1. 第 1-2 周 打基础
+2. 第 3-4 周 专题突破
+3. 第 5-8 周 实战输出
+4. 第 9+ 周 精熟/创新
+{% endif %}
+
+**当前进度**：第 1 周 / 总 {{ total_weeks | default("?", true) }} 周

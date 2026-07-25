@@ -1,0 +1,69 @@
+# 环境配置 - {{ topic | default("", true) }}
+
+> 《荀子·劝学》：蓬生麻中，不扶而直；白沙在涅，与之俱黑。
+> 《学记》：学莫便乎近其人。
+> 现代：近朱者赤近墨者黑。
+
+## 🏠 物理环境
+
+### 空间
+- **主要训练地点**：{{ physical_space | default("[图书馆/书房/咖啡馆]", true) }}
+- **避免地点**：{{ physical_avoid | default("[床上/沙发 - 容易困]", true) }}
+
+### 设备
+{% for d in devices | default([], true) %}
+- {{ d }}
+{% endfor %}
+{% if not (devices | default([], true)) %}
+- [设备 1]：[具体型号/参数]
+{% endif %}
+- 干扰物隔离：[手机放抽屉 / Forest 锁机 / 物理隔离]
+
+### 光线与温湿度
+- {{ light_temp | default("自然光 / 22°C / 低噪音", true) }}
+
+## 👥 社会环境
+
+### 导师 / 师傅
+- {{ social_mentor | default("无", true) }}
+
+### 学习小组
+- {{ social_peers | default("无", true) }}
+
+### 家庭支持
+- {{ social_family | default("无", true) }}
+
+### 文化环境
+- 你的 5 个最常接触的人，他们的平均水平 ≈ 你的水平。
+- 评估这 5 个人是否支持你的目标？
+
+## 📡 信息环境
+
+### 高刺激干扰（必须远离）
+{% set dist = info_distractions | default([], true) %}
+- [{{ "x" if (dist | length) >= 1 and dist[0] else " " }}] 短视频 app
+- [{{ "x" if (dist | length) >= 2 and dist[1] else " " }}] 即时通讯推送
+- [{{ "x" if (dist | length) >= 3 and dist[2] else " " }}] 信息流 / 算法推荐
+
+### 高质量信息源
+{% for s in info_quality | default([], true) %}
+- {{ s }}
+{% endfor %}
+{% if not (info_quality | default([], true)) %}
+- [书单 3-5 本]
+- [Newsletter 1-2 个]
+- [播客 1-2 个]
+{% endif %}
+
+### 知识管理工具
+- {{ km_tools | default("[Obsidian / Roam / Notion / Anki]", true) }}
+- 笔记结构：[每日笔记 + 主题笔记 + 项目笔记]
+
+## ✅ 环境检查清单
+
+执行训练前确认：
+{% set env = env_checklist | default([], true) %}
+- [{{ "x" if (env | length) >= 1 and env[0] else " " }}] 训练空间已就绪
+- [{{ "x" if (env | length) >= 2 and env[1] else " " }}] 干扰物已隔离
+- [{{ "x" if (env | length) >= 3 and env[2] else " " }}] 设备已充电
+- [{{ "x" if (env | length) >= 4 and env[3] else " " }}] 已告知他人"训练中请勿打扰"

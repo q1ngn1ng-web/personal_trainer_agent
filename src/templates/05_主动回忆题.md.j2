@@ -1,0 +1,46 @@
+# 主动回忆题 - {{ topic | default("", true) }}
+
+> 《学记》：善问者如攻坚木，先其易者，后其节目。
+> Karpicke & Roediger (2008)：主动回忆比被动重读记忆留存率高 80% vs 36%。
+
+## 使用方法
+
+1. **闭卷**：不查资料，先回忆
+2. **写下答案**：1-2 分钟
+3. **对答案**：标 ✅/❌/⚠️
+4. **错题加入下一轮复习**
+
+---
+
+{% for unit in units | default([], true) %}
+## 第 {{ loop.index }} 单元：{{ unit.name | default("", true) }}
+
+{% for q in unit.questions | default([], true) %}
+### {{ q.id | default("Q" ~ loop.index, true) }}: {{ q.question | default("", true) }}
+**难度**：{{ "⭐" * (q.difficulty | default(1) | int) }}
+**类别**：{{ q.dimension | default("", true) }}
+**你的答案**：___________________
+**参考**：{{ q.reference | default("", true) }}
+**状态**：{{ q.status | default("⬜ 未做", true) }}
+
+{% endfor %}
+
+---
+{% endfor %}
+{% if not (units | default([], true)) %}
+（暂无题目，跑完基线诊断后会自动生成）
+{% endif %}
+
+## 错题本（自动汇总）
+
+> 错题会被自动移到这里，每周集中突破。
+
+| 题号 | 错因 | 复习日期 | 状态 |
+|------|------|---------|------|
+| | | | |
+
+## 题目生成原则
+
+- 每 5-7 题覆盖 1 个核心概念
+- 30% 回忆题（知识）、50% 应用题（场景）、20% 分析题（跨域）
+- 难度梯度：1⭐ 30% / 2⭐ 40% / 3⭐ 30%

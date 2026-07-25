@@ -1,0 +1,103 @@
+# 奖励机制 - {{ topic | default("", true) }}
+
+> 《论语·学而》：学而时习之，不亦说乎？
+> 《学记》：不兴其艺，不能乐学。
+> 现代：Self-Determination Theory（自主+胜任+关系）
+
+## 🎁 奖励设计三原则
+
+1. **及时**：行为发生后越快给越好（5 分钟内）
+2. **具体**：针对具体行为给（不是"你真棒"，是"你刚才那段代码的命名很好"）
+3. **可变性**：固定奖励会习惯化（Hedonic Adaptation），要偶尔"惊喜"
+
+## 💰 外在奖励
+
+### 物质奖励
+| 行为 | 奖励 | 触发时机 |
+|------|------|---------|
+{% for e in extrinsic_material | default([], true) %}
+| {{ e.behavior | default("", true) }} | {{ e.reward | default("", true) }} | {{ e.timing | default("", true) }} |
+{% endfor %}
+{% if not (extrinsic_material | default([], true)) %}
+| 完成每日任务 | [小礼物/奶茶/零食] | 当晚 |
+| 完成周目标 | [一顿好饭/一件小东西] | 周末 |
+| 完成阶段里程碑 | [一次旅行/一个想要的东西] | 阶段末 |
+{% endif %}
+
+### 社会奖励
+{% for s in extrinsic_social | default([], true) %}
+- [{{ s }}]
+{% endfor %}
+{% if not (extrinsic_social | default([], true)) %}
+- [ ] 朋友圈分享成果（每周一次）
+- [ ] 给朋友/家人讲学到的东西
+- [ ] 写公众号/博客记录
+- [ ] 参加社群分享/挑战赛
+{% endif %}
+
+### 机会奖励
+{% for o in extrinsic_opportunity | default([], true) %}
+- {{ o }}
+{% endfor %}
+{% if not (extrinsic_opportunity | default([], true)) %}
+- [完成 X 阶段后可以解锁 Y 项目]
+- [达成 Z 水平后可以申请 W 机会]
+{% endif %}
+
+## 🧠 内在奖励（最持久）
+
+### 胜任感（Competence）
+- {{ intrinsic_competence | default("任务难度 = 当前能力 + 1（i+1）", true) }}
+
+### 自主感（Autonomy）
+- {{ intrinsic_autonomy | default("每周给自己 1 小时\"自由探索\"时间", true) }}
+
+### 关系感（Relatedness）
+- {{ intrinsic_relatedness | default("找到 1-2 个学习伙伴 / 加入相关社群 / 给别人讲", true) }}
+
+### 好奇心满足
+- {{ intrinsic_curiosity | default("每周留 1 个\"为什么\"问题，深入研究", true) }}
+
+### 意义感
+- {{ intrinsic_meaning | default("[写下\"我学这个是为了 ____\"]", true) }}
+
+## 📅 奖励日历
+
+| 触发条件 | 奖励 | 自我承诺 |
+|---------|------|---------|
+{% for r in reward_calendar | default([], true) %}
+| {{ r.trigger | default("", true) }} | {{ r.reward | default("", true) }} | {{ r.commit | default("", true) }} |
+{% endfor %}
+{% if not (reward_calendar | default([], true)) %}
+| 完成今日任务 | [具体] | [签名] |
+| 完成周任务 80% | [具体] | |
+| 完成阶段目标 | [具体] | |
+| 连续 7 天全勤 | [具体] | |
+| 达成里程碑 | [大奖励] | |
+{% endif %}
+
+## ⚠️ 反模式（避免）
+
+{% for a in anti_patterns | default([], true) %}
+- ❌ {{ a }}
+{% endfor %}
+{% if not (anti_patterns | default([], true)) %}
+- ❌ 物质奖励为主 → 失去内在动机
+- ❌ 延迟太久 → 当事人已忘
+- ❌ 错行为给奖励 → 强化错行为
+- ❌ 比较奖励（"别人比你快"）→ 削弱自我决定感
+- ❌ 只在失败时关注 → 回避训练
+{% endif %}
+
+## 🔄 奖励升级（每月调一次）
+
+每月 1 日检查：
+{% for q in monthly_review_questions | default([], true) %}
+- {{ q }}
+{% endfor %}
+{% if not (monthly_review_questions | default([], true)) %}
+- 上月哪些奖励有效？
+- 哪些奖励已"贬值"？
+- 本月要尝试什么新奖励？
+- 内在 vs 外在比例是否合适（建议 7:3 内在:外在）？
+{% endif %}

@@ -1,0 +1,87 @@
+# 边界与止 - {{ topic | default("", true) }}
+
+> 《大学》：知止而后有定。
+> 《论语》：过犹不及。
+
+## 🛑 不做什么（明确边界）
+
+> 没有边界的训练是涣散。
+
+### 范围约束
+- 训练只针对 **{{ scope_constraint | default("[主题]", true) }}**，不跑到其他领域
+- 关联发散不超过 1 个"跳转"
+  - 例：学 Python 时跳到算法 OK，跳到哲学 = 过界
+
+### 时间约束
+- 单次训练 ≤ {{ time_constraint_min | default("90", true) }} 分钟
+- 每日训练 ≤ {{ time_constraint_daily_max | default("4-6", true) }} 小时
+- 每周休息 1 天（**{{ rest_day | default("周日", true) }}** 强制）
+
+### 目标约束
+- {{ goal_constraint | default("阶段目标未达成前不开新坑", true) }}
+- 同时进行的训练主题 ≤ 2 个
+
+### 方法约束
+- {{ method_constraint | default("同时试的方法 ≤ 1 种（先跑 2 周看效果）", true) }}
+- 工具不频繁切换
+
+## 🚦 止的信号（出现立即停）
+
+{% for s in stop_signals | default([], true) %}
+- {{ s }}
+{% endfor %}
+{% if not (stop_signals | default([], true)) %}
+- **疲惫**：连续 3 天训练质量下降
+- **厌倦**：对训练产生强烈抵触
+- **伤害**：身体不适 / 心理压力过大
+- **过拟合**：能完美回忆题但不会应用
+- **完美主义**：因为"不够完美"而拖延
+{% endif %}
+
+## 🔄 收放节奏
+
+| 阶段 | 状态 | 时长 |
+|------|------|------|
+{% for r in rhythm_table | default([], true) %}
+| {{ r.phase | default("", true) }} | {{ r.state | default("", true) }} | {{ r.duration | default("", true) }} |
+{% endfor %}
+{% if not (rhythm_table | default([], true)) %}
+| 紧 | 高强度（冲刺） | 1-2 周 |
+| 收 | 巩固消化 | 1 周 |
+| 紧 | 高强度 | 1-2 周 |
+| 收 | 巩固消化 | 1 周 |
+| 放 | 自由探索 / 休息 | 1 周 |
+{% endif %}
+
+## 🛡️ 应急方案
+
+**今天状态不好 / 出现止的信号**：
+
+{% set eo = emergency_options | default([], true) %}
+{% for o in eo %}
+- {{ o }}
+{% endfor %}
+{% if not eo %}
+- 选项 A：完成 50% 任务 + 早睡
+- 选项 B：纯回忆（不学新内容）
+- 选项 C：直接休息（每周允许 1 次）
+{% endif %}
+
+**连续 3 天没完成**：
+- 检查是不是目标定太高 → 降低 30%
+- 检查是不是奖励失效 → 换奖励
+- 检查是不是环境出问题 → 改环境
+- 检查是不是根本不想学 → 重新对齐"为什么"
+
+## 🚪 想放弃时
+
+{% set gp = give_up_protocol | default([], true) %}
+{% for p in gp %}
+- {{ p }}
+{% endfor %}
+{% if not gp %}
+- 回到 02_训练目标.md 的"终点目标"
+- 问自己：还想要那个目标吗？
+- 如想 → 调整节奏
+- 如不想 → 允许放弃，记录原因，重新选主题
+{% endif %}

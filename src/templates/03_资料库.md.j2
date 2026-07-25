@@ -1,0 +1,59 @@
+# 资料库 - {{ topic | default("", true) }}
+
+> 《荀子·劝学》：君子生非异也，善假于物也。
+> 《学记》：不学操缦，不能安弦；不学博依，不能安《诗》；不学杂服，不能安礼。
+
+## 普适性资料（操缦 - 基础框架）
+
+> 必读，建立全局认知。对应 i+1 中的 i。
+
+| 资料 | 类型 | 难度 | 预计时间 | 状态 |
+|------|------|------|---------|------|
+{% for m in universal_materials | default([], true) %}
+| {{ m.name | default("", true) }} | {{ m.type | default("", true) }} | {{ m.difficulty | default("", true) }} | {{ m.hours | default("", true) }} | {{ m.status | default("未开始", true) }} |
+{% endfor %}
+{% if not (universal_materials | default([], true)) %}
+| [书名/课程名] | 教材/视频/文档 | ⭐ | XX h | [未开始] |
+{% endif %}
+
+## 专门化资料（博依/杂服 - 领域知识）
+
+> 选读，对准具体场景。
+
+| 资料 | 类型 | 难度 | 预计时间 | 状态 |
+|------|------|------|---------|------|
+{% for m in specialized_materials | default([], true) %}
+| {{ m.name | default("", true) }} | {{ m.type | default("", true) }} | {{ m.difficulty | default("", true) }} | {{ m.hours | default("", true) }} | {{ m.status | default("未开始", true) }} |
+{% endfor %}
+{% if not (specialized_materials | default([], true)) %}
+| | | | | |
+{% endif %}
+
+## i+1 难度匹配（动态资料）
+
+> 比当前水平高 1 档的资料。每周根据基线更新。
+
+| 资料 | 难度差距 | 何时使用 |
+|------|---------|---------|
+{% for m in i1_materials | default([], true) %}
+| {{ m.name | default("", true) }} | {{ m.gap | default("", true) }} | {{ m.when_to_use | default("", true) }} |
+{% endfor %}
+{% if not (i1_materials | default([], true)) %}
+| | | |
+{% endif %}
+
+## 资料使用原则
+
+{% for p in principles | default([], true) %}
+{{ loop.index }}. **{{ p }}**
+{% endfor %}
+{% if not (principles | default([], true)) %}
+1. **难度匹配**：70% 懂、30% 不懂
+2. **多模态**：文字 + 图示 + 视频 + 实操
+3. **可重复**：经典 > 时效性资讯
+4. **可验证**：能通过练习/测试/项目确认是否掌握
+{% endif %}
+
+## 资料获取渠道
+
+- （按你的具体平台/网站/书补充）

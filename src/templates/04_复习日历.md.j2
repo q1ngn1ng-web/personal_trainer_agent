@@ -1,0 +1,76 @@
+# 复习日历 - {{ topic | default("", true) }}
+
+> 《学记》：时教必有正业，退息必有居学。
+> 艾宾浩斯遗忘曲线：1-3-7-15-30 间隔最有效。
+
+## 时间分配原则
+
+- **正业**（大块时间，60-90 min）：处理新内容、难题
+- **居学**（碎片时间，10-30 min）：复习、回忆、回顾
+- **日总投入**：{{ daily_minutes | default("XX", true) }} 分钟
+
+## 间隔重复算法（SM-2 简化）
+
+> 学完后按此间隔复习。回忆成功率 ≥ 90% → 延长间隔，< 70% → 缩短。
+
+{% set ivs = intervals | default([1, 3, 7, 15, 30], true) %}
+```
+第 1 次复习：{{ ivs[0] if ivs | length > 0 else 1 }} 天后
+第 2 次复习：{{ ivs[1] if ivs | length > 1 else 3 }} 天后
+第 3 次复习：{{ ivs[2] if ivs | length > 2 else 7 }} 天后
+第 4 次复习：{{ ivs[3] if ivs | length > 3 else 15 }} 天后
+第 5 次复习：{{ ivs[4] if ivs | length > 4 else 30 }} 天后
+之后：每 30-60 天一次
+```
+
+## 每日任务模板
+
+| 时段 | 任务 | 时长 | 来源 |
+|------|------|------|------|
+{% for s in schedule_template | default([], true) %}
+| {{ s.slot | default("", true) }} | {{ s.task | default("", true) }} | {{ s.duration | default("", true) }} | {{ s.source | default("", true) }} |
+{% endfor %}
+{% if not (schedule_template | default([], true)) %}
+| 早 | 回忆题 | 10 min | 05_主动回忆题.md |
+| 午 | 新内容学习 | 60 min | 03_资料库.md |
+| 晚 | 复盘 + 回忆 | 15 min | 08_每日反省.md |
+{% endif %}
+
+## 周日历
+
+{% for wp in week_plans | default([], true) %}
+### 第 {{ wp.week | default(loop.index, true) }} 周日历
+
+| 日期 | 任务 | 状态 |
+|------|------|------|
+{% for d in wp.days | default([], true) %}
+| {{ d.date | default("", true) }} | {{ d.task | default("", true) }} | {{ d.status | default("⬜", true) }} |
+{% endfor %}
+{% if not (wp.days | default([], true)) %}
+| 周一 | [任务] | ⬜ |
+| 周二 | [任务] | ⬜ |
+| 周三 | [任务] | ⬜ |
+| 周四 | [任务] | ⬜ |
+| 周五 | [任务] | ⬜ |
+| 周六 | 复盘 + 输出 | ⬜ |
+| 周日 | 周复盘 + 基线更新 | ⬜ |
+{% endif %}
+
+{% endfor %}
+{% if not (week_plans | default([], true)) %}
+（按上面模板补充每周日历）
+{% endif %}
+
+## 长期阶段安排
+
+| 周 | 主题 | 阶段 |
+|----|------|------|
+{% for sp in stage_phases | default([], true) %}
+| {{ sp.weeks | default("", true) }} | {{ sp.theme | default("", true) }} | {{ sp.phase | default("", true) }} |
+{% endfor %}
+{% if not (stage_phases | default([], true)) %}
+| 1-2 | 基础 | 入门 |
+| 3-4 | 专题 1 | 进阶 |
+| 5-8 | 实战 | 应用 |
+| 9+ | 创新 | 精熟 |
+{% endif %}

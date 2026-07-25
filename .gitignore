@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# 测试产物
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 训练数据（不提交）
+data/trainer.db
+data/test_*.db
+data/test_*.db-*
+training_*/
+data/trainings_e2e/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 临时文件
+*.log
+tmp/
+.env
+.env.local

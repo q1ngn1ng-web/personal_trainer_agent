@@ -1,0 +1,63 @@
+# 基线诊断 - {{ topic | default("", true) }}
+
+## 前置拷问
+
+> 30 秒内不查资料回答。答对=掌握，模糊=半掌握，不会=缺失基线。
+
+{% for q in questions | default([], true) %}
+### Q{{ loop.index }}: {{ q.question | default("", true) }}
+**你的答案**：{{ q.user_answer | default("___________________", true) }}
+**判定**：{{ q.score | default("☐ 未判定", true) }}
+**应对**：
+- 掌握 → 跳过
+- 模糊 → 加入 03_资料库.md 作为复习项
+- 缺失 → 加入"预训练清单"，先补这块
+
+{% endfor %}
+{% if not (questions | default([], true)) %}
+### Q1: [问题 1]
+**你的答案**：___________________
+**判定**：☐ 未判定
+**应对**：掌握 → 跳过；模糊 → 加入 03_资料库.md 作为复习项；缺失 → 加入"预训练清单"，先补这块
+{% endif %}
+
+## 知识面扫描（mind map）
+
+> 用 5 分钟画出你对这个主题的全部了解。空白=完全没有概念。
+
+{{ mind_map_note | default("[图：用户画]", true) }}
+
+## 深度测试（苏格拉底式追问）
+
+> 根据你的回答追问 2 层。例如：
+- 你说"我知道 X"，那 X 的本质是什么？
+- 那 X 和 Y 的区别是什么？
+
+{{ socratic_dialogue | default("[对话记录]", true) }}
+
+## 诊断结果
+
+{% set bd = baseline_dim_scores | default({}, true) %}
+| 维度 | 评分 (1-5) | 备注 |
+|------|-----------|------|
+| 知识面 | {{ bd.get("知识面", "__") }}/5 | |
+| 深度 | {{ bd.get("深度", "__") }}/5 | |
+| 量 | {{ bd.get("量", "__") }}/5 | |
+| **综合基线** | **{{ baseline_score | default("__", true) }}/5** | {{ baseline_level | default("高/中/低", true) }} |
+
+## 预训练清单（基线"低"时生成）
+
+> 如果你的基线是"低"，先按这个清单补 1-2 周基础再进正式训练：
+
+{% for p in pretrain_checklist | default([], true) %}
+{{ loop.index }}. {{ p.concept | default("", true) }} - {{ p.materials | default("", true) }}
+{% endfor %}
+{% if not (pretrain_checklist | default([], true)) %}
+（无 / 不需要预训练）
+{% endif %}
+
+## 基线升级日志
+
+| 日期 | 基线评分 | 升级内容 |
+|------|---------|---------|
+| {{ created_at | default("YYYY-MM-DD", true) }} | {{ baseline_score | default("__", true) }}/5 | 初始 |
