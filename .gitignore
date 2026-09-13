@@ -35,3 +35,6 @@ data/trainings_e2e/
 tmp/
 .env
 .env.local
+
+# 工具本地状态（可重建，不入库）
+.slim/
