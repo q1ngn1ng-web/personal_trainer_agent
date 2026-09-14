@@ -68,7 +68,7 @@ uv run python scripts/check_llm_logs.py       # llm_calls 表完整性校验
 | Phase | 名称 | 状态 | 说明 |
 |---|---|---|---|
 | Phase 1 | MVP（自用） | ✅ 已完成 | Streamlit 单页 + 完整十要素闭环 + LLM 可观测层 |
-| Phase 2 | 通用化 | ⏳ 计划中 | 多用户、权限、对象扩展（人/LLM/动物） |
+| Phase 2 | 通用化 | ⏳ 计划中 | 多用户、权限、训练领域适配（按领域配置验证方式） |
 | Phase 3 | Harness 化 | ⏳ 计划中 | A/B 实验框架、回归测试、prompt 版本管理 |
 | Phase 4 | 数据飞轮 | ⏳ 计划中 | 真实使用数据回流、调优策略、模板迭代 |
 
