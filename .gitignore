@@ -38,3 +38,14 @@ tmp/
 
 # 工具本地状态（可重建，不入库）
 .slim/
+
+# 个人求职材料（仅本地保留，不入公开仓）
+docs/简历项目包装与深挖问答.md
+docs/项目现状与改进方向.md
+workspace/record/20260913_docs_简历项目包装与深挖问答.md
+workspace/record/20260913_docs_项目现状与改进方向.md
+workspace/record/简历项目包装与深挖问答.md
+workspace/record/项目现状与改进方向.md
+
+# Obsidian 本地编辑状态（每台机器各不相同）
+workspace/.obsidian/

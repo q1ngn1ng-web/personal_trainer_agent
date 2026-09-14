@@ -56,8 +56,9 @@ uv run streamlit run src/main.py
 
 ```bash
 uv run python scripts/e2e_full_flow.py        # 完整闭环：新建 → 基线 → 10 文件 → 日常 → 周复盘
-uv run python scripts/e2e_llm_observability.py # LLM 可观测层验证
-uv run python scripts/e2e_review_calibration.py # 周复盘校准验证
+uv run python scripts/seed_test_data.py       # 生成临时种子数据（可选，先跑）
+uv run python scripts/harness_smoke.py        # harness 查询冒烟：种子数据 + 逐条断言
+uv run python scripts/check_llm_logs.py       # llm_calls 表完整性校验
 ```
 
 ---
