@@ -15,6 +15,7 @@
 | `workspace/decisions/` | **ADR 决策记录**（为什么选 A 不选 B） | 涉及选型必写 |
 | `workspace/evidence/` | **效果证据**（评测结果、指标口径） | 量化结论必须能追到这里 |
 | `workspace/prompts/` | 可复用的提示词与工作流模板 | 按需阅读 |
+| `workspace/面试/` | **面试素材**（竞品调研、差异化、选型依据） | 结论须标注证据档位 |
 | `workspace/training_list的基本使用/` | 训练清单使用文档 | 只读 |
 | `.opencode/` | OpenCode skills & commands | 不要移动 |
 
