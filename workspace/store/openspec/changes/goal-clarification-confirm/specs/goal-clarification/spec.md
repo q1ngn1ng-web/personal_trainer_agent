@@ -18,22 +18,50 @@
 - **WHEN** 用户提交空白描述
 - **THEN** 系统拒绝提交并提示「请用一句话描述你想训练的内容」
 
-### Requirement: 系统必须追问以补全目标字段
+### Requirement: 前端必须提供投入参数选择，且允许跳过
 
-系统 SHALL 使用 LLM 从用户描述中抽取目标草案，草案包含 `content`、`level`、`horizon`、
-`daily_budget`、`acceptance` 五个必填字段。当存在缺失字段时，系统 SHALL 针对缺失字段追问，
-单次澄清会话追问轮次上限为 5 轮。**是否继续追问 MUST 由规则层依据缺失字段与轮次判定，不得由 LLM 自行决定停止。**
+系统 SHALL 在新建训练页提供三个结构化控件：`horizon`（周期）、`weekly_frequency`（每周训练次数）、
+`daily_budget`（每次训练时长）。每个控件 MUST 带默认值，用户 MUST 可以直接跳过并开始。
+系统 MUST NOT 把这三个参数作为追问内容。
 
-#### Scenario: 字段缺失时追问
+#### Scenario: 用户显式选择参数
 
-- **WHEN** 用户描述「我想学虚拟语气」且草案缺少 `horizon` 与 `acceptance`
-- **THEN** 系统提出一个针对缺失字段的追问，并把 `clarification_rounds` 加 1
-- **THEN** 系统不进入关键词生成阶段
+- **WHEN** 用户在新建训练页选择「2 周 / 每周 5 次 / 每次 30 分钟」
+- **THEN** 三个值写入 `goal_json`，`field_sources` 中对应字段标为 `ui_select`
 
-#### Scenario: 达到追问上限
+#### Scenario: 用户跳过参数选择
 
-- **WHEN** 追问轮次已达 5 轮且仍有缺失字段
-- **THEN** 系统输出草案，并对每个缺失字段标注来源为「系统假设」
+- **WHEN** 用户不修改任何控件直接提交描述
+- **THEN** 系统采用默认值（周期 2 周 / 每周 5 次 / 每次 30 分钟）
+- **THEN** 对应字段在 `field_sources` 中标为 `default`
+- **THEN** 系统不因这三个参数发起追问
+
+### Requirement: 系统只对语义字段追问，且追问有软限与硬限
+
+系统 SHALL 仅对 `level`（目标等级）与 `acceptance`（验收标准）两个语义字段发起追问，
+这两项 MUST NOT 由系统默认值替代而不告知用户。
+
+追问 **软限 2 轮**：达到后系统 SHALL 给出建议值，并明确提示「可以直接用系统建议，也可以自己改」。
+追问 **硬限 3 轮**：达到后系统 MUST 强制收口，输出草案并对仍缺失的字段标注来源为 `inferred`。
+
+**是否继续追问 MUST 由规则层依据缺失字段与轮次判定，不得由 LLM 自行决定停止。**
+
+#### Scenario: 缺语义字段时追问
+
+- **WHEN** 用户描述「我想学虚拟语气」且草案缺少 `acceptance`
+- **THEN** 系统提出一个针对 `acceptance` 的追问，并把 `clarification_rounds` 加 1
+- **THEN** 系统不进入关键词生成与训练文件生成阶段
+
+#### Scenario: 到达软限
+
+- **WHEN** 追问轮次达到 2 轮且仍有语义字段缺失
+- **THEN** 系统给出建议值并提示「可以直接用系统建议，也可以自己改」
+- **THEN** 用户可以直接确认，不被迫继续回答
+
+#### Scenario: 到达硬限
+
+- **WHEN** 追问轮次达到 3 轮且仍有语义字段缺失
+- **THEN** 系统输出草案，把缺失字段的来源标为 `inferred`
 - **THEN** 系统进入 `pending_confirm` 状态，允许用户直接修改
 
 #### Scenario: LLM 调用失败降级
@@ -41,6 +69,25 @@
 - **WHEN** `goal_clarification` 用途的 LLM 调用重试后仍失败
 - **THEN** 系统降级为表单式追问模板，逐字段向用户提问
 - **THEN** 失败记录写入 `llm_calls` 表，但流程不阻塞
+
+### Requirement: 参数优先级固定为用户显式值优先
+
+系统 SHALL 按 **前端显式选择 > 追问得到 > AI 推断** 的优先级合并目标参数。
+系统 MUST NOT 让 LLM 输出覆盖用户在界面上显式给定或通过追问确认的值。
+每个字段的来源 MUST 记录在 `goal_json.field_sources` 中，取值为
+`ui_select` / `user_reply` / `default` / `inferred`。
+
+#### Scenario: AI 不得覆盖用户显式值
+
+- **WHEN** 用户在前端选择「每次 30 分钟」，而 LLM 输出草案给出「每次 60 分钟」
+- **THEN** 系统保留 30 分钟，丢弃 LLM 的该字段
+- **THEN** `field_sources.daily_budget` 为 `ui_select`
+
+#### Scenario: 推断值必须可识别
+
+- **WHEN** 某字段由系统推断得出
+- **THEN** 该字段在草案界面上带「系统建议」标识
+- **THEN** `field_sources` 中对应字段为 `inferred`
 
 ### Requirement: 用户必须确认目标后才能进入后续流程
 
@@ -79,10 +126,11 @@ MUST NOT 生成关键词白名单、MUST NOT 渲染训练文件。确认动作 S
 #### Scenario: 快照写入
 
 - **WHEN** 用户确认目标
-- **THEN** `trainings.goal_json` 包含五个目标字段与 `schema_version`
+- **THEN** `trainings.goal_json` 包含 `content` / `level` / `horizon` / `weekly_frequency` /
+  `daily_budget` / `acceptance` / `field_sources` / `schema_version`
 - **THEN** 读取该训练的任意页面都能取到确认时的目标，不受后续 LLM 生成结果影响
 
 #### Scenario: 确认后可追溯
 
 - **WHEN** 用户或开发者查看该训练
-- **THEN** 可看到 `goal_confirmed_at`、`clarification_rounds` 与完整目标快照
+- **THEN** 可看到 `goal_confirmed_at`、`clarification_rounds`、完整目标快照与各字段来源
