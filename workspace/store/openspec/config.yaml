@@ -1,20 +1,35 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  项目：个人训练师 Agent —— 意图驱动的自适应训练闭环
+  （目标澄清 → 计划生成 → 每日执行 → 效果评测 → 自适应调度 → 周复盘）。
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  技术栈：Python 3.12、Streamlit、SQLite（data/trainer.db）、
+  LLM API（DeepSeek / MiniMax / DashScope Embedding）、Jinja2、tenacity、uv。
+
+  架构分层：src/ui（视图）→ src/services（业务编排）→ src/llm、src/db（基础设施）。
+
+  核心设计原则：
+  - LLM 只负责语义（澄清目标、生成计划草案、评测解释）；日期计算、状态迁移、统计
+    必须由确定性代码负责，不能让 LLM 直接写日期或状态。
+  - 所有 LLM 输出走 JSON Schema 校验，失败重试并落 llm_calls 审计表记录
+    prompt 版本、模型、token、耗时、失败原因。
+  - 机械指标（完成率、连续天数、正确率、成本）用 SQL / 纯函数计算，不消耗 token。
+
+  运行环境：一律用 uv（uv run ...），不要直接调用 python / pip。
+
+  证据与决策：技术选型记录在 workspace/decisions/（MADR 格式）；量化结论必须能在
+  workspace/evidence/ 找到脚本或报告；未实测的数字标【待验证】。
+
+rules:
+  proposal:
+    - 必须包含「非目标（Non-goals）」一节
+    - 涉及技术选择时，必须列出至少 1 个备选方案和放弃理由
+    - 验收标准必须可执行（命令、指标口径或明确的人工检查步骤），不能只写"体验更好"
+    - 涉及量化结果时写明证据来源，未实测的标注【待验证】
+  design:
+    - 说明该设计为什么优于备选方案，并指向对应的 ADR（workspace/decisions/）
+  tasks:
+    - 每个任务必须写明验收方式
+    - 单个任务控制在 2 小时以内
+    - 涉及技术选型的任务，先完成 ADR 再写代码

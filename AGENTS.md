@@ -12,6 +12,9 @@
 | `workspace/` | 个人工作区 | 见下方规则 |
 | `workspace/record/` | **变更日志目录**（必读） | 每次重大更新必写 |
 | `workspace/store/` | OpenSpec store（已注册 id=`store`） | spec / change 都走这里 |
+| `workspace/decisions/` | **ADR 决策记录**（为什么选 A 不选 B） | 涉及选型必写 |
+| `workspace/evidence/` | **效果证据**（评测结果、指标口径） | 量化结论必须能追到这里 |
+| `workspace/prompts/` | 可复用的提示词与工作流模板 | 按需阅读 |
 | `workspace/training_list的基本使用/` | 训练清单使用文档 | 只读 |
 | `.opencode/` | OpenCode skills & commands | 不要移动 |
 
@@ -39,6 +42,36 @@
 - 先 `/opsx:propose "<想法>"` 创建 proposal
 - 走完 `apply → archive` 闭环
 - 命令记得带 `--store store`（opencode 自动处理）
+
+### 5. 文档与决策工作流（四件套）
+
+> 核心：让"为什么这么做"和"怎么证明做对了"跟着代码一起沉淀，而不是事后补。
+
+| 层 | 载体 | 回答的问题 | 何时写 |
+|---|---|---|---|
+| 决策 | `workspace/decisions/ADR-XXXX-*.md` | 为什么选 A 不选 B | 每次技术选型 / 架构调整 |
+| 规格与验收 | `workspace/store/`（`--store store`） | 要做什么、怎么算做到 | 功能变更前走 `/opsx:propose` |
+| 证据 | `workspace/evidence/` | 做完到底有没有效果 | 功能完成后 |
+| 变更记录 | `workspace/record/` | 这次改了什么 | 变更收尾 |
+
+#### 开工前读取分级
+
+- **每次必读**：本文件 + 当前 OpenSpec change 的 `proposal.md`
+- **按任务触发**：
+  - 改 LLM 调用 / prompt → 对应 ADR + `src/llm/`
+  - 改计划生成 / 调度 / 评测 → 对应 spec + `src/services/`
+  - 改数据库 / 状态迁移 → 对应 ADR + `src/db/`
+- **不要整体加载**（按需 grep）：`workspace/record/` 的历史全文、`workspace/evidence/` 明细报告、
+  `docs/` 理论资料、`data/`、`.venv/`
+
+#### 硬性门禁
+
+1. **选型先写 ADR**：涉及技术选择的改动，ADR 未落盘视为任务未完成。
+2. **规格走闭环**：功能变更走 `propose → apply → archive`；归档后必须把 spec 的 `Purpose`
+   从 `TBD` 改成一句话（当前 6 个 spec 都还是 TBD，见记录 `20260919_chore_workflow-adr-eval.md`）。
+3. **数字要有出处**：量化结论必须能在 `workspace/evidence/` 找到脚本或报告；未实测的一律写
+   `【待验证】`，禁止估算百分比、用户量、QPS、准确率。
+4. **收尾三件事**：跑测试 → 回填证据 → 写 `workspace/record/` 变更记录。
 
 ## 不要做的事
 - 不要把 `.opencode/` 移出项目根
