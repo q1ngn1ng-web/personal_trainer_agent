@@ -18,23 +18,23 @@
 - **WHEN** 用户提交空白描述
 - **THEN** 系统拒绝提交并提示「请用一句话描述你想训练的内容」
 
-### Requirement: 前端必须提供投入参数选择，且允许跳过
+### Requirement: 澄清阶段只处理目的，不得索要投入参数
 
-系统 SHALL 在新建训练页提供三个结构化控件：`horizon`（周期）、`weekly_frequency`（每周训练次数）、
-`daily_budget`（每次训练时长）。每个控件 MUST 带默认值，用户 MUST 可以直接跳过并开始。
-系统 MUST NOT 把这三个参数作为追问内容。
+澄清阶段 SHALL 只产出 `content`、`level`、`acceptance` 三个字段。
+系统 MUST NOT 在本阶段询问或要求用户选择训练周期、每周训练次数、每次训练时长等投入参数，
+MUST NOT 在澄清页放置这类控件。这些参数属于训练路径阶段，由 AI 生成草案、用户微调后确认。
 
-#### Scenario: 用户显式选择参数
+#### Scenario: 澄清页不出现投入参数控件
 
-- **WHEN** 用户在新建训练页选择「2 周 / 每周 5 次 / 每次 30 分钟」
-- **THEN** 三个值写入 `goal_json`，`field_sources` 中对应字段标为 `ui_select`
+- **WHEN** 用户进入新建训练页
+- **THEN** 页面只包含内容描述输入与澄清追问
+- **THEN** 页面不包含周期 / 每周次数 / 每次时长的选择控件
 
-#### Scenario: 用户跳过参数选择
+#### Scenario: 用户主动提供投入参数
 
-- **WHEN** 用户不修改任何控件直接提交描述
-- **THEN** 系统采用默认值（周期 2 周 / 每周 5 次 / 每次 30 分钟）
-- **THEN** 对应字段在 `field_sources` 中标为 `default`
-- **THEN** 系统不因这三个参数发起追问
+- **WHEN** 用户在描述里写「我想两周内学会虚拟语气，每天 30 分钟」
+- **THEN** 系统把该信息作为描述的一部分保留，不因此发起澄清追问
+- **THEN** 该信息不作为澄清阶段的产出参数，留给路径阶段使用
 
 ### Requirement: 系统只对语义字段追问，且追问有软限与硬限
 
@@ -70,18 +70,17 @@
 - **THEN** 系统降级为表单式追问模板，逐字段向用户提问
 - **THEN** 失败记录写入 `llm_calls` 表，但流程不阻塞
 
-### Requirement: 参数优先级固定为用户显式值优先
+### Requirement: AI 不得覆盖用户显式给出的值
 
-系统 SHALL 按 **前端显式选择 > 追问得到 > AI 推断** 的优先级合并目标参数。
-系统 MUST NOT 让 LLM 输出覆盖用户在界面上显式给定或通过追问确认的值。
-每个字段的来源 MUST 记录在 `goal_json.field_sources` 中，取值为
-`ui_select` / `user_reply` / `default` / `inferred`。
+系统 SHALL 在每个字段上记录来源 `goal_json.field_sources`，取值为
+`user_input` / `user_reply` / `inferred`。当 LLM 输出与用户输入或用户回答冲突时，
+系统 MUST 保留用户的值并丢弃 LLM 的该字段值。
 
-#### Scenario: AI 不得覆盖用户显式值
+#### Scenario: AI 不得覆盖用户表达
 
-- **WHEN** 用户在前端选择「每次 30 分钟」，而 LLM 输出草案给出「每次 60 分钟」
-- **THEN** 系统保留 30 分钟，丢弃 LLM 的该字段
-- **THEN** `field_sources.daily_budget` 为 `ui_select`
+- **WHEN** 用户明确表示「我想达到能自己写句子的程度」，而 LLM 草案给出「了解即可」
+- **THEN** 系统保留「能自己写句子」，丢弃 LLM 的该字段
+- **THEN** `field_sources.level` 为 `user_reply`
 
 #### Scenario: 推断值必须可识别
 
@@ -89,9 +88,9 @@
 - **THEN** 该字段在草案界面上带「系统建议」标识
 - **THEN** `field_sources` 中对应字段为 `inferred`
 
-### Requirement: 用户必须确认目标后才能进入后续流程
+### Requirement: 用户必须确认目的后才能进入后续流程
 
-系统 SHALL 把目标确认实现为显式状态迁移：训练处于 `draft` 或 `pending_confirm` 状态时，
+系统 SHALL 把目的确认实现为显式状态迁移：训练处于 `draft` 或 `pending_confirm` 状态时，
 MUST NOT 生成关键词白名单、MUST NOT 渲染训练文件。确认动作 SHALL 由规则层执行并落库。
 
 #### Scenario: 未确认时阻止后续步骤
@@ -100,16 +99,16 @@ MUST NOT 生成关键词白名单、MUST NOT 渲染训练文件。确认动作 S
 - **THEN** 系统不调用关键词生成，也不创建任何训练文件
 - **THEN** 页面提示「请先确认训练目标」
 
-#### Scenario: 用户确认目标
+#### Scenario: 用户确认目的
 
 - **WHEN** 用户点击「确认目标」
 - **THEN** 训练状态由 `pending_confirm` 变为 `confirmed`
 - **THEN** 系统写入 `goal_confirmed_at` 时间戳
-- **THEN** 系统允许进入关键词生成与文件生成阶段
+- **THEN** 系统允许进入后续阶段
 
-#### Scenario: 用户修改目标
+#### Scenario: 用户修改目的
 
-- **WHEN** 用户在 `pending_confirm` 状态下修改任一目标字段
+- **WHEN** 用户在 `pending_confirm` 状态下修改任一目的字段
 - **THEN** 系统重新生成草案并保持 `pending_confirm` 状态
 - **THEN** `goal_confirmed_at` 保持为空
 
@@ -118,19 +117,25 @@ MUST NOT 生成关键词白名单、MUST NOT 渲染训练文件。确认动作 S
 - **WHEN** 代码尝试把 `confirmed` 直接迁回 `draft`
 - **THEN** 状态迁移函数拒绝该操作并记录一条警告日志
 
-### Requirement: 目标确认后必须留存快照
+### Requirement: 目的确认后必须留存快照
 
 系统 SHALL 在确认时把目标草案以 JSON 形式写入 `trainings.goal_json`，并 MUST 在快照内包含
-`schema_version` 字段，以便后续结构变更时做兼容读取。
+`schema_version` 字段，以便后续结构变更时做兼容读取。快照一旦确认即冻结，
+MUST NOT 被后续 LLM 生成过程改写。
 
 #### Scenario: 快照写入
 
-- **WHEN** 用户确认目标
-- **THEN** `trainings.goal_json` 包含 `content` / `level` / `horizon` / `weekly_frequency` /
-  `daily_budget` / `acceptance` / `field_sources` / `schema_version`
-- **THEN** 读取该训练的任意页面都能取到确认时的目标，不受后续 LLM 生成结果影响
+- **WHEN** 用户确认目的
+- **THEN** `trainings.goal_json` 包含 `content` / `level` / `acceptance` / `field_sources` /
+  `schema_version`
+- **THEN** 读取该训练的任意页面都能取到确认时的目的，不受后续 LLM 生成结果影响
 
 #### Scenario: 确认后可追溯
 
 - **WHEN** 用户或开发者查看该训练
-- **THEN** 可看到 `goal_confirmed_at`、`clarification_rounds`、完整目标快照与各字段来源
+- **THEN** 可看到 `goal_confirmed_at`、`clarification_rounds`、完整目的快照与各字段来源
+
+#### Scenario: 快照作为路径生成的唯一输入
+
+- **WHEN** 后续路径生成阶段启动
+- **THEN** 它读取的是已确认的 `goal_json`，而不是重新解析用户原始描述
