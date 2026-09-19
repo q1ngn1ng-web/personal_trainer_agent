@@ -135,6 +135,13 @@ MUST NOT 被后续 LLM 生成过程改写。
 - **WHEN** 用户或开发者查看该训练
 - **THEN** 可看到 `goal_confirmed_at`、`clarification_rounds`、完整目的快照与各字段来源
 
+#### Scenario: 确认标记与目的内容分开存储
+
+- **WHEN** 用户确认目的
+- **THEN** `trainings.status` 变为 `confirmed` 并写入 `goal_confirmed_at`
+- **THEN** `goal_json` 中保存的是 `content` / `level` / `acceptance` 的具体取值，而不是布尔标记
+- **THEN** 后续环节通过读取这些取值（而非"是否确认"）来决定训练内容与判分口径
+
 #### Scenario: 快照作为路径生成的唯一输入
 
 - **WHEN** 后续路径生成阶段启动
