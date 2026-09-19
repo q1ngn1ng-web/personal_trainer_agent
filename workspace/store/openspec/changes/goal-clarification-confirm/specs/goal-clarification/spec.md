@@ -70,6 +70,31 @@ MUST NOT 在澄清页放置这类控件。这些参数属于训练路径阶段�
 - **THEN** 系统降级为表单式追问模板，逐字段向用户提问
 - **THEN** 失败记录写入 `llm_calls` 表，但流程不阻塞
 
+### Requirement: 验收标准必须是可判定判据
+
+`acceptance` MUST 是量化判据或可观察的质性判据之一，MUST NOT 是纯主观形容词。
+量化判据 SHALL 包含 `metric`（`accuracy` / `volume` / `speed` / `streak`）与 `target`；
+质性判据 SHALL 包含可观察的 `statement` 与检查方式 `check`。
+追问时系统 SHALL 优先引导用户给出数字。
+
+#### Scenario: 用户给出可量化标准
+
+- **WHEN** 用户回答「10 句改错题做对 8 句」
+- **THEN** 系统记录 `type=quantitative`、`metric=accuracy`、`target=0.8`、`unit=10 句改错题`
+- **THEN** 该判据可被后续评测模块直接消费
+
+#### Scenario: 用户给不出数字
+
+- **WHEN** 用户回答「能自己讲清楚就行」
+- **THEN** 系统记录 `type=qualitative`，并追问或补充可观察的检查方式
+- **THEN** 缺少检查方式时该字段仍视为未完成，继续追问
+
+#### Scenario: 用户给出纯主观形容词
+
+- **WHEN** 用户回答「练得比较熟练就行」
+- **THEN** 系统不把该回答当作完成的判据
+- **THEN** 系统继续追问一次；若到达硬限，则由 AI 给出建议判据并标为 `inferred`
+
 ### Requirement: AI 不得覆盖用户显式给出的值
 
 系统 SHALL 在每个字段上记录来源 `goal_json.field_sources`，取值为

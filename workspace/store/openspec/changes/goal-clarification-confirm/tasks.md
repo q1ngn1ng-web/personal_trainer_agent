@@ -15,8 +15,11 @@
 ## 2. 目的字段定义与来源标记
 
 - [ ] 2.1 定义三个目的字段的取值：`content`（自由文本）、`level`（了解 / 会用 / 熟练 / 能讲清）、
-  `acceptance`（自由文本）
+  `acceptance`（结构化判据，见 2.1b）
   - 验收：单测断言 `level` 只接受枚举内取值
+- [ ] 2.1b 定义 `acceptance` 的两种形状（`quantitative` 含 metric/target/unit；`qualitative` 含
+  statement/check），并实现"纯主观形容词不算完成"的校验
+  - 验收：单测断言「比较熟练」被判为未完成，「正确率 ≥ 80%」被判为完成
 - [ ] 2.2 实现 `field_sources` 记录（`user_input` / `user_reply` / `inferred`）
   - 验收：单测断言每个字段都有来源标记
 - [ ] 2.3 实现合并函数：LLM 输出与用户值冲突时保留用户值，并记录一条冲突日志
