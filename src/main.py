@@ -3,6 +3,7 @@
 根据 ?page= 查询参数路由到对应的页面渲染器：
   - home (default)         → page_home
   - new_training           → page_new_training
+  - sources + ?training_id → page_sources
   - detail + ?training_id  → page_training
   - daily + ?training_id   → page_daily
   - review + ?training_id  → page_review
@@ -45,6 +46,7 @@ def _register_pages() -> None:
         return
     from src.ui.page_home import render as render_home
     from src.ui.page_new_training import render as render_new_training
+    from src.ui.page_sources import render as render_sources
     from src.ui.page_training import render as render_training
     from src.ui.page_daily import render as render_daily
     from src.ui.page_review import render as render_review
@@ -52,6 +54,7 @@ def _register_pages() -> None:
     PAGES = {
         "home": render_home,
         "new_training": render_new_training,
+        "sources": render_sources,
         "detail": render_training,
         "daily": render_daily,
         "review": render_review,
@@ -99,6 +102,10 @@ def _render_sidebar() -> None:
                 type="primary" if current_page == "new_training" else "secondary",
             ):
                 _goto(page="new_training")
+
+        if st.button("📚 资料", key="nav_sources", width="stretch",
+                     type="primary" if current_page == "sources" else "secondary"):
+            _goto(page="sources", training_id=int(current_training_id) if current_training_id else None)
 
         st.markdown("---")
 
