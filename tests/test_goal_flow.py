@@ -123,8 +123,17 @@ class TestGoalClarificationFallback(unittest.TestCase):
 
     def setUp(self) -> None:
         self._old_key = os.environ.pop("DEEPSEEK_API_KEY", None)
+        # 注入必然失败的调用，避免测试依赖真实网络（否则会偶发失败）
+        from src.llm import client as client_module
+
+        self._client = client_module
+        self._orig_call_api = client_module._call_api
+        client_module._call_api = lambda messages: (_ for _ in ()).throw(  # type: ignore[assignment]
+            client_module.LLMError("forced failure for test")
+        )
 
     def tearDown(self) -> None:
+        self._client._call_api = self._orig_call_api  # type: ignore[assignment]
         if self._old_key is not None:
             os.environ["DEEPSEEK_API_KEY"] = self._old_key
 
