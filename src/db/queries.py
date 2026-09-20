@@ -153,6 +153,42 @@ def set_training_status(id: int, status: str, conn: sqlite3.Connection | None = 
     return update_training(id, conn=conn, status=status, last_active_at=_now())
 
 
+#: 删除训练时要一并清理的子表（按外键依赖顺序，先删孙子再删子）
+_TRAINING_CASCADE: tuple[str, ...] = (
+    "DELETE FROM daily_log_tasks WHERE daily_log_id IN "
+    "(SELECT id FROM daily_logs WHERE training_id = ?)",
+    "DELETE FROM daily_logs WHERE training_id = ?",
+    "DELETE FROM training_items WHERE stage_id IN "
+    "(SELECT id FROM path_stages WHERE path_id IN "
+    "(SELECT id FROM training_paths WHERE training_id = ?))",
+    "DELETE FROM path_stages WHERE path_id IN "
+    "(SELECT id FROM training_paths WHERE training_id = ?)",
+    "DELETE FROM training_paths WHERE training_id = ?",
+    "DELETE FROM edge_assessments WHERE training_id = ?",
+    "DELETE FROM source_chunks WHERE source_id IN (SELECT id FROM sources WHERE training_id = ?)",
+    "DELETE FROM sources WHERE training_id = ?",
+    "DELETE FROM learning_signals WHERE training_id = ?",
+    "DELETE FROM adjustment_log WHERE training_id = ?",
+    "DELETE FROM baseline_history WHERE training_id = ?",
+    "DELETE FROM review_archives WHERE training_id = ?",
+    "DELETE FROM llm_calls WHERE training_id = ?",
+)
+
+
+def delete_training(id: int, conn: sqlite3.Connection | None = None) -> bool:
+    """彻底删除一个训练及其全部关联数据。
+
+    **不可恢复**。调用方必须先做二次确认。
+    返回是否真的删掉了训练行。
+    """
+    with _connection(conn) as active:
+        for statement in _TRAINING_CASCADE:
+            active.execute(statement, (id,))
+        cursor = active.execute("DELETE FROM trainings WHERE id = ?", (id,))
+        deleted = cursor.rowcount > 0
+    return deleted
+
+
 def get_or_create_daily_log(
     training_id: int,
     log_date: str | date,

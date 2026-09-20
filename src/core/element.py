@@ -41,6 +41,9 @@ class Element(Enum):
 
 class TrainingStatus(Enum):
     CREATED = "created"
+    DRAFT = "draft"
+    PENDING_CONFIRM = "pending_confirm"
+    CONFIRMED = "confirmed"
     ACTIVE = "active"
     PAUSED = "paused"
     ARCHIVED = "archived"

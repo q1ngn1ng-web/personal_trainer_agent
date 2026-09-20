@@ -19,6 +19,9 @@ logger = logging.getLogger("src.ui.page_home")
 
 _STATUS_BADGE: dict[TrainingStatus, str] = {
     TrainingStatus.CREATED: "🆕 已创建",
+    TrainingStatus.DRAFT: "📝 草稿",
+    TrainingStatus.PENDING_CONFIRM: "🟡 待确认目标",
+    TrainingStatus.CONFIRMED: "📚 待选资料/路径",
     TrainingStatus.ACTIVE: "🟢 活跃",
     TrainingStatus.PAUSED: "⏸️ 暂停",
     TrainingStatus.ARCHIVED: "📦 已归档",
@@ -184,6 +187,38 @@ def _render_new_training_cta() -> None:
             st.rerun()
 
 
+def _render_delete_panel(dashboard: HomeDashboard) -> None:
+    """删除训练：危险操作，必须手动输入训练 ID 才能执行。"""
+    from src.db import queries
+
+    trainings = queries.list_trainings()
+    if not trainings:
+        return
+
+    with st.expander("🗑 删除训练（不可恢复）", expanded=False):
+        st.caption(
+            "删除会一并清掉这个训练的资料、切片、路径、训练项、信号与调用记录，**无法恢复**。"
+        )
+        options = {
+            f"#{t.id} · {getattr(t, 'status', '')} · {(getattr(t, 'topic', '') or '')[:28]}": t.id
+            for t in trainings
+        }
+        picked = st.selectbox("选择要删除的训练", list(options), key="hm_delete_pick")
+        target_id = options[picked]
+        typed = st.text_input(
+            f"输入 `{target_id}` 以确认删除", key="hm_delete_confirm_input"
+        )
+        if st.button("确认删除", key="hm_delete_btn", type="primary"):
+            if (typed or "").strip() != str(target_id):
+                st.error("确认编号不一致，已取消。")
+            else:
+                if queries.delete_training(target_id):
+                    st.success(f"训练 #{target_id} 已删除")
+                    st.rerun()
+                else:
+                    st.warning("没有找到该训练，可能已被删除。")
+
+
 def render() -> None:
     """Render the home page."""
     _render_hero()
@@ -194,6 +229,7 @@ def render() -> None:
     st.divider()
 
     _render_training_list(dashboard)
+    _render_delete_panel(dashboard)
     _render_new_training_cta()
 
 

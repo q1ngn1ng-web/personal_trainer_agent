@@ -47,6 +47,18 @@ def _looks_like_heading(line: str) -> bool:
     return any(pattern.match(text) for pattern in _HEADING_PATTERNS)
 
 
+def _is_title_candidate(text: str) -> bool:
+    """判断一行是否像该页的标题：长度适中、结尾无标点、且含足够多的实义字符。"""
+    candidate = text.strip().strip("\u200b\u200c\u200d\ufeff")
+    if not (4 <= len(candidate) <= 24):
+        return False
+    if candidate.endswith(("。", "，", "；", "：", "！", "？", "、", ".", ",")):
+        return False
+    # 至少要有两个汉字或字母，过滤掉「4.」「- 1」这类列表编号
+    meaningful = re.findall(r"[\u4e00-\u9fffA-Za-z]", candidate)
+    return len(meaningful) >= 2
+
+
 def parse_text(filename: str | None, data: bytes) -> str:
     """Markdown / 纯文本：尝试 UTF-8，失败则忽略不可解码字节。"""
     try:
@@ -57,7 +69,11 @@ def parse_text(filename: str | None, data: bytes) -> str:
 
 
 def parse_pdf(filename: str | None, data: bytes) -> str:
-    """PDF：按页抽取文本，并把疑似标题的行提升为 Markdown 标题。"""
+    """PDF：按页抽取文本，并把疑似标题的行提升为 Markdown 标题。
+
+    每页标题取「第一个像标题的短行」，找不到才退回「第 N 页」——
+    因为下游把标题当知识点名，全是「第 N 页」会让知识点失去意义。
+    """
     import fitz  # pymupdf
 
     pieces: list[str] = []
@@ -66,11 +82,21 @@ def parse_pdf(filename: str | None, data: bytes) -> str:
             text = page.get_text("text") or ""
             if not text.strip():
                 continue
-            pieces.append(f"# 第 {page_index} 页")
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            title = ""
+            for candidate in lines[:3]:
+                if _is_title_candidate(candidate):
+                    title = candidate.strip("\u200b\u200c\u200d\ufeff")
+                    break
+            # 有标题时带上页码便于溯源；没有标题就只用页码，避免「第 2 页（第 2 页）」
+            heading = f"{title}（第 {page_index} 页）" if title else f"第 {page_index} 页"
+            pieces.append(f"# {heading}")
             for raw_line in text.splitlines():
                 line = raw_line.strip()
                 if not line:
                     pieces.append("")
+                    continue
+                if line == title:
                     continue
                 if _looks_like_heading(line):
                     pieces.append(f"## {line}")
