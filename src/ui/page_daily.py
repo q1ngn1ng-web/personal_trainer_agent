@@ -291,6 +291,124 @@ def _render_plan_overview(training_id: int, tasks: list[Any]) -> None:
         )
 
 
+def _render_quiz_section(training_id: int) -> None:
+    """测验：每 14 天一次（也可手动开始）；**作答过程中不给提示**，提交后统一出结果。
+
+    取题只从题库里**冷却期已过**的题里选（ADR-0016）；LLM 不可用时降级为自评，并明确标注。
+    """
+    from src.services import quiz_service
+
+    st.subheader("3. 测验")
+    key_id = f"dl_quiz_{training_id}"
+    key_result = f"dl_quiz_result_{training_id}"
+
+    result = st.session_state.get(key_result)
+    if result:
+        level = st.success if result["passed"] else st.warning
+        level(
+            f"测验结果：{result['score']:.0%}（{result['question_count']} 题）——"
+            + ("通过 ✅" if result["passed"] else "未通过，相关题目已加练一轮")
+        )
+        if result["failed_items"]:
+            st.caption("未掌握的知识点：" + "、".join(
+                str(item.get("knowledge_point") or "未标注") for item in result["failed_items"]
+            ))
+        st.caption(f"判分方式：{'AI 判分' if result['graded_by'] == 'llm' else '自评（AI 判分不可用）'}")
+        if st.button("关闭结果", key=f"dl_quiz_close_{training_id}"):
+            st.session_state.pop(key_result, None)
+            st.rerun()
+        return
+
+    assessment_id = st.session_state.get(key_id)
+    if assessment_id is None:
+        pending = quiz_service.pending_quiz_plan(training_id)
+        latest = quiz_service.latest_assessment(training_id)
+        if pending is not None:
+            pool_size = len(quiz_service.question_pool(training_id))
+            if pool_size:
+                st.info(
+                    f"今天的测验到点了（可抽 {pool_size} 道题）：**内容不可挑**，答完统一给结果。"
+                )
+            else:
+                st.warning(
+                    "测验到点了，但题库里还没有**冷却期已过**的题——"
+                    "练过的题要过 14 天才能进测验（ADR-0016）。先去把今天的题练完吧。"
+                )
+        elif latest is not None and latest.status == "in_progress":
+            st.info(f"有一次未完成的测验（#{latest.id}），继续它即可。")
+        else:
+            st.caption("没有到期的测验。每 14 天一次，也可以现在手动来一次。")
+        if st.button(
+            "开始测验" if pending is None else "开始今日测验",
+            key=f"dl_quiz_start_{training_id}",
+            type="primary",
+        ):
+            try:
+                assessment = quiz_service.start_assessment(
+                    training_id,
+                    trigger="scheduled" if pending else "manual",
+                    plan_id=int(pending["id"]) if pending else None,
+                )
+            except ValueError as exc:
+                st.warning(str(exc))
+            else:
+                st.session_state[key_id] = int(assessment.id)
+                st.rerun()
+        return
+
+    items = quiz_service.load_items(int(assessment_id))
+    if not items:
+        st.session_state.pop(key_id, None)
+        st.warning("这次测验没有题目，已重置。")
+        return
+    st.caption(
+        f"共 {len(items)} 题 · 通过线 80% · "
+        + ("变式题" if all(item.is_variant for item in items) else "含原题（变式生成不可用）")
+    )
+    answers: dict[int, str] = {}
+    for item in items:
+        st.markdown(f"**{item.ordinal}. {item.question}**")
+        answers[item.id] = st.text_area(
+            "你的作答",
+            key=f"dl_quiz_ans_{item.id}",
+            height=80,
+            label_visibility="collapsed",
+        )
+    col_submit, col_manual = st.columns(2)
+    if col_submit.button("提交答卷", key=f"dl_quiz_submit_{assessment_id}", type="primary"):
+        quiz_service.save_answers(int(assessment_id), answers)
+        if quiz_service.grade_with_llm(int(assessment_id)):
+            outcome = quiz_service.finish_assessment(int(assessment_id), graded_by="llm")
+            st.session_state[key_result] = outcome.__dict__
+            st.session_state.pop(key_id, None)
+        else:
+            st.session_state[f"dl_quiz_manual_{assessment_id}"] = True
+        st.rerun()
+
+    if st.session_state.get(f"dl_quiz_manual_{assessment_id}"):
+        st.warning("AI 判分暂时不可用，请对照参考答案自评（自评会标注来源）。")
+        verdicts: dict[int, str] = {}
+        for item in items:
+            st.markdown(f"**{item.ordinal}. {item.question}**")
+            st.caption(f"你答的是：{answers.get(item.id) or '（空）'}")
+            st.caption(f"参考答案：{item.reference_answer or '（暂无）'}")
+            choice = st.radio(
+                "自评",
+                options=["答对", "答错"],
+                key=f"dl_quiz_verdict_{item.id}",
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+            verdicts[item.id] = "pass" if choice == "答对" else "fail"
+        if st.button("提交自评结果", key=f"dl_quiz_finish_manual_{assessment_id}"):
+            quiz_service.save_manual_verdicts(int(assessment_id), verdicts)
+            outcome = quiz_service.finish_assessment(int(assessment_id), graded_by="self")
+            st.session_state[key_result] = outcome.__dict__
+            st.session_state.pop(key_id, None)
+            st.session_state.pop(f"dl_quiz_manual_{assessment_id}", None)
+            st.rerun()
+
+
 def _render_signal_section(training_id: int, focus: Any | None = None) -> None:
     """四失一键反馈：点一下就提交，不填表。"""
     from src.services import attempt_service, plan_service, signal_service
@@ -446,6 +564,7 @@ def _render_training(training: Any) -> None:
         _render_new_section(tasks.new_items, training.id, progress)
 
     _render_recall_section(recall_questions, training.id)
+    _render_quiz_section(training.id)
     _render_progress_section(progress)
     _render_signal_section(training.id, plan_tasks[0] if plan_tasks else None)
     _render_notes_section(training.id, progress)

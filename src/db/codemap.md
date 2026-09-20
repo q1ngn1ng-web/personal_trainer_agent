@@ -82,6 +82,8 @@ SCHEDULE / RECALL_PRACTICE / THREE_REFLECTIONS / REWARD / WEEKLY_REVIEW
 | `training_items.status` 新增 `practiced` | "练过"（勾选写入）；`passed` 收窄为"达标"，只由达标判定写入 |
 | `practice_attempts`（2026-09-21） | 逐次作答记录：`(training_id, item_key, plan_id, round_index, result, source)`。准确率、连续达标、客观通道都以它为准 |
 | `training_items.mastered_at` | 达标时间（由 `attempt_service.mark_mastered_if_ready` 写入） |
+| `assessments`（2026-09-21） | 测验批次：`trigger ∈ {scheduled, manual, stage_end}`、`status`、`score`、`passed` |
+| `assessment_items` | 测验题目与判分：`item_key` 回指题库，`is_variant` 标记是否变式题，`verdict ∈ {pass, fail}` |
 
 迁移由 `migrate._rebuild_training_items` 负责：重建表 + 回填 `item_key`，走迁移三件套
 （`isolation_level=None` + `foreign_keys=OFF` + `legacy_alter_table=ON` + 显式事务），迁移后自检 `foreign_key_check`。

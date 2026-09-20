@@ -190,6 +190,53 @@ class TestPlanPages(unittest.TestCase):
         self.assertEqual(attempt["plan_id"], task.plan_id)
         self.assertEqual(item["status"], "practiced")
 
+    def test_quiz_section_starts_assessment(self) -> None:
+        """点「开始测验」应生成一次测验批次（题目来自冷却期外的题库）。"""
+        from streamlit.testing.v1 import AppTest
+
+        from src.db import queries
+        from src.services import plan_service
+
+        training_id = self._training_with_plan()
+        plan_service.generate_plan(training_id)
+        task = plan_service.today_tasks(training_id=training_id)[0]
+        plan_service.complete_tasks([task.plan_id])  # 练过 → 入题库（冷却期 14 天）
+
+        conn = queries.get_connection()
+        try:
+            conn.execute(
+                "UPDATE question_bank SET cooldown_until = '2026-01-01' WHERE training_id = ?",
+                (training_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        app = AppTest.from_file(self._daily_wrapper, default_timeout=60)
+        app.query_params["page"] = "daily"
+        app.query_params["training_id"] = str(training_id)
+        app.run()
+        self.assertFalse(app.exception)
+        app.button(key=f"dl_quiz_start_{training_id}").click().run()
+        self.assertFalse(app.exception, "开始测验不应抛异常（LLM 不可用时应降级为原题）")
+
+        conn = queries.get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id, status, question_count FROM assessments WHERE training_id = ?",
+                (training_id,),
+            ).fetchone()
+            item_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM assessment_items WHERE assessment_id = ?",
+                (int(row["id"]),),
+            ).fetchone()["n"]
+        finally:
+            conn.close()
+        self.assertIsNotNone(row, "应生成一条测验批次")
+        self.assertEqual(row["status"], "in_progress")
+        self.assertEqual(int(row["question_count"]), 1)
+        self.assertEqual(int(item_count), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

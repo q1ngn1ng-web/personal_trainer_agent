@@ -281,6 +281,42 @@ CREATE TABLE IF NOT EXISTS practice_attempts (
 CREATE INDEX IF NOT EXISTS idx_practice_attempts_item
     ON practice_attempts(training_id, item_key, id);
 
+-- 测验批次：每两周一次 / 用户手动触发 / 阶段末触发
+CREATE TABLE IF NOT EXISTS assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    plan_id INTEGER,
+    trigger TEXT DEFAULT 'scheduled' CHECK (trigger IN ('scheduled', 'manual', 'stage_end')),
+    status TEXT DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed')),
+    question_count INTEGER DEFAULT 0,
+    score REAL,
+    passed INTEGER,
+    created_at DATETIME NOT NULL,
+    completed_at DATETIME,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+-- 测验题目与作答：item_key 回指题库，判分结果用于回退重练
+CREATE TABLE IF NOT EXISTS assessment_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    assessment_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    knowledge_point TEXT,
+    question TEXT NOT NULL,
+    reference_answer TEXT,
+    is_variant INTEGER DEFAULT 1,
+    user_answer TEXT,
+    verdict TEXT CHECK (verdict IS NULL OR verdict IN ('pass', 'fail')),
+    reason TEXT,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assessments_training ON assessments(training_id, id);
+CREATE INDEX IF NOT EXISTS idx_assessment_items_assessment
+    ON assessment_items(assessment_id, ordinal);
+
 CREATE TABLE IF NOT EXISTS learning_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     training_id INTEGER NOT NULL,

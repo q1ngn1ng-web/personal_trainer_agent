@@ -238,6 +238,40 @@ class PracticeAttempt(RowModel):
 
 
 @dataclass
+class Assessment(RowModel):
+    """一次测验批次。"""
+
+    id: int
+    training_id: int
+    plan_id: int | None = None
+    trigger: str = "scheduled"
+    status: str = "in_progress"
+    question_count: int = 0
+    score: float | None = None
+    passed: int | None = None
+    created_at: str = ""
+    completed_at: str | None = None
+
+
+@dataclass
+class AssessmentItem(RowModel):
+    """测验里的一道题及其作答与判分。"""
+
+    id: int
+    assessment_id: int
+    ordinal: int
+    item_key: str
+    knowledge_point: str | None = None
+    question: str = ""
+    reference_answer: str | None = None
+    is_variant: int = 1
+    user_answer: str | None = None
+    verdict: str | None = None
+    reason: str | None = None
+    created_at: str = ""
+
+
+@dataclass
 class PathStage(RowModel):
     """路径的一个阶段。"""
 

@@ -14,7 +14,7 @@
 
 - **分层清晰**：
   - 编排层：`trainer_service`（新建）、`review_service`（周复盘）。
-  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`plan_service` / `attempt_service` / `schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
+  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`plan_service` / `attempt_service` / `quiz_service` / `schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
   - 共享基础：每个 LLM 子服务都遵循同一套 `complete → 解析 output_json → record_llm_call` 三段式套路，便于排查。
 - **鲁棒性策略统一**：
   - **失败兜底**：LLM 服务一旦调用失败/回退，会写一条 `validation_result="fail"`、`fallback_used=1` 的审计记录，然后回退到 `fallback_for(...)` 或启发式算法。
@@ -157,6 +157,21 @@ UI 在"今日训练"页面按以下顺序读取：
 | `objective_for_item(...)` / `objective_for_training(...)` | 供 `signal_service` 的客观通道（<3 次 → `unknown`） |
 | `mark_mastered_if_ready(...)` | **唯一的"达标"写入点**：连续 2 次通过 → `training_items.status='passed'` + `mastered_at` |
 | `record_and_evaluate(...)` | 记录作答并顺带判定达标，返回是否刚刚达标 |
+
+### 4.6 `quiz_service.py` — 测验取题、判分与回退重练（2026-09-21 新增）
+
+对应 `periodic-assessment` 能力与 ADR-0016。
+
+| 函数 | 作用 |
+|---|---|
+| `question_pool(...)` | 可抽题池：只取 `question_bank.cooldown_until <= 今天` 的题（冷却期内的近期原题不得进池） |
+| `pick_blueprints(pool, size)` | 先保证**知识点覆盖**（每知识点最多一题），再按练过次数补足 |
+| `build_questions(blueprints)` | 优先 LLM 生成**变式题**（`quiz_variant`）；不可用时退回冷却期外的原题并标记 `is_variant=0` |
+| `start_assessment(...)` | 建测验批次 + 落题（`assessments` / `assessment_items`） |
+| `save_answers(...)` / `save_manual_verdicts(...)` | 存作答 / 自评兜底（LLM 判分不可用时，标注来源为自评） |
+| `grade_with_llm(...)` | LLM 判分（`quiz_grade`，只出 pass / fail） |
+| `finish_assessment(...)` | 结算成绩（通过线 80%）、把测验结果写进 `practice_attempts`、未通过的题**追加补练轮次**（`reason='quiz_failed'`） |
+| `pending_quiz_plan(...)` / `latest_assessment(...)` | 今日到期测验 / 最近一次测验（页面用） |
 
 > ⚠️ 2026-09-20 起，新链路（已有训练路径的训练）由 `plan_service` 接手；
 > `schedule_service` 的 `trainings.schedule.units` 分支只服务老训练，属 legacy。

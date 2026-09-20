@@ -284,6 +284,51 @@ PATH_SKELETON_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+QUIZ_VARIANT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "questions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item_key": {"type": "string"},
+                    "question": {"type": "string"},
+                    "reference_answer": {"type": "string"},
+                },
+                "required": ["item_key", "question", "reference_answer"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["questions"],
+    "additionalProperties": False,
+}
+
+QUIZ_GRADE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item_key": {"type": "string"},
+                    "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                    "reason": {"type": "string"},
+                },
+                "required": ["item_key", "verdict", "reason"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["results"],
+    "additionalProperties": False,
+}
+
+
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "topic_validation": TOPIC_VALIDATION_SCHEMA,
     "keyword_generation": KEYWORD_GENERATION_SCHEMA,
@@ -296,4 +341,6 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "edge_probe": EDGE_PROBE_SCHEMA,
     "edge_probe_grade": EDGE_PROBE_GRADE_SCHEMA,
     "path_skeleton": PATH_SKELETON_SCHEMA,
+    "quiz_variant": QUIZ_VARIANT_SCHEMA,
+    "quiz_grade": QUIZ_GRADE_SCHEMA,
 }

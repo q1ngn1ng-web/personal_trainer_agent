@@ -223,6 +223,35 @@ PATH_SKELETON_PROMPT: str = """你是训练路径设计助手。用户已确认�
 
 PATH_SKELETON_PROMPT_VERSION: str = "v1.0.0"
 
+QUIZ_VARIANT_PROMPT: str = """你是测验出题助手。下面给出若干「蓝本题」，它们都是用户练过并且已过冷却期的题。
+请为每道蓝本题生成一道**变式题**：换场景、换问法或改条件，但必须考同一个知识点、难度与原题相当。
+
+严格要求：
+1. 不能照抄原题的问法，也不要把原题的答案直接写进题干；
+2. 每道题的 `item_key` 必须与蓝本题一致（用于回退重练的归因）；
+3. 只输出 JSON，字段见 schema。
+
+蓝本题列表：
+{blueprints}
+"""
+
+QUIZ_VARIANT_PROMPT_VERSION: str = "v1.0.0"
+
+QUIZ_GRADE_PROMPT: str = """你是测验评分员。请依据参考答案，判定用户对每道题的作答是否正确。
+
+判定口径：
+1. 只判断"是否答到了参考答案里的关键点"，表述不同不影响判定；
+2. 完全没答、答非所问、只重复题干 → `fail`；
+3. 每道题都要给出简短理由（引用用户作答里的依据）；
+4. 只输出 JSON，字段见 schema。
+
+题目与作答：
+{items}
+"""
+
+QUIZ_GRADE_PROMPT_VERSION: str = "v1.0.0"
+
+
 PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "topic_validation": (TOPIC_VALIDATION_PROMPT, TOPIC_VALIDATION_PROMPT_VERSION),
     "keyword_generation": (KEYWORD_GENERATION_PROMPT, KEYWORD_GENERATION_PROMPT_VERSION),
@@ -235,4 +264,6 @@ PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "edge_probe": (EDGE_PROBE_PROMPT, EDGE_PROBE_PROMPT_VERSION),
     "edge_probe_grade": (EDGE_PROBE_GRADE_PROMPT, EDGE_PROBE_GRADE_PROMPT_VERSION),
     "path_skeleton": (PATH_SKELETON_PROMPT, PATH_SKELETON_PROMPT_VERSION),
+    "quiz_variant": (QUIZ_VARIANT_PROMPT, QUIZ_VARIANT_PROMPT_VERSION),
+    "quiz_grade": (QUIZ_GRADE_PROMPT, QUIZ_GRADE_PROMPT_VERSION),
 }
