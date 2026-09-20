@@ -58,6 +58,7 @@
 #### 开工前读取分级
 
 - **每次必读**：本文件 + 当前 OpenSpec change 的 `proposal.md`
+- **交接优先**：`workspace/HANDOFF.md`（项目现状、剩余 change 顺序、关键约束、迁移三件套）
 - **按任务触发**：
   - 改 LLM 调用 / prompt → 对应 ADR + `src/llm/`
   - 改计划生成 / 调度 / 评测 → 对应 spec + `src/services/`
