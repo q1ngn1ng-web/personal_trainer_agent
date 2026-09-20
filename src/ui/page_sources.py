@@ -50,8 +50,10 @@ def _resolve_training() -> object | None:
 
 
 def _render_add_forms(training_id: int) -> None:
-    """三类静态来源的添加入口。"""
-    tab_paste, tab_upload, tab_ai = st.tabs(["✏️ 粘贴文本", "📎 上传文件", "🤖 AI 生成"])
+    """四类来源的添加入口（阶段 B 起包含网络来源）。"""
+    tab_paste, tab_upload, tab_web, tab_ai = st.tabs(
+        ["✏️ 粘贴文本", "📎 上传文件", "🌐 网络来源", "🤖 AI 生成"]
+    )
 
     with tab_paste:
         title = st.text_input("标题", key="src_paste_title", placeholder="例如：虚拟语气讲义")
@@ -91,6 +93,23 @@ def _render_add_forms(training_id: int) -> None:
             st.rerun()
         st.caption("扫描件（图片型 PDF）暂不支持，需要 OCR。")
 
+    with tab_web:
+        st.caption("粘贴一个网址即可添加为知识来源。会保存当时的正文快照，之后页面变了可手动刷新。")
+        url = st.text_input("网址", key="src_web_url", placeholder="https://…")
+        if st.button("抓取并添加", key="src_web_submit", type="primary"):
+            if not url.strip():
+                st.error("请先填入网址")
+            else:
+                with st.spinner("正在抓取…"):
+                    source = svc.fetch_web_source(training_id, url.strip())
+                if source.parse_status == "ok":
+                    chunks = len(svc.list_chunks(source.id, limit=1000))
+                    st.success(f"已抓取 {source.origin_url}，共 {chunks} 个切片")
+                else:
+                    st.error(source.parse_error or "抓取失败")
+                st.rerun()
+        st.caption("只抓你给出的这个网址：不跟随页面内链接、不做定时重抓、不绕过反爬。")
+
     with tab_ai:
         st.caption("选择后将由 AI 生成训练资料，本阶段仅登记来源，生成逻辑在路径阶段接入。")
         title = st.text_input("资料主题", key="src_ai_title", placeholder="例如：虚拟语气要点")
@@ -119,10 +138,35 @@ def _render_source_list(training_id: int) -> None:
                 "类型": _TYPE_LABELS.get(source.type, source.type),
                 "切片数": chunk_count,
                 "状态": _STATUS_LABELS.get(source.parse_status, source.parse_status),
+                "启用": "✅" if source.enabled else "⏸",
                 "范围": source.scope,
             }
         )
     st.dataframe(rows, width="stretch", hide_index=True)
+
+    toggle_labels = {
+        f"{'⏸ 停用' if s.enabled else '▶ 启用'} #{s.id} · {s.title[:20]}": s for s in sources
+    }
+    picked = st.selectbox("启用 / 停用某个来源", ["（不操作）", *toggle_labels], key="src_toggle_pick")
+    if picked != "（不操作）":
+        source = toggle_labels[picked]
+        if st.button("切换", key="src_toggle_apply"):
+            svc.set_source_enabled(source.id, not bool(source.enabled))
+            st.success("已切换（停用不会删除资料，只是不再参与检索与出题）")
+            st.rerun()
+
+    if any(source.type == "web_url" for source in sources):
+        web_sources = {f"#{s.id} · {s.title[:24]}": s for s in sources if s.type == "web_url"}
+        picked_web = st.selectbox("刷新网页快照", ["（不操作）", *web_sources], key="src_refresh_pick")
+        if picked_web != "（不操作）" and st.button("重新抓取", key="src_refresh_apply"):
+            with st.spinner("正在重新抓取…"):
+                refreshed = svc.refresh_snapshot(web_sources[picked_web].id)
+            if refreshed.parse_status == "ok":
+                st.success("快照已刷新，切片已更新")
+            else:
+                st.error(refreshed.parse_error or "刷新失败")
+            st.rerun()
+
     if any(source.parse_status == "failed" for source in sources):
         for source in sources:
             if source.parse_status == "failed":

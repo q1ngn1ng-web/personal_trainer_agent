@@ -68,19 +68,17 @@ class TestSourcePage(unittest.TestCase):
         self.assertTrue(any("确认训练目标" in warning.value for warning in app.warning))
         self.assertEqual(len(app.tabs), 0)
 
-    def test_confirmed_training_offers_three_static_sources_only(self) -> None:
+    def test_confirmed_training_offers_all_source_types(self) -> None:
         from src.db import queries
 
         training = queries.create_training(topic="英语虚拟语气", status="confirmed")
         app = self._app(training.id)
         labels = [tab.label for tab in app.tabs]
-        self.assertEqual(len(labels), 3)
+        self.assertEqual(len(labels), 4)
         self.assertTrue(any("粘贴文本" in label for label in labels))
         self.assertTrue(any("上传文件" in label for label in labels))
         self.assertTrue(any("AI 生成" in label for label in labels))
-        joined = " ".join(labels)
-        self.assertNotIn("网络", joined)
-        self.assertNotIn("网址", joined)
+        self.assertTrue(any("网络" in label for label in labels))
 
     def test_paste_source_is_parsed_into_chunks(self) -> None:
         from src.db import queries

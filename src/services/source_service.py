@@ -49,6 +49,7 @@ def create_source(
     type: str,
     title: str,
     origin: str | None = None,
+    origin_url: str | None = None,
     content: str | None = None,
     scope: str = "personal",
     conn: sqlite3.Connection | None = None,
@@ -61,6 +62,7 @@ def create_source(
         "type": type,
         "title": (title or "").strip() or "未命名来源",
         "origin": origin,
+        "origin_url": origin_url,
         "snapshot_text": text or None,
         "org_id": DEFAULT_ORG_ID,
         "scope": scope,
@@ -303,6 +305,105 @@ def get_chunks_by_ids(
     return [dict(row) for row in rows]
 
 
+def set_source_enabled(
+    source_id: int, enabled: bool, conn: sqlite3.Connection | None = None
+) -> Source | None:
+    """启用 / 停用某个来源。停用不等于删除（ADR 边界：企业版关掉 URL 来源，代码仍在）。"""
+    active = _connect(conn)
+    own = conn is None
+    try:
+        active.execute(
+            "UPDATE sources SET enabled = ? WHERE id = ?", (1 if enabled else 0, source_id)
+        )
+        if own:
+            active.commit()
+        row = active.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+    finally:
+        if own:
+            active.close()
+    return Source.from_row(row) if row else None
+
+
+def fetch_web_source(
+    training_id: int,
+    url: str,
+    *,
+    title: str | None = None,
+    timeout: float | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> Source:
+    """抓取一个网页作为训练来源：保存正文快照 + 原始网址 + 抓取时间。
+
+    失败时**先落一条来源记录再标状态**，让用户在列表里看得到失败原因（ADR-0008）。
+    """
+    from src.services.web_source import DEFAULT_TIMEOUT_S, WebSourceError, fetch_and_extract
+
+    target = (url or "").strip()
+    source = create_source(
+        training_id,
+        type="web_url",
+        title=title or target or "网络来源",
+        origin=target,
+        origin_url=target,
+        conn=conn,
+    )
+    try:
+        page, text = fetch_and_extract(target, timeout=timeout or DEFAULT_TIMEOUT_S)
+    except WebSourceError as exc:
+        logger.warning("fetch_web_source: %s -> %s", target, exc)
+        return mark_failed(source.id, str(exc), conn=conn) or source
+    except Exception as exc:  # pragma: no cover - 兜底
+        logger.exception("fetch_web_source: unexpected failure for %s", target)
+        return mark_failed(source.id, f"抓取失败：{exc}", conn=conn) or source
+
+    active = _connect(conn)
+    own = conn is None
+    try:
+        active.execute(
+            "UPDATE sources SET snapshot_text = ?, fetched_at = ?, checksum = ?, "
+            "origin_url = ? WHERE id = ?",
+            (text, page.fetched_at, content_checksum(text), page.final_url, source.id),
+        )
+        if own:
+            active.commit()
+    finally:
+        if own:
+            active.close()
+    return parse_source(source.id, conn=conn)
+
+
+def refresh_snapshot(
+    source_id: int, *, timeout: float | None = None, conn: sqlite3.Connection | None = None
+) -> Source:
+    """按用户请求重新抓取网络来源的快照（不做定时重抓）。"""
+    source = get_source(source_id, conn=conn)
+    if source is None:
+        raise ValueError(f"source not found: {source_id}")
+    if source.type != "web_url" or not source.origin_url:
+        raise ValueError("只有网络来源可以刷新快照")
+
+    from src.services.web_source import DEFAULT_TIMEOUT_S, WebSourceError, fetch_and_extract
+
+    try:
+        page, text = fetch_and_extract(source.origin_url, timeout=timeout or DEFAULT_TIMEOUT_S)
+    except WebSourceError as exc:
+        return mark_failed(source_id, str(exc), conn=conn) or source
+
+    active = _connect(conn)
+    own = conn is None
+    try:
+        active.execute(
+            "UPDATE sources SET snapshot_text = ?, fetched_at = ?, checksum = ? WHERE id = ?",
+            (text, page.fetched_at, content_checksum(text), source_id),
+        )
+        if own:
+            active.commit()
+    finally:
+        if own:
+            active.close()
+    return parse_source(source_id, force=True, conn=conn)
+
+
 def search_chunks(
     training_id: int, query: str, *, limit: int = 10, conn: sqlite3.Connection | None = None
 ) -> list[SourceChunk]:
@@ -315,7 +416,7 @@ def search_chunks(
     like_sql = """
         SELECT c.* FROM source_chunks c
         JOIN sources s ON s.id = c.source_id
-        WHERE s.training_id = ? AND c.text LIKE ?
+        WHERE s.training_id = ? AND s.enabled = 1 AND c.text LIKE ?
         ORDER BY c.ordinal LIMIT ?
     """
     try:
@@ -325,7 +426,7 @@ def search_chunks(
                 SELECT c.* FROM source_chunks_fts f
                 JOIN source_chunks c ON c.id = f.rowid
                 JOIN sources s ON s.id = c.source_id
-                WHERE source_chunks_fts MATCH ? AND s.training_id = ?
+                WHERE source_chunks_fts MATCH ? AND s.training_id = ? AND s.enabled = 1
                 ORDER BY bm25(source_chunks_fts) LIMIT ?
                 """,
                 (text, training_id, limit),
@@ -403,6 +504,7 @@ __all__ = [
     "create_source",
     "create_source_from_file",
     "existing_chunk_ids",
+    "fetch_web_source",
     "get_chunks_by_ids",
     "get_source",
     "link_chunk_ids",
@@ -411,5 +513,7 @@ __all__ = [
     "mark_failed",
     "mark_unsupported",
     "parse_source",
+    "refresh_snapshot",
     "search_chunks",
+    "set_source_enabled",
 ]

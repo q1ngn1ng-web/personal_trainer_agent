@@ -165,6 +165,7 @@ class Source(RowModel):
     snapshot_text: str | None = None
     org_id: int | None = None
     scope: str = "personal"
+    enabled: int = 1
     checksum: str | None = None
     parse_status: str = "pending"
     parse_error: str | None = None

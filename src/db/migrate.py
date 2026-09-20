@@ -73,6 +73,32 @@ _LLM_CALLS_COLUMNS = (
     "fallback_used, created_at"
 )
 
+_SOURCES_DDL = """
+CREATE TABLE sources_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('ai_generated', 'user_upload', 'user_paste', 'web_url')),
+    title TEXT NOT NULL,
+    origin TEXT,
+    origin_url TEXT,
+    fetched_at DATETIME,
+    snapshot_text TEXT,
+    org_id INTEGER,
+    scope TEXT DEFAULT 'personal' CHECK (scope IN ('org_shared', 'personal')),
+    enabled INTEGER DEFAULT 1,
+    checksum TEXT,
+    parse_status TEXT DEFAULT 'pending' CHECK (parse_status IN ('pending', 'ok', 'failed', 'unsupported')),
+    parse_error TEXT,
+    imported_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+"""
+
+_SOURCES_COLUMNS = (
+    "id, training_id, type, title, origin, origin_url, fetched_at, snapshot_text, org_id, "
+    "scope, checksum, parse_status, parse_error, imported_at"
+)
+
 
 def _table_sql(conn: sqlite3.Connection, table: str) -> str:
     row = conn.execute(
@@ -120,6 +146,18 @@ def _rebuild_llm_calls(conn: sqlite3.Connection) -> None:
     logger.info("migrate: rebuilt llm_calls (goal_clarification purpose)")
 
 
+def _rebuild_sources(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE sources RENAME TO sources_old")
+    conn.execute(_SOURCES_DDL)
+    conn.execute(
+        f"INSERT INTO sources_new ({_SOURCES_COLUMNS}) SELECT {_SOURCES_COLUMNS} FROM sources_old"
+    )
+    conn.execute("DROP TABLE sources_old")
+    conn.execute("ALTER TABLE sources_new RENAME TO sources")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sources_training ON sources(training_id)")
+    logger.info("migrate: rebuilt sources (added enabled flag)")
+
+
 def migrate(conn: sqlite3.Connection) -> list[str]:
     """对既有数据库执行迁移，返回执行过的迁移名列表。"""
     applied: list[str] = []
@@ -129,7 +167,10 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     llm_sql = _table_sql(conn, "llm_calls")
     needs_llm_calls = bool(llm_sql) and "goal_clarification" not in llm_sql
 
-    if not (needs_trainings or needs_llm_calls):
+    source_columns = _column_names(conn, "sources")
+    needs_sources = bool(source_columns) and "enabled" not in source_columns
+
+    if not (needs_trainings or needs_llm_calls or needs_sources):
         return applied
 
     # 两处必须处理：
@@ -152,6 +193,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_llm_calls:
                 _rebuild_llm_calls(conn)
                 applied.append("llm_calls:goal_clarification")
+            if needs_sources:
+                _rebuild_sources(conn)
+                applied.append("sources:enabled_flag")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

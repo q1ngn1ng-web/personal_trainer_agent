@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS sources (
     snapshot_text TEXT,
     org_id INTEGER,
     scope TEXT DEFAULT 'personal' CHECK (scope IN ('org_shared', 'personal')),
+    enabled INTEGER DEFAULT 1,
     checksum TEXT,
     parse_status TEXT DEFAULT 'pending' CHECK (parse_status IN ('pending', 'ok', 'failed', 'unsupported')),
     parse_error TEXT,
