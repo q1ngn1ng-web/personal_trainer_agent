@@ -251,6 +251,36 @@ class TrainingPath(RowModel):
     confirmed_at: str | None = None
 
 
+@dataclass
+class LearningSignal(RowModel):
+    """一条学习信号（四失）。"""
+
+    id: int
+    training_id: int
+    item_id: int | None = None
+    signal_type: str = ""
+    raw_text: str | None = None
+    confidence: float | None = None
+    created_at: str = ""
+
+
+@dataclass
+class AdjustmentLog(RowModel):
+    """一次调整（含被冲突规则拦截的情形）。"""
+
+    id: int
+    training_id: int
+    item_id: int | None = None
+    signal_type: str | None = None
+    action: str | None = None
+    reason: str | None = None
+    detail: Any = None
+    blocked: int = 0
+    created_at: str = ""
+
+    json_fields: ClassVar[frozenset[str]] = frozenset({"detail"})
+
+
 class Element(str, Enum):
     TRAINING_GOAL = "training_goal"
     BASELINE = "baseline"

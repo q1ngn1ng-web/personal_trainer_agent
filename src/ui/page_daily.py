@@ -167,9 +167,44 @@ def _render_recall_section(
                     st.rerun()
 
 
+def _render_signal_section(training_id: int) -> None:
+    """四失一键反馈：点一下就提交，不填表。"""
+    from src.services import signal_service
+
+    st.subheader("5. 今天的感受")
+    st.caption("点一下就行。系统会据此调整难度、范围或题量——**不用你填表**。")
+
+    labels = signal_service.SIGNAL_ACTIONS
+    columns = st.columns(4)
+    for column, (code, meta) in zip(columns, labels.items()):
+        with column:
+            if st.button(
+                meta["label"],
+                key=f"dl_signal_{training_id}_{code}",
+                width="stretch",
+            ):
+                decision = signal_service.process_signal(
+                    training_id, code, raw_text="", item_status=None
+                )
+                st.session_state[f"dl_signal_msg_{training_id}"] = decision.message
+                st.rerun()
+
+    message = st.session_state.get(f"dl_signal_msg_{training_id}")
+    if message:
+        st.info(message)
+
+    recent = signal_service.list_signals(training_id)[:5]
+    if recent:
+        counts = signal_service.signal_counts(training_id)
+        summary = " · ".join(
+            f"{labels[code]['label']} {count}" for code, count in counts.items() if count
+        )
+        st.caption(f"累计反馈：{summary}")
+
+
 def _render_notes_section(training_id: int, progress: DailyProgress) -> None:
     """留言（推荐填）+ 三省（可选）。不再强制用户填写。"""
-    st.subheader("5. 给教练留言")
+    st.subheader("6. 留言（可选）")
     st.caption("今天的感受、卡住的地方、想调整的地方，随便写一句就行。**不填也能领奖励。**")
 
     note = st.text_area(
@@ -215,7 +250,7 @@ def _render_progress_section(progress: DailyProgress) -> None:
 
 
 def _render_reward_section(progress: DailyProgress, training_id: int) -> None:
-    st.subheader("6. 奖励领取")
+    st.subheader("7. 奖励领取")
     all_done = progress.total_tasks > 0 and progress.completed_count == progress.total_tasks
     if all_done:
         if st.button("🎁 领取今日奖励", key=f"dl_reward_{training_id}"):
@@ -244,6 +279,7 @@ def _render_training(training: Any) -> None:
     _render_new_section(tasks.new_items, training.id, progress)
     _render_recall_section(recall_questions, training.id)
     _render_progress_section(progress)
+    _render_signal_section(training.id)
     _render_notes_section(training.id, progress)
     _render_reward_section(progress, training.id)
 

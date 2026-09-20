@@ -215,3 +215,30 @@ CREATE TABLE IF NOT EXISTS training_items (
 CREATE INDEX IF NOT EXISTS idx_training_paths_training ON training_paths(training_id, version);
 CREATE INDEX IF NOT EXISTS idx_path_stages_path ON path_stages(path_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_training_items_stage ON training_items(stage_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS learning_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_id INTEGER,
+    signal_type TEXT NOT NULL CHECK (signal_type IN ('too_easy', 'too_hard', 'too_much', 'too_narrow')),
+    raw_text TEXT,
+    confidence REAL,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE TABLE IF NOT EXISTS adjustment_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_id INTEGER,
+    signal_type TEXT,
+    action TEXT,
+    reason TEXT,
+    detail TEXT,
+    blocked INTEGER DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_learning_signals_training ON learning_signals(training_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_adjustment_log_training ON adjustment_log(training_id, created_at);
