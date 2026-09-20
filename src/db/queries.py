@@ -11,8 +11,18 @@ from src.db.models import BaselineHistory, DailyLog, LLMCall, ReviewArchive, Tra
 from src.db.sqlite import get_connection
 
 logger = logging.getLogger("src.db.queries")
-_TRAINING_STATUSES = {"created", "active", "paused", "archived", "failed"}
+_TRAINING_STATUSES = {
+    "created",
+    "draft",
+    "pending_confirm",
+    "confirmed",
+    "active",
+    "paused",
+    "archived",
+    "failed",
+}
 _JSON_TRAINING_FIELDS = {
+    "goal_json",
     "keywords",
     "forbidden",
     "targets",
@@ -24,6 +34,9 @@ _JSON_TRAINING_FIELDS = {
 _TRAINING_FIELDS = {
     "topic",
     "status",
+    "goal_json",
+    "goal_confirmed_at",
+    "clarification_rounds",
     "keywords",
     "must_cover_count",
     "forbidden",

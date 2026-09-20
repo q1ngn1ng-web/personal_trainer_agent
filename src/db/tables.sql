@@ -1,7 +1,10 @@
 CREATE TABLE IF NOT EXISTS trainings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     topic TEXT NOT NULL,
-    status TEXT DEFAULT 'created' CHECK (status IN ('created', 'active', 'paused', 'archived', 'failed')),
+    status TEXT DEFAULT 'draft' CHECK (status IN ('created', 'draft', 'pending_confirm', 'confirmed', 'active', 'paused', 'archived', 'failed')),
+    goal_json TEXT,
+    goal_confirmed_at DATETIME,
+    clarification_rounds INTEGER DEFAULT 0,
     keywords TEXT,
     must_cover_count INTEGER DEFAULT 2,
     forbidden TEXT,
@@ -47,7 +50,7 @@ CREATE TABLE IF NOT EXISTS baseline_history (
 CREATE TABLE IF NOT EXISTS llm_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     training_id INTEGER,
-    call_purpose TEXT NOT NULL CHECK (call_purpose IN ('topic_validation', 'keyword_generation', 'baseline_q', 'baseline_scoring', 'weekly_calibration', 'md_generation', 'pretrain_checklist')),
+    call_purpose TEXT NOT NULL CHECK (call_purpose IN ('topic_validation', 'keyword_generation', 'baseline_q', 'baseline_scoring', 'weekly_calibration', 'md_generation', 'pretrain_checklist', 'goal_clarification')),
     prompt_name TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
     model TEXT NOT NULL,

@@ -42,7 +42,10 @@ class RowModel:
 class Training(RowModel):
     id: int
     topic: str
-    status: str = "created"
+    status: str = "draft"
+    goal_json: Any = None
+    goal_confirmed_at: str | None = None
+    clarification_rounds: int = 0
     keywords: Any = None
     must_cover_count: int = 2
     forbidden: Any = None
@@ -60,7 +63,16 @@ class Training(RowModel):
     last_active_at: str | None = None
 
     json_fields: ClassVar[frozenset[str]] = frozenset(
-        {"keywords", "forbidden", "targets", "review_items", "pretrain_checklist", "schedule", "materials"}
+        {
+            "goal_json",
+            "keywords",
+            "forbidden",
+            "targets",
+            "review_items",
+            "pretrain_checklist",
+            "schedule",
+            "materials",
+        }
     )
 
 

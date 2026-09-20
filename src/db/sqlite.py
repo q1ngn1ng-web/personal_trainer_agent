@@ -35,6 +35,11 @@ def init_db(db_path: str | None = None) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        from src.db.migrate import migrate
+
+        applied = migrate(conn)
+        if applied:
+            logger.info("Database migrated: %s", ", ".join(applied))
         conn.commit()
         logger.info("Database initialized: %s", _db_path(db_path))
     finally:

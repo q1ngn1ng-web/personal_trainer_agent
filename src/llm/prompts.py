@@ -133,6 +133,30 @@ PRETRAIN_CHECKLIST_PROMPT: str = """你是低基线预训练清单助手。请�
 
 PRETRAIN_CHECKLIST_PROMPT_VERSION: str = "v1.0.0"
 
+GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会用一句话描述想训练的内容，你的任务是把这句话补全成可执行的目标草案。
+
+用户描述: {description}
+已知信息: {known}
+历史追问与回答: {history}
+当前追问轮次: {rounds}
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
+
+要求:
+1. draft.content: 学习内容，保留用户原话的核心表述，不要摘要式改写
+2. draft.level: 目标等级，只能取「了解 / 会用 / 熟练 / 能讲清」之一
+3. draft.acceptance: 验收标准，必须可判定。优先给量化判据（type=quantitative，配 metric 与 target，metric 取 accuracy / volume / speed / streak）；给不出数字时用 type=qualitative，并给出可观察的 statement 与检查方式 check
+4. missing_fields: 仍然缺失或不合格的字段名列表
+5. follow_up_question: 只针对第一个缺失字段提一个问题；若没有缺失则为空字符串
+6. 若用户描述里已经提到训练周期、每周次数或每次时长，只把它保留在 content 里，不要追问，也不要输出成字段
+7. 严禁在本阶段询问训练周期、每周训练次数、每次训练时长——这些属于训练路径阶段
+
+你只能输出 JSON。
+"""
+
+GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.0.0"
+
 PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "topic_validation": (TOPIC_VALIDATION_PROMPT, TOPIC_VALIDATION_PROMPT_VERSION),
     "keyword_generation": (KEYWORD_GENERATION_PROMPT, KEYWORD_GENERATION_PROMPT_VERSION),
@@ -141,4 +165,5 @@ PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "weekly_calibration": (WEEKLY_CALIBRATION_PROMPT, WEEKLY_CALIBRATION_PROMPT_VERSION),
     "md_generation": (MD_GENERATION_PROMPT, MD_GENERATION_PROMPT_VERSION),
     "pretrain_checklist": (PRETRAIN_CHECKLIST_PROMPT, PRETRAIN_CHECKLIST_PROMPT_VERSION),
+    "goal_clarification": (GOAL_CLARIFICATION_PROMPT, GOAL_CLARIFICATION_PROMPT_VERSION),
 }

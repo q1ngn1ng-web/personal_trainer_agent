@@ -147,6 +147,48 @@ PRETRAIN_CHECKLIST_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+GOAL_CLARIFICATION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "draft": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string"},
+                "level": {"type": "string", "enum": ["了解", "会用", "熟练", "能讲清"]},
+                "acceptance": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["quantitative", "qualitative"]},
+                        "statement": {"type": "string"},
+                        "metric": {"type": "string", "enum": ["accuracy", "volume", "speed", "streak"]},
+                        "target": {"type": "number"},
+                        "unit": {"type": "string"},
+                        "check": {"type": "string"},
+                    },
+                    "required": ["type", "statement"],
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["content", "level", "acceptance"],
+            "additionalProperties": False,
+        },
+        "field_sources": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string"},
+                "level": {"type": "string"},
+                "acceptance": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+        "missing_fields": {"type": "array", "items": {"type": "string"}},
+        "follow_up_question": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["draft", "field_sources", "missing_fields", "follow_up_question", "confidence"],
+    "additionalProperties": False,
+}
+
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "topic_validation": TOPIC_VALIDATION_SCHEMA,
     "keyword_generation": KEYWORD_GENERATION_SCHEMA,
@@ -155,4 +197,5 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "weekly_calibration": WEEKLY_CALIBRATION_SCHEMA,
     "md_generation": MD_GENERATION_SCHEMA,
     "pretrain_checklist": PRETRAIN_CHECKLIST_SCHEMA,
+    "goal_clarification": GOAL_CLARIFICATION_SCHEMA,
 }

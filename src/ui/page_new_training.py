@@ -10,7 +10,7 @@ from src.services.trainer_service import TrainerCreationError, create_training
 
 _STEPS: tuple[int, ...] = (1, 2, 3, 4)
 _STEP_TITLES: dict[int, str] = {
-    1: "填写主题",
+    1: "描述与澄清目标",
     2: "确认关键词",
     3: "基线诊断",
     4: "完成",
@@ -21,6 +21,8 @@ def _init_state() -> None:
     defaults: dict[str, object] = {
         "nt_step": 1,
         "nt_topic": "",
+        "nt_clarify_session": None,
+        "nt_clarify_answer": "",
         "nt_validation": None,
         "nt_keywords": None,
         "nt_keywords_input": "",
@@ -41,6 +43,8 @@ def _reset_state() -> None:
     for key in (
         "nt_step",
         "nt_topic",
+        "nt_clarify_session",
+        "nt_clarify_answer",
         "nt_validation",
         "nt_keywords",
         "nt_keywords_input",
@@ -100,55 +104,113 @@ def _render_header(step: int) -> None:
     st.divider()
 
 
-def _render_step1() -> None:
-    _render_header(1)
-    st.subheader("📝 第 1 步：填写训练主题")
-    st.caption("主题要具体到可验证。例：「3 周内背完 GRE 核心 1500 词」。")
+def _render_draft(draft) -> None:
+    """展示目标草案。``inferred`` 字段标出「系统建议」。"""
+    from src.core.goal import GoalFieldSource
 
-    topic = st.text_input(
-        "训练主题",
-        value=st.session_state["nt_topic"],
-        placeholder="例如：用 Python asyncio 写并发爬虫",
-        key="nt_topic_input",
+    rows = [
+        ("学习内容", draft.content),
+        ("目标等级", draft.level),
+        ("验收标准", _acceptance_text(draft.acceptance)),
+    ]
+    for label, value in rows:
+        name = {"学习内容": "content", "目标等级": "level", "验收标准": "acceptance"}[label]
+        mark = " 🟡系统建议" if draft.field_sources.get(name) == GoalFieldSource.INFERRED.value else ""
+        st.markdown(f"- **{label}**：{value or '（待补充）'}{mark}")
+
+
+def _acceptance_text(value) -> str:
+    if isinstance(value, dict):
+        if value.get("type") == "quantitative":
+            return (
+                f"{value.get('statement') or ''}（口径 {value.get('metric')}，目标 {value.get('target')}）"
+            )
+        return str(value.get("statement") or value.get("check") or "")
+    return str(value or "")
+
+
+def _render_step1() -> None:
+    """第 1 步：描述学习内容 → AI 追问 → 用户确认目标。"""
+    _render_header(1)
+    st.subheader("📝 第 1 步：描述学习内容，确认训练目标")
+    st.caption(
+        "用一句话描述你想训练的内容即可，系统会追问关键信息。"
+        "训练周期与频次属于下一步「训练路径」，这里不填。"
     )
+
+    session = st.session_state.get("nt_clarify_session")
+    topic = st.text_input(
+        "学习内容",
+        value=st.session_state["nt_topic"],
+        placeholder="例如：我想学英语虚拟语气",
+        key="nt_topic_input",
+        disabled=session is not None,
+    )
+
+    if session is None:
+        if st.button("开始澄清 →", key="nt_start_clarify", type="primary", width="stretch"):
+            text = (topic or "").strip()
+            if not text:
+                st.error("请先用一句话描述你想训练的内容")
+                return
+            from src.services.goal_clarification_service import start_session
+
+            with st.spinner("正在理解你的目标..."):
+                try:
+                    session = start_session(text)
+                except Exception as exc:
+                    st.error(f"澄清失败：{exc}")
+                    return
+            st.session_state["nt_clarify_session"] = session
+            st.session_state["nt_training_id"] = session.training_id
+            st.rerun()
+        return
+
+    st.divider()
+    st.markdown(f"**已澄清 {session.rounds} 轮**")
+    _render_draft(session.draft)
+
+    for note in session.notes:
+        st.info(note)
+    if session.fallback_used:
+        st.warning("LLM 暂时不可用，已降级为表单式提问。")
+
+    if session.question and not session.can_confirm:
+        st.markdown(f"**{session.question}**")
+        answer = st.text_input("你的回答", key="nt_clarify_answer")
+        if st.button("提交回答", key="nt_answer", type="primary"):
+            from src.services.goal_clarification_service import continue_session
+
+            with st.spinner("正在更新目标..."):
+                updated = continue_session(session.training_id, answer)
+            st.session_state["nt_clarify_session"] = updated
+            st.session_state["nt_clarify_answer"] = ""
+            st.rerun()
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        validate_clicked = st.button(
-            "✅ 校验主题", key="nt_validate", type="primary", width='stretch'
-        )
+        confirm_disabled = not session.can_confirm
+        if st.button(
+            "✅ 确认目标", key="nt_confirm_goal", type="primary",
+            disabled=confirm_disabled, width="stretch",
+        ):
+            from src.services.goal_clarification_service import confirm
+
+            with st.spinner("正在保存目标快照..."):
+                training = confirm(session.training_id)
+            st.session_state["nt_topic"] = session.draft.content
+            st.session_state["nt_training_id"] = training.id
+            st.session_state["nt_step"] = 2
+            st.session_state["nt_error"] = None
+            st.rerun()
     with col2:
-        if st.button("清除", key="nt_reset_step1", width='stretch'):
+        if st.button("重新开始", key="nt_restart_clarify", width="stretch"):
+            st.session_state["nt_clarify_session"] = None
             st.session_state["nt_topic"] = ""
-            st.session_state["nt_validation"] = None
             st.rerun()
 
-    if validate_clicked:
-        topic = (topic or "").strip()
-        if not topic:
-            st.error("请先填写训练主题")
-            return
-        st.session_state["nt_topic"] = topic
-        from src.services.topic_validation import validate_topic
-        with st.spinner("正在调用 LLM 校验主题..."):
-            validation = validate_topic(topic)
-        st.session_state["nt_validation"] = validation
-
-    validation = st.session_state["nt_validation"]
-    if validation is not None:
-        if validation.is_valid:
-            st.success(f"✅ 主题通过校验：{validation.reason or 'OK'}")
-            if st.button("下一步：生成关键词白名单 →", key="nt_go_step2", type="primary"):
-                st.session_state["nt_step"] = 2
-                st.session_state["nt_error"] = None
-                st.rerun()
-        else:
-            st.error(f"❌ 主题不够具体：{validation.reason or '需要具体化'}")
-            if validation.suggestions:
-                st.markdown("**具体化建议：**")
-                for idx, suggestion in enumerate(validation.suggestions, 1):
-                    st.markdown(f"{idx}. {suggestion}")
-            st.markdown("请基于建议修改后重新提交。")
+    if not session.can_confirm and not session.question:
+        st.caption("补充上表中标记为「待补充」的字段后即可确认。")
 
 
 def _render_step2() -> None:

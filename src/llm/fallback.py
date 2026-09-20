@@ -39,10 +39,24 @@ FALLBACK_BASELINE_Q: dict[str, Any] = {
 }
 
 
+def _goal_clarification_fallback() -> dict[str, Any]:
+    """LLM 不可用时的表单式追问模板（缺哪个字段问哪个）。"""
+    return {
+        "draft": {"content": "", "level": "", "acceptance": {"type": "qualitative", "statement": ""}},
+        "field_sources": {},
+        "missing_fields": ["content", "level", "acceptance"],
+        "follow_up_question": "请补充：你想训练的具体内容是什么？希望达到什么程度？怎样才算学会？",
+        "confidence": 0.0,
+    }
+
+
 def fallback_for(purpose: str) -> dict[str, Any] | None:
     """Return a fallback response dict for the given call purpose, or None if no fallback is defined."""
     if purpose == "baseline_q":
         logger.warning("fallback_for: serving preset baseline_q fallback (LLM exhausted)")
         return FALLBACK_BASELINE_Q
+    if purpose == "goal_clarification":
+        logger.warning("fallback_for: serving form-style goal_clarification fallback (LLM exhausted)")
+        return _goal_clarification_fallback()
     logger.warning("fallback_for: no fallback defined for purpose=%s", purpose)
     return None
