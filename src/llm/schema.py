@@ -189,6 +189,58 @@ GOAL_CLARIFICATION_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+EDGE_PROBE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "questions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "knowledge_point": {"type": "string"},
+                    "heading_path": {"type": "string"},
+                    "difficulty": {"type": "integer", "minimum": 1, "maximum": 4},
+                    "question": {"type": "string"},
+                    "reference_answer": {"type": "string"},
+                },
+                "required": [
+                    "knowledge_point",
+                    "heading_path",
+                    "difficulty",
+                    "question",
+                    "reference_answer",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["questions"],
+    "additionalProperties": False,
+}
+
+EDGE_PROBE_GRADE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdicts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "knowledge_point": {"type": "string"},
+                    "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                    "reason": {"type": "string"},
+                },
+                "required": ["knowledge_point", "verdict", "reason"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["verdicts"],
+    "additionalProperties": False,
+}
+
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "topic_validation": TOPIC_VALIDATION_SCHEMA,
     "keyword_generation": KEYWORD_GENERATION_SCHEMA,
@@ -198,4 +250,6 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "md_generation": MD_GENERATION_SCHEMA,
     "pretrain_checklist": PRETRAIN_CHECKLIST_SCHEMA,
     "goal_clarification": GOAL_CLARIFICATION_SCHEMA,
+    "edge_probe": EDGE_PROBE_SCHEMA,
+    "edge_probe_grade": EDGE_PROBE_GRADE_SCHEMA,
 }

@@ -1,18 +1,21 @@
-"""Streamlit wizard that drives the new-training creation flow."""
+"""新建训练向导：描述 → 澄清目标 → 选资料来源 → 定位理解边缘 → 完成。
+
+流程依据 ADR-0018：**先有来源，再定位理解边缘**——探测题从用户导入的资料里出，
+而不是让模型凭空生成后拿关键词约束。
+"""
 from __future__ import annotations
 
 import streamlit as st
 
-from src.services.baseline_service import BaselineQuestions
-from src.services.keyword_service import KeywordResult
-from src.services.trainer_service import TrainerCreationError, create_training
+from src.services import edge_service, source_service
+from src.ui.page_sources import _render_add_forms, _render_source_list
 
 
 _STEPS: tuple[int, ...] = (1, 2, 3, 4)
 _STEP_TITLES: dict[int, str] = {
     1: "描述与澄清目标",
-    2: "确认关键词",
-    3: "基线诊断",
+    2: "选择资料来源",
+    3: "定位理解边缘",
     4: "完成",
 }
 
@@ -22,16 +25,11 @@ def _init_state() -> None:
         "nt_step": 1,
         "nt_topic": "",
         "nt_clarify_session": None,
-        "nt_validation": None,
-        "nt_keywords": None,
-        "nt_keywords_input": "",
-        "nt_forbidden_input": "",
-        "nt_must_cover_count": 2,
-        "nt_questions": None,
-        "nt_answers": ["", "", ""],
-        "nt_result": None,
         "nt_training_id": None,
         "nt_error": None,
+        "nt_probe": None,
+        "nt_probe_answers": [],
+        "nt_probe_skipped": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -43,16 +41,11 @@ def _reset_state() -> None:
         "nt_step",
         "nt_topic",
         "nt_clarify_session",
-        "nt_validation",
-        "nt_keywords",
-        "nt_keywords_input",
-        "nt_forbidden_input",
-        "nt_must_cover_count",
-        "nt_questions",
-        "nt_answers",
-        "nt_result",
         "nt_training_id",
         "nt_error",
+        "nt_probe",
+        "nt_probe_answers",
+        "nt_probe_skipped",
     ):
         st.session_state.pop(key, None)
 
@@ -75,15 +68,6 @@ def _maybe_redirect() -> bool:
         st.stop()
         return True
     return False
-
-
-def _score_label(score: str) -> str:
-    return {
-        "mastered": "✅掌握",
-        "partial": "⚠️半掌握",
-        "missing": "❌缺失",
-        "": "☐ 未判定",
-    }.get(score, "☐ 未判定")
 
 
 def _render_header(step: int) -> None:
@@ -216,231 +200,175 @@ def _render_step1() -> None:
 
 
 def _render_step2() -> None:
+    """第 2 步：选择训练资料来源（至少一份才能继续）。"""
     _render_header(2)
-    st.subheader("🔑 第 2 步：关键词白名单确认")
-    st.caption("每道基线诊断题至少覆盖 must_cover_count 个关键词；forbidden 中的词不会出现在题目里。")
+    st.subheader("📚 第 2 步：选择训练资料来源")
+    st.caption("训练内容从你的资料里来，不是模型凭空编的。至少添加一份资料才能继续。")
 
-    if st.session_state["nt_keywords"] is None:
-        from src.services.keyword_service import generate_keywords
-        try:
-            with st.spinner("正在生成关键词白名单..."):
-                kw = generate_keywords(st.session_state["nt_topic"])
-        except Exception as exc:
-            st.error(f"关键词生成失败：{exc}")
-            if st.button("← 返回", key="nt_step2_back_fail", width='stretch'):
-                st.session_state["nt_step"] = 1
-                st.rerun()
-            return
-        st.session_state["nt_keywords"] = kw
-        st.session_state["nt_keywords_input"] = "\n".join(kw.keywords)
-        st.session_state["nt_forbidden_input"] = "\n".join(kw.forbidden)
-        st.session_state["nt_must_cover_count"] = kw.must_cover_count
-        st.rerun()
-
-    kw: KeywordResult = st.session_state["nt_keywords"]
-    st.info(f"已生成 {len(kw.keywords)} 个关键词，必覆盖数 {kw.must_cover_count}，禁止词 {len(kw.forbidden)} 个。")
-
-    new_keywords_text = st.text_area(
-        "关键词（每行一个，可编辑）",
-        value=st.session_state.get("nt_keywords_input", "\n".join(kw.keywords)),
-        height=200,
-        key="nt_keywords_input_widget",
-    )
-    new_forbidden_text = st.text_area(
-        "禁止词（每行一个，可留空）",
-        value=st.session_state.get("nt_forbidden_input", "\n".join(kw.forbidden)),
-        height=100,
-        key="nt_forbidden_input_widget",
-    )
-    new_must = st.number_input(
-        "每道题必须覆盖的关键词数",
-        min_value=1,
-        max_value=5,
-        value=int(st.session_state.get("nt_must_cover_count", kw.must_cover_count)),
-        step=1,
-        key="nt_must_widget",
-    )
-
-    st.session_state["nt_keywords_input"] = new_keywords_text
-    st.session_state["nt_forbidden_input"] = new_forbidden_text
-    st.session_state["nt_must_cover_count"] = new_must
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("← 返回", key="nt_step2_back", width='stretch'):
+    training_id = st.session_state.get("nt_training_id")
+    if not training_id:
+        st.error("没有找到当前训练，请返回第一步重新开始。")
+        if st.button("← 返回", key="nt_step2_noid_back"):
             st.session_state["nt_step"] = 1
-            st.rerun()
-    with col2:
-        confirm = st.button(
-            "下一步：生成基线诊断题 →", key="nt_go_step3", type="primary", width='stretch'
-        )
-
-    if confirm:
-        parsed_keywords = [
-            line.strip() for line in (new_keywords_text or "").splitlines() if line.strip()
-        ]
-        parsed_forbidden = [
-            line.strip() for line in (new_forbidden_text or "").splitlines() if line.strip()
-        ]
-        if not parsed_keywords:
-            st.error("至少需要一个关键词。")
-            return
-        updated = KeywordResult(
-            keywords=parsed_keywords,
-            must_cover_count=int(new_must),
-            forbidden=parsed_forbidden,
-            raw=kw.raw,
-        )
-        st.session_state["nt_keywords"] = updated
-        st.session_state["nt_answers"] = ["", "", ""]
-        st.session_state["nt_questions"] = None
-        st.session_state["nt_step"] = 3
-        st.rerun()
-
-
-def _ensure_questions() -> BaselineQuestions | None:
-    cached = st.session_state.get("nt_questions")
-    if cached is not None:
-        return cached
-    from src.services.baseline_service import generate_baseline_questions
-    kw: KeywordResult = st.session_state["nt_keywords"]
-    with st.spinner("正在生成基线诊断题..."):
-        questions = generate_baseline_questions(
-            topic=st.session_state["nt_topic"],
-            keywords=kw.keywords,
-            must_cover_count=kw.must_cover_count,
-            forbidden=kw.forbidden,
-        )
-    st.session_state["nt_questions"] = questions
-    return questions
-
-
-def _render_step3() -> None:
-    _render_header(3)
-    st.subheader("🎯 第 3 步：基线诊断（3 道题）")
-    st.caption("不查资料，30 秒内作答。LLM 会判定每题掌握度并给出基线档位（高/中/低）。")
-
-    questions = _ensure_questions()
-    if questions is None:
-        st.error("基线题生成失败，请返回上一步。")
-        if st.button("← 返回", key="nt_step3_back_fail"):
-            st.session_state["nt_step"] = 2
             st.rerun()
         return
 
-    if questions.fallback_used:
-        st.warning("⚠️ LLM 生成失败，已使用预置基线诊断题。")
+    training_id = int(training_id)
+    _render_source_list(training_id)
 
-    answers: list[str] = list(st.session_state["nt_answers"])
-    if len(answers) != len(questions.questions):
-        answers = [""] * len(questions.questions)
+    st.markdown("### 添加资料")
+    _render_add_forms(training_id)
 
-    for idx, question in enumerate(questions.questions):
-        st.markdown(f"**Q{idx + 1}** · 维度：{question.dimension} · 难度：{'⭐' * max(1, min(3, question.difficulty))}")
-        st.markdown(f"> {question.question}")
-        st.caption(f"参考答案：{question.reference_answer}")
-        answers[idx] = st.text_area(
-            f"你的答案 Q{idx + 1}",
-            value=answers[idx],
-            key=f"nt_answer_{idx}",
-            height=120,
-            placeholder="不查资料，凭直觉作答",
+    sources = source_service.list_sources(training_id)
+    usable = [source for source in sources if source.parse_status == "ok"]
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("← 返回", key="nt_step2_back", width="stretch"):
+            st.session_state["nt_step"] = 1
+            st.rerun()
+    with col2:
+        if st.button(
+            "下一步：定位理解边缘 →",
+            key="nt_step2_next",
+            type="primary",
+            width="stretch",
+            disabled=not usable,
+        ):
+            st.session_state["nt_probe"] = None
+            st.session_state["nt_step"] = 3
+            st.rerun()
+    if not usable:
+        st.caption("添加并解析成功至少一份资料后，才能进入下一步。")
+
+
+def _render_step3() -> None:
+    """第 3 步：从资料里出题，定位理解边缘。"""
+    _render_header(3)
+    st.subheader("🎯 第 3 步：定位理解边缘")
+    st.caption(
+        "题目只从你刚导入的资料里出。答完会分成三类："
+        "**已掌握**（跳过）、**边缘**（教学重点）、**未达**（先做前置铺垫）。"
+    )
+
+    training_id = int(st.session_state["nt_training_id"])
+    probe = st.session_state.get("nt_probe")
+
+    if probe is None:
+        if st.button("开始探测", key="nt_probe_start", type="primary", width="stretch"):
+            with st.spinner("正在从资料里出题..."):
+                try:
+                    probe = edge_service.generate_probe_items(
+                        training_id, topic=st.session_state["nt_topic"]
+                    )
+                except Exception as exc:
+                    st.error(f"出题失败：{exc}")
+                    return
+            st.session_state["nt_probe"] = probe
+            st.session_state["nt_probe_answers"] = [""] * len(probe.items)
+            st.rerun()
+        if st.button("跳过探测（按中位难度起步）", key="nt_probe_skip"):
+            st.session_state["nt_probe_skipped"] = True
+            st.session_state["nt_step"] = 4
+            st.rerun()
+        return
+
+    answers: list[str] = list(st.session_state.get("nt_probe_answers") or [])
+    if len(answers) != len(probe.items):
+        answers = [""] * len(probe.items)
+
+    if probe.fallback_used:
+        st.warning("模型出题失败，已退回按知识点生成的朴素问法。")
+
+    for index, item in enumerate(probe.items):
+        st.markdown(
+            f"**Q{index + 1}** · {item.knowledge_point} · 难度 {'⭐' * max(1, min(4, item.difficulty))}"
         )
-
-    st.session_state["nt_answers"] = answers
+        st.markdown(f"> {item.question}")
+        answers[index] = st.text_area(
+            f"你的答案 Q{index + 1}",
+            value=answers[index],
+            key=f"nt_probe_answer_{index}",
+            height=100,
+            placeholder="不查资料，凭理解作答；不会就写「不会」",
+        )
+    st.session_state["nt_probe_answers"] = answers
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("← 返回", key="nt_step3_back", width='stretch'):
+        if st.button("← 返回", key="nt_step3_back", width="stretch"):
+            st.session_state["nt_probe"] = None
             st.session_state["nt_step"] = 2
             st.rerun()
     with col2:
-        submit = st.button(
-            "提交诊断并生成训练 →", key="nt_submit", type="primary", width='stretch'
-        )
+        submit = st.button("提交并判定 →", key="nt_probe_submit", type="primary", width="stretch")
 
     if submit:
-        if not all((a or "").strip() for a in answers):
-            st.error("请完成 3 道题的作答后再提交。")
-            return
-        try:
-            with st.spinner("正在评分基线 + 生成 10 份训练文件 + 写库..."):
-                training = create_training(
-                    topic=st.session_state["nt_topic"],
-                    baseline_answers=answers,
-                )
-        except TrainerCreationError as exc:
-            st.session_state["nt_error"] = exc
-            st.error(f"创建失败（{exc.step}）：{exc.original}")
-            return
-        except Exception as exc:
-            st.session_state["nt_error"] = exc
-            st.error(f"创建失败：{exc}")
-            return
-        st.session_state["nt_result"] = training
-        st.session_state["nt_training_id"] = training.id
+        for index, item in enumerate(probe.items):
+            item.answer = answers[index]
+        with st.spinner("正在评定..."):
+            graded = edge_service.grade_probe(
+                training_id, probe.items, topic=st.session_state["nt_topic"]
+            )
+            edge_service.save_probe(graded)
+        st.session_state["nt_probe"] = graded
+        st.session_state["nt_probe_skipped"] = False
         st.session_state["nt_step"] = 4
         st.rerun()
 
 
 def _render_step4() -> None:
+    """第 4 步：展示探测结果并把训练推进到可训练状态。"""
     _render_header(4)
-    st.subheader("🎉 训练创建成功")
+    st.subheader("🎉 训练已就绪")
 
-    training = st.session_state["nt_result"]
-    if training is None:
-        st.warning("未找到训练结果，请重试。")
-        if st.button("← 重新创建", key="nt_step4_restart_empty"):
-            _reset_state()
-            st.rerun()
-        return
+    training_id = int(st.session_state["nt_training_id"])
+    from src.core.goal import assert_transition
+    from src.db import queries
 
-    progress = st.progress(min(1.0, max(0.0, (training.baseline_score or 0.0) / 5.0)))
-    cols = st.columns(3)
-    level_value = (
-        training.baseline_level.value
-        if hasattr(training.baseline_level, "value")
-        else str(training.baseline_level)
-    )
-    cols[0].metric("基线档位", level_value)
-    cols[1].metric("基线评分", f"{training.baseline_score}/5")
-    cols[2].metric("补强项数", len(training.review_items or []))
+    probe = st.session_state.get("nt_probe")
+    skipped = bool(st.session_state.get("nt_probe_skipped"))
 
-    if training.review_items:
-        st.markdown("**补强复习项（partial_topics）：**")
-        for item in training.review_items:
-            st.markdown(f"- {item}")
+    if skipped:
+        st.info("你跳过了探测：训练项会按中位难度起步，并在训练中用实际表现快速修正。")
+    elif probe is not None:
+        counts = probe.state_counts()
+        cols = st.columns(3)
+        cols[0].metric("已掌握（跳过）", counts["mastered"])
+        cols[1].metric("边缘（教学重点）", counts["edge"])
+        cols[2].metric("未达（先铺垫）", counts["unreached"])
 
-    if training.pretrain_checklist:
-        st.markdown("**预训练清单（基线低）：**")
-        for entry in training.pretrain_checklist:
-            concept = entry.get("concept", "")
-            materials = entry.get("materials") or []
-            materials_text = "、".join(materials) if materials else "（无推荐资料）"
-            st.markdown(f"- **{concept}** — {materials_text}")
+        st.markdown("**逐个知识点**")
+        for item in probe.items:
+            label = edge_service.PROBE_STATE_LABELS.get(item.state or "", item.state or "")
+            st.markdown(f"- {item.knowledge_point}：{label}")
+            if item.reason:
+                st.caption(f"　{item.reason}")
 
-    st.markdown("**训练文件目录：**")
-    st.code(str(training.directory))
-
-    st.markdown(
-        f"**训练 ID：`{training.id}`** · "
-        f"**状态：** `{training.status.value if hasattr(training.status, 'value') else training.status}`"
-    )
+    training = queries.get_training(training_id)
+    if training is not None and training.status == "confirmed":
+        try:
+            assert_transition(training.status, "active")
+            queries.set_training_status(training_id, "active")
+            st.success("训练已激活，可以开始今天的训练了。")
+        except Exception as exc:  # 状态异常不应阻塞用户看到结果
+            st.warning(f"激活训练时出错：{exc}")
+    elif training is not None:
+        st.caption(f"当前训练状态：`{training.status}`")
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button(
-            "查看训练详情 →",
-            key="nt_goto_training_detail",
-            type="primary",
-            width='stretch',
-        ):
-            st.query_params["page"] = "detail"
-            st.query_params["training_id"] = str(training.id)
+        if st.button("📅 去今日任务卡", key="nt_step4_daily", type="primary", width="stretch"):
+            for key in list(st.query_params.keys()):
+                del st.query_params[key]
+            st.query_params["page"] = "daily"
+            st.query_params["training_id"] = str(training_id)
             st.rerun()
     with col2:
-        if st.button("再创建一个训练", key="nt_create_another", width='stretch'):
-            _reset_state()
+        if st.button("📚 查看资料", key="nt_step4_sources", width="stretch"):
+            for key in list(st.query_params.keys()):
+                del st.query_params[key]
+            st.query_params["page"] = "sources"
+            st.query_params["training_id"] = str(training_id)
             st.rerun()
 
 

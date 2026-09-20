@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS baseline_history (
 CREATE TABLE IF NOT EXISTS llm_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     training_id INTEGER,
-    call_purpose TEXT NOT NULL CHECK (call_purpose IN ('topic_validation', 'keyword_generation', 'baseline_q', 'baseline_scoring', 'weekly_calibration', 'md_generation', 'pretrain_checklist', 'goal_clarification')),
+    call_purpose TEXT NOT NULL,
     prompt_name TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -145,11 +145,27 @@ CREATE TRIGGER IF NOT EXISTS source_chunks_au AFTER UPDATE ON source_chunks BEGI
     VALUES (new.id, new.text, new.heading_path);
 END;
 
+CREATE TABLE IF NOT EXISTS edge_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    knowledge_point TEXT NOT NULL,
+    heading_path TEXT,
+    difficulty INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    reference_answer TEXT,
+    answer TEXT,
+    verdict TEXT CHECK (verdict IS NULL OR verdict IN ('pass', 'fail', 'unknown')),
+    state TEXT CHECK (state IS NULL OR state IN ('mastered', 'edge', 'unreached')),
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_trainings_last_active_at ON trainings(last_active_at);
 CREATE INDEX IF NOT EXISTS idx_daily_logs_training_date ON daily_logs(training_id, log_date);
 CREATE INDEX IF NOT EXISTS idx_baseline_history_training ON baseline_history(training_id, recorded_at);
-CREATE INDEX IF NOT EXISTS idx_llm_calls_purpose ON llm_calls(call_purpose);
+CREATE INDEX IF NOT EXISTS yidx_llm_calls_purpose ON llm_calls(call_purpose);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_prompt_version ON llm_calls(prompt_name, prompt_version);
 CREATE INDEX IF NOT EXISTS idx_review_archives_training_week ON review_archives(training_id, week_start);
 CREATE INDEX IF NOT EXISTS idx_sources_training ON sources(training_id);
 CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_edge_assessments_training ON edge_assessments(training_id, knowledge_point);

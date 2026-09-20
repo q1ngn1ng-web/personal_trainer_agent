@@ -184,6 +184,23 @@ class SourceChunk(RowModel):
     char_count: int
 
 
+@dataclass
+class EdgeAssessment(RowModel):
+    """理解边缘探测的一条结果（一个知识点一题）。"""
+
+    id: int
+    training_id: int
+    knowledge_point: str
+    heading_path: str | None = None
+    difficulty: int = 1
+    question: str = ""
+    reference_answer: str | None = None
+    answer: str | None = None
+    verdict: str | None = None
+    state: str | None = None
+    created_at: str = ""
+
+
 class Element(str, Enum):
     TRAINING_GOAL = "training_goal"
     BASELINE = "baseline"

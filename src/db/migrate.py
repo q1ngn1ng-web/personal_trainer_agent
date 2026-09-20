@@ -48,7 +48,7 @@ _LLM_CALLS_DDL = """
 CREATE TABLE llm_calls_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     training_id INTEGER,
-    call_purpose TEXT NOT NULL CHECK (call_purpose IN ('topic_validation', 'keyword_generation', 'baseline_q', 'baseline_scoring', 'weekly_calibration', 'md_generation', 'pretrain_checklist', 'goal_clarification')),
+    call_purpose TEXT NOT NULL,
     prompt_name TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -165,7 +165,8 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     columns = _column_names(conn, "trainings")
     needs_trainings = bool(columns) and "goal_json" not in columns
     llm_sql = _table_sql(conn, "llm_calls")
-    needs_llm_calls = bool(llm_sql) and "goal_clarification" not in llm_sql
+    # 去掉 call_purpose 的 CHECK：用途列表是应用层知识，每加一个用途就重建一次表不值得
+    needs_llm_calls = bool(llm_sql) and "call_purpose TEXT NOT NULL CHECK" in llm_sql
 
     source_columns = _column_names(conn, "sources")
     needs_sources = bool(source_columns) and "enabled" not in source_columns

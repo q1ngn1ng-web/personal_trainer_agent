@@ -157,6 +157,48 @@ GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会�
 
 GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.0.0"
 
+EDGE_PROBE_PROMPT: str = """你是学习诊断出题助手。用户已经确认了训练目标，并导入了自己的资料来源。
+请**只根据给定的来源内容**出题，用于判断用户对每个知识点的掌握处于哪一档，不要考资料之外的东西。
+
+训练目标: {topic}
+已确认的目的: {goal}
+知识点与来源片段:
+{knowledge_points}
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
+
+要求:
+1. 每个知识点出一道题，knowledge_point 与输入里的名称一致
+2. difficulty 取 1-4：1 单点记忆 / 2 单点应用 / 3 多知识点组合 / 4 跨章节综合
+3. question 必须能用来源里的内容判定对错，不要问开放式的感想
+4. reference_answer 写清判分要点，供后续判定使用
+
+你只能输出 JSON。
+"""
+
+EDGE_PROBE_PROMPT_VERSION: str = "v1.0.0"
+
+EDGE_PROBE_GRADE_PROMPT: str = """你是答案评定助手。请判断用户的作答是否达到参考要点。
+
+训练目标: {topic}
+待评定的作答:
+{items}
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
+
+要求:
+1. 逐条给出 verdict：pass（要点基本齐全）或 fail（缺失关键要点）
+2. knowledge_point 必须与输入一致
+3. reason 用一句话说明判定依据
+4. 不要宽容：漏掉关键要点即 fail
+
+你只能输出 JSON。
+"""
+
+EDGE_PROBE_GRADE_PROMPT_VERSION: str = "v1.0.0"
+
 PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "topic_validation": (TOPIC_VALIDATION_PROMPT, TOPIC_VALIDATION_PROMPT_VERSION),
     "keyword_generation": (KEYWORD_GENERATION_PROMPT, KEYWORD_GENERATION_PROMPT_VERSION),
@@ -166,4 +208,6 @@ PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "md_generation": (MD_GENERATION_PROMPT, MD_GENERATION_PROMPT_VERSION),
     "pretrain_checklist": (PRETRAIN_CHECKLIST_PROMPT, PRETRAIN_CHECKLIST_PROMPT_VERSION),
     "goal_clarification": (GOAL_CLARIFICATION_PROMPT, GOAL_CLARIFICATION_PROMPT_VERSION),
+    "edge_probe": (EDGE_PROBE_PROMPT, EDGE_PROBE_PROMPT_VERSION),
+    "edge_probe_grade": (EDGE_PROBE_GRADE_PROMPT, EDGE_PROBE_GRADE_PROMPT_VERSION),
 }
