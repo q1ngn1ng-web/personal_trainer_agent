@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from src.core.plan import item_key_for
 from src.db.models import PathStage, TrainingItem, TrainingPath
 from src.db.sqlite import get_connection
 from src.llm.client import complete
@@ -388,13 +389,14 @@ def save_skeleton(
             stage_id = int(stage_cursor.lastrowid)
             for item_index, item in enumerate(stage.items, start=1):
                 active.execute(
-                    "INSERT INTO training_items (stage_id, ordinal, title, item_type, difficulty_tier, "
-                    "difficulty_basis, knowledge_point, source_chunk_ids, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+                    "INSERT INTO training_items (stage_id, ordinal, title, item_key, item_type, "
+                    "difficulty_tier, difficulty_basis, knowledge_point, source_chunk_ids, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
                     (
                         stage_id,
                         item_index,
                         item.title,
+                        item_key_for(skeleton.training_id, item.knowledge_point, item.title),
                         item.item_type,
                         item.difficulty,
                         json.dumps(item.difficulty_basis, ensure_ascii=False),
@@ -585,7 +587,7 @@ def mark_item(
     item_id: int, status: str, conn: sqlite3.Connection | None = None
 ) -> TrainingItem | None:
     """更新训练项状态（勾选任务卡时调用）。"""
-    if status not in ("pending", "in_progress", "passed", "failed"):
+    if status not in ("pending", "in_progress", "practiced", "passed", "failed"):
         raise ValueError(f"invalid item status: {status}")
     active = _connect(conn)
     own = conn is None

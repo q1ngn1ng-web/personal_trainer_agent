@@ -73,6 +73,41 @@ def _render_hero() -> None:
         st.caption("主题校验、关键词白名单、基线题、周复盘校准，全部可追溯")
 
 
+def _render_today_plan() -> None:
+    """首页「今日训练」：跨训练聚合当天的计划项（ADR-0021 / progress-dashboard）。
+
+    只读：所有写操作（勾选）都发生在今日任务卡里。
+    """
+    from src.db.queries import list_trainings
+    from src.services import plan_service
+
+    st.subheader("📌 今日训练")
+    summary = plan_service.today_summary()
+    if not summary["count"]:
+        upcoming: list[tuple[date, str]] = []
+        for training in list_trainings():
+            next_due = plan_service.next_due_date(int(training.id))
+            if next_due is not None:
+                upcoming.append((next_due, str(training.topic or "未命名")))
+        if upcoming:
+            next_due, topic = min(upcoming, key=lambda pair: pair[0])
+            st.info(f"今天是休息日。下一次训练：{next_due.isoformat()}（{topic}）")
+        else:
+            st.info("今天没有训练任务。确认训练路径后会自动生成 5 轮计划。")
+        return
+
+    st.caption(f"共 {summary['count']} 项 · 预计 {summary['minutes']} 分钟")
+    for group in summary["groups"]:
+        st.markdown(
+            f"- **{group['topic'] or '未命名'}** · {group['count']} 项 · 约 {group['minutes']} 分钟"
+        )
+    if st.button("进入今日任务卡", key="home_today_enter", type="primary"):
+        for key in list(st.query_params.keys()):
+            del st.query_params[key]
+        st.query_params["page"] = "daily"
+        st.rerun()
+
+
 def _render_metrics(dashboard: HomeDashboard) -> None:
     cols = st.columns(3)
     cols[0].metric("训练主题数", dashboard.total_all)
@@ -222,6 +257,9 @@ def _render_delete_panel(dashboard: HomeDashboard) -> None:
 def render() -> None:
     """Render the home page."""
     _render_hero()
+    st.divider()
+
+    _render_today_plan()
     st.divider()
 
     dashboard = compute_home_dashboard()

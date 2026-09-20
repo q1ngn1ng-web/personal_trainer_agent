@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from src.core.plan import item_key_for
+
 logger = logging.getLogger("src.db.migrate")
 
 _TRAININGS_DDL = """
@@ -99,6 +101,24 @@ _SOURCES_COLUMNS = (
     "scope, checksum, parse_status, parse_error, imported_at"
 )
 
+_TRAINING_ITEMS_DDL = """
+CREATE TABLE training_items_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stage_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    item_key TEXT,
+    item_type TEXT CHECK (item_type IN ('memory', 'comprehension', 'practice', 'prerequisite')),
+    difficulty_tier INTEGER,
+    difficulty_basis TEXT,
+    knowledge_point TEXT,
+    source_chunk_ids TEXT,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'practiced', 'passed', 'failed')),
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (stage_id) REFERENCES path_stages(id)
+)
+"""
+
 
 def _table_sql(conn: sqlite3.Connection, table: str) -> str:
     row = conn.execute(
@@ -158,6 +178,57 @@ def _rebuild_sources(conn: sqlite3.Connection) -> None:
     logger.info("migrate: rebuilt sources (added enabled flag)")
 
 
+def _rebuild_training_items(conn: sqlite3.Connection) -> None:
+    """给训练项补上稳定题目键 ``item_key`` 与 ``practiced`` 状态。
+
+    ``item_key`` 是题库与计划表引用的目标（见 change ``training-plan-and-daily-view`` 的 design D7）：
+    训练项自身的主键在路径重生成时会变，因此必须有跨重生成稳定的键。
+    """
+    rows = conn.execute(
+        """
+        SELECT i.id, i.stage_id, i.ordinal, i.title, i.item_type, i.difficulty_tier,
+               i.difficulty_basis, i.knowledge_point, i.source_chunk_ids, i.status, i.created_at,
+               tp.training_id AS training_id
+        FROM training_items i
+        JOIN path_stages s ON s.id = i.stage_id
+        JOIN training_paths tp ON tp.id = s.path_id
+        """
+    ).fetchall()
+
+    payload = [
+        (
+            row["id"],
+            row["stage_id"],
+            row["ordinal"],
+            row["title"],
+            item_key_for(int(row["training_id"]), row["knowledge_point"], row["title"]),
+            row["item_type"],
+            row["difficulty_tier"],
+            row["difficulty_basis"],
+            row["knowledge_point"],
+            row["source_chunk_ids"],
+            row["status"],
+            row["created_at"],
+        )
+        for row in rows
+    ]
+
+    conn.execute("ALTER TABLE training_items RENAME TO training_items_old")
+    conn.execute(_TRAINING_ITEMS_DDL)
+    conn.executemany(
+        "INSERT INTO training_items_new (id, stage_id, ordinal, title, item_key, item_type, "
+        "difficulty_tier, difficulty_basis, knowledge_point, source_chunk_ids, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        payload,
+    )
+    conn.execute("DROP TABLE training_items_old")
+    conn.execute("ALTER TABLE training_items_new RENAME TO training_items")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_training_items_stage ON training_items(stage_id, ordinal)"
+    )
+    logger.info("migrate: rebuilt training_items (item_key + practiced status)")
+
+
 def migrate(conn: sqlite3.Connection) -> list[str]:
     """对既有数据库执行迁移，返回执行过的迁移名列表。"""
     applied: list[str] = []
@@ -171,7 +242,13 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     source_columns = _column_names(conn, "sources")
     needs_sources = bool(source_columns) and "enabled" not in source_columns
 
-    if not (needs_trainings or needs_llm_calls or needs_sources):
+    item_columns = _column_names(conn, "training_items")
+    item_sql = _table_sql(conn, "training_items")
+    needs_items = bool(item_columns) and (
+        "item_key" not in item_columns or "'practiced'" not in item_sql
+    )
+
+    if not (needs_trainings or needs_llm_calls or needs_sources or needs_items):
         return applied
 
     # 两处必须处理：
@@ -197,6 +274,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_sources:
                 _rebuild_sources(conn)
                 applied.append("sources:enabled_flag")
+            if needs_items:
+                _rebuild_training_items(conn)
+                applied.append("training_items:item_key")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

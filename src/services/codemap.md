@@ -14,7 +14,7 @@
 
 - **分层清晰**：
   - 编排层：`trainer_service`（新建）、`review_service`（周复盘）。
-  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
+  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`plan_service` / `schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
   - 共享基础：每个 LLM 子服务都遵循同一套 `complete → 解析 output_json → record_llm_call` 三段式套路，便于排查。
 - **鲁棒性策略统一**：
   - **失败兜底**：LLM 服务一旦调用失败/回退，会写一条 `validation_result="fail"`、`fallback_used=1` 的审计记录，然后回退到 `fallback_for(...)` 或启发式算法。
@@ -143,6 +143,9 @@ UI 在"今日训练"页面按以下顺序读取：
 **注意**：`_consecutive_days` 与 `metrics_calculator._consecutive_completed` 实现相似但窗口不同（30 天 vs 全部），是两套并存实现。
 
 ### 5. `schedule_service.py` — 间隔复习任务抽取
+
+> ⚠️ 2026-09-20 起，新链路（已有训练路径的训练）由 `plan_service` 接手；
+> `schedule_service` 的 `trainings.schedule.units` 分支只服务老训练，属 legacy。
 
 **职责**：把 `training.schedule.units` 解析成"今日复习项 + 新内容项"。
 **入口**：`extract_today_tasks(training_id, today) -> TodayTasks`、`interval_for_index(idx)`、`next_review_date(last_reviewed, idx)`。

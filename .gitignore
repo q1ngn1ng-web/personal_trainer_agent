@@ -18,6 +18,8 @@ env/
 
 # 训练数据（不提交）
 data/trainer.db
+data/trainer.db-wal
+data/trainer.db-shm
 data/test_*.db
 data/test_*.db-*
 training_*/

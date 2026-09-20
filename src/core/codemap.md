@@ -8,6 +8,7 @@
 - `baseline.py`：基线分数、等级换算与历史记录选择。
 - `training.py`：一次训练的核心状态模型及时间相关判断。
 - `content_dim.py`：训练内容维度与按比例分配算法。
+- `plan.py`：训练排期与题库口径（固定 5 轮、冷却期、稳定题目键、本地日期）。
 
 该目录当前是轻量领域层：以枚举、数据类和纯函数表达业务概念与规则，不直接进行数据库访问、文件读写、网络调用或界面渲染。
 
@@ -262,3 +263,20 @@ Training
 - 训练状态迁移编排。
 - 基线历史与 `Training` 当前基线摘要的同步。
 - 根据 `Element.file_prefix` 执行实际文件或目录操作。
+
+---
+
+### `plan.py`：训练排期与题库口径（ADR-0021，2026-09-20 新增）
+
+纯函数，不依赖数据库与 LLM。它是"哪一天练什么"的规则层——排期、冷却期、日期口径都在这里定义。
+
+| 符号 | 作用 |
+|---|---|
+| `ROUND_OFFSETS = (1, 3, 7, 15, 30)` | 整条路径固定 5 轮，锚点是训练创建日 |
+| `round_due_dates(anchor)` | `{轮次: 到期日}` |
+| `quiz_due_dates(anchor, until)` | 每 14 天一次测验（与 5 轮同锚点） |
+| `cooldown_until(practiced_on)` | 题库冷却期 = 练过日 + 14 天（ADR-0016：测验排除刚练过的原题） |
+| `item_key_for(training_id, 知识点, 标题)` | **稳定题目键**（sha1 前 12 位）。计划表与题库引用它，而不是会随路径重生成变化的 `training_items.id` |
+| `local_today()` / `parse_local_date()` | 统一"今天"的口径（默认 `Asia/Shanghai`，可用 `TRAINER_TZ` 覆盖） |
+| `select_today_slots(slots, today)` | 当日取数：`due_date <= 今天` 且未完成，**每个题目只取最早未完成的那一轮**（"累计到下一天"的实现口径） |
+| `total_minutes(tasks)` | 当日预计总时长（用于超限提示） |

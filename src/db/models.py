@@ -209,6 +209,7 @@ class TrainingItem(RowModel):
     stage_id: int
     ordinal: int
     title: str
+    item_key: str | None = None
     item_type: str | None = None
     difficulty_tier: int | None = None
     difficulty_basis: Any = None

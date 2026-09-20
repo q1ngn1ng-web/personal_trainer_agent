@@ -72,6 +72,18 @@ SCHEDULE / RECALL_PRACTICE / THREE_REFLECTIONS / REWARD / WEEKLY_REVIEW
 
 `DailyLogTask` 是 schema 中存在但当前 `queries.py` **未提供** CRUD 的表（潜在扩展点）。
 
+### 2.2.1 本轮新增的表与列（ADR-0021，2026-09-20）
+
+| 对象 | 说明 |
+|---|---|
+| `plan_items` | 训练计划：`(到期日, 训练, 题目, 轮次)` 一条计划项。`UNIQUE(training_id, item_key, round_index)`；`kind ∈ {train, assessment}`；`status ∈ {planned, practiced, skipped}` |
+| `question_bank` | 测验题库：练过的题入池，`cooldown_until` = 练过日 + 14 天（冷却期内的题不得被抽中，ADR-0016） |
+| `training_items.item_key` | **稳定题目键**（`sha1(training_id + 知识点 + 规范化标题)[:12]`）。`plan_items` 与 `question_bank` 引用它，而不是会随路径重生成变化的 `id` |
+| `training_items.status` 新增 `practiced` | "练过"（勾选写入）；`passed` 收窄为"达标"，只由达标判定写入 |
+
+迁移由 `migrate._rebuild_training_items` 负责：重建表 + 回填 `item_key`，走迁移三件套
+（`isolation_level=None` + `foreign_keys=OFF` + `legacy_alter_table=ON` + 显式事务），迁移后自检 `foreign_key_check`。
+
 ### 2.3 查询（`queries.py`）
 
 **私有工具函数 / 常量**：

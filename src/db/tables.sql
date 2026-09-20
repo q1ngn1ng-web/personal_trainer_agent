@@ -202,12 +202,13 @@ CREATE TABLE IF NOT EXISTS training_items (
     stage_id INTEGER NOT NULL,
     ordinal INTEGER NOT NULL,
     title TEXT NOT NULL,
+    item_key TEXT,
     item_type TEXT CHECK (item_type IN ('memory', 'comprehension', 'practice', 'prerequisite')),
     difficulty_tier INTEGER,
     difficulty_basis TEXT,
     knowledge_point TEXT,
     source_chunk_ids TEXT,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'passed', 'failed')),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'practiced', 'passed', 'failed')),
     created_at DATETIME NOT NULL,
     FOREIGN KEY (stage_id) REFERENCES path_stages(id)
 );
@@ -215,6 +216,51 @@ CREATE TABLE IF NOT EXISTS training_items (
 CREATE INDEX IF NOT EXISTS idx_training_paths_training ON training_paths(training_id, version);
 CREATE INDEX IF NOT EXISTS idx_path_stages_path ON path_stages(path_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_training_items_stage ON training_items(stage_id, ordinal);
+
+-- 训练计划：以「到期日 × 训练 × 题目 × 轮次」为一条计划项（ADR-0021）
+-- item_key 是稳定题目键，不用训练项的自增主键——路径重生成会换 id（见 design D7）
+CREATE TABLE IF NOT EXISTS plan_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    round_index INTEGER NOT NULL,
+    kind TEXT DEFAULT 'train' CHECK (kind IN ('train', 'assessment')),
+    due_date TEXT NOT NULL,
+    anchor_date TEXT NOT NULL,
+    original_date TEXT NOT NULL,
+    status TEXT DEFAULT 'planned' CHECK (status IN ('planned', 'practiced', 'skipped')),
+    planned_minutes INTEGER DEFAULT 0,
+    practiced_at DATETIME,
+    reason TEXT,
+    created_at DATETIME NOT NULL,
+    UNIQUE (training_id, item_key, round_index),
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_items_due ON plan_items(training_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_plan_items_status ON plan_items(status, due_date);
+
+-- 测验题库：练过的题在这里登记，冷却期过后才可被抽题（ADR-0016）
+CREATE TABLE IF NOT EXISTS question_bank (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    source_chunk_ids TEXT,
+    knowledge_point TEXT,
+    item_type TEXT,
+    difficulty_tier INTEGER,
+    question_text TEXT,
+    answer_text TEXT,
+    practiced_count INTEGER DEFAULT 0,
+    last_practiced_at DATETIME,
+    banked_at DATETIME NOT NULL,
+    cooldown_until TEXT,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'retired')),
+    UNIQUE (training_id, item_key),
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_question_bank_drawable ON question_bank(training_id, cooldown_until);
 
 CREATE TABLE IF NOT EXISTS learning_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

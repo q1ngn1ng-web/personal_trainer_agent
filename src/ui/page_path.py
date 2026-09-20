@@ -17,7 +17,13 @@ _TYPE_LABELS: dict[str, str] = {
     "prerequisite": "前置铺垫",
 }
 
-_STATUS_LABELS: dict[str, str] = {"pending": "⬜ 待练", "in_progress": "🔄 进行中", "passed": "✅ 已达标", "failed": "❌ 未通过"}
+_STATUS_LABELS: dict[str, str] = {
+    "pending": "⬜ 待练",
+    "in_progress": "🔄 进行中",
+    "practiced": "✅ 今天练过",
+    "passed": "🏅 已达标（判定）",
+    "failed": "❌ 未通过",
+}
 
 
 def _resolve_training() -> object | None:
@@ -173,7 +179,16 @@ def _render_path(training_id: int) -> None:
             if st.button("✅ 确认路径", key="path_confirm", type="primary", disabled=over_budget):
                 confirmed = path_service.confirm_path(training_id)
                 if confirmed:
-                    _flash("路径已确认。这是你的投入承诺，之后改动会保留新版本。")
+                    from src.services import plan_service
+
+                    plan = plan_service.generate_plan(training_id)
+                    if plan.is_empty:
+                        _flash("路径已确认，但这个训练还没有训练项，暂时无法排期。", "warning")
+                    else:
+                        _flash(
+                            f"路径已确认。已排出 {plan.rounds} 轮计划（共 {plan.item_count} 道题 × 5 轮）："
+                            f"第 1 轮到 {plan.last_due_date} 全部完成即训练结束。"
+                        )
                 st.rerun()
         if st.session_state.get("path_discard_confirm"):
             st.warning("丢弃草案会删除当前未确认的路径，确认请再点一次。")

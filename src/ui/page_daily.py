@@ -30,6 +30,13 @@ _DIMENSION_LABEL: dict[ContentDimension, str] = {
     ContentDimension.WRITE: "💻 写代码",
 }
 
+_ITEM_TYPE_LABEL: dict[str, str] = {
+    "memory": "记忆性",
+    "comprehension": "理解性",
+    "practice": "实践性",
+    "prerequisite": "前置铺垫",
+}
+
 
 def _format_dimension(dim: ContentDimension | None) -> str:
     if dim is None:
@@ -174,6 +181,74 @@ def _render_recall_section(
                     st.rerun()
 
 
+def _render_plan_item(training_id: int, task: Any) -> None:
+    """计划项勾选：勾上 = **练过**（`practiced`），不产生"达标"（达标由判定写入）。"""
+    from src.core.plan import local_today
+    from src.services import plan_service
+
+    currently = task.status == "practiced"
+    label = f"第 {task.round_index}/5 轮 · {task.title}"
+    if task.knowledge_point:
+        label += f" · {task.knowledge_point}"
+    new_value = st.checkbox(label, key=f"dl_plan_{task.plan_id}", value=currently)
+    meta = [f"预计 {task.planned_minutes} 分钟"]
+    if task.item_type:
+        meta.append(_ITEM_TYPE_LABEL.get(task.item_type, task.item_type))
+    if task.is_overdue(local_today()):
+        meta.append(f"原定 {task.original_date.isoformat()}，已累计到今天")
+    st.caption("　·　".join(meta))
+
+    if new_value != currently:
+        with st.spinner("保存训练状态..."):
+            plan_service.complete_tasks([task.plan_id], completed=new_value)
+            # 保留打卡记录：完成度与奖励机制依赖 daily_log_tasks
+            check_task(training_id, f"P{task.plan_id}", new_value)
+        st.rerun()
+
+
+def _render_plan_section(
+    title: str, tasks: list[Any], training_id: int, empty_hint: str
+) -> None:
+    from src.core.plan import local_today
+
+    st.subheader(title)
+    if not tasks:
+        st.info(empty_hint)
+        return
+    for task in tasks:
+        overdue = task.is_overdue(local_today())
+        prefix = "⏳" if overdue else "✨"
+        with st.expander(
+            f"{prefix} 第 {task.round_index}/5 轮　{task.title}", expanded=False
+        ):
+            st.markdown(f"**知识点**：{task.knowledge_point or '—'}")
+            _render_plan_item(training_id, task)
+
+
+def _render_plan_overview(training_id: int, tasks: list[Any]) -> None:
+    """当日负荷概览：只提示不裁剪（ADR-0021）。"""
+    from src.services import path_service, plan_service
+
+    minutes = sum(int(task.planned_minutes or 0) for task in tasks)
+    rounds = sorted({task.round_index for task in tasks})
+    round_text = "、".join(f"第 {index} 轮" for index in rounds) or "—"
+    st.caption(f"今天 {len(tasks)} 项 · 预计 {minutes} 分钟 · {round_text}")
+
+    path = path_service.load_path(training_id)
+    budget = int(getattr(path, "daily_budget_minutes", 0) or 0)
+    if budget and minutes > budget:
+        st.warning(
+            f"今天预计 {minutes} 分钟，超过你设定的 {budget} 分钟——"
+            "整轮不裁剪，做不完的部分明天继续（会累计）。"
+        )
+    progress = plan_service.plan_progress(training_id)
+    if progress["total"]:
+        st.progress(
+            min(max(progress["practiced"] / progress["total"], 0.0), 1.0),
+            text=f"计划进度 {progress['practiced']}/{progress['total']} 次",
+        )
+
+
 def _render_signal_section(training_id: int) -> None:
     """四失一键反馈：点一下就提交，不填表。"""
     from src.services import signal_service
@@ -278,12 +353,37 @@ def _render_training(training: Any) -> None:
     st.title(f"📅 今日任务卡 — {training.topic}")
     _training_header(training)
 
+    from src.core.plan import local_today
+    from src.services import plan_service
+
     progress = get_today_progress(training.id)
-    tasks = extract_today_tasks(training.id)
     recall_questions = get_today_recall_questions(training.id)
 
-    _render_review_section(tasks.review_items, training.id, progress)
-    _render_new_section(tasks.new_items, training.id, progress)
+    # 有路径但还没排期时补生成一次（幂等）
+    plan_service.ensure_plan(training.id)
+    plan_tasks = plan_service.today_tasks(training_id=training.id)
+    today = local_today()
+
+    if plan_tasks or plan_service.has_plan(training.id):
+        _render_plan_overview(training.id, plan_tasks)
+        _render_plan_section(
+            "1. 待补（累计到今天）",
+            [task for task in plan_tasks if task.is_overdue(today)],
+            training.id,
+            "没有欠下的训练项。",
+        )
+        _render_plan_section(
+            "2. 今天到期",
+            [task for task in plan_tasks if not task.is_overdue(today)],
+            training.id,
+            "今天没有到期的训练项，可以休息或重练已练过的题。",
+        )
+    else:
+        # 没有训练路径的老训练：继续走老的复习日历口径
+        tasks = extract_today_tasks(training.id)
+        _render_review_section(tasks.review_items, training.id, progress)
+        _render_new_section(tasks.new_items, training.id, progress)
+
     _render_recall_section(recall_questions, training.id)
     _render_progress_section(progress)
     _render_signal_section(training.id)
