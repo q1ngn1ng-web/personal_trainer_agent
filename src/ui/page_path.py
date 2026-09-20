@@ -184,6 +184,29 @@ def _render_path(training_id: int) -> None:
     else:
         st.caption("已确认的路径不会就地大改；需要重构时会产生新版本。")
 
+    st.divider()
+    st.markdown("### 其他操作")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("🎯 重新定位理解边缘", key="path_redo_probe", width="stretch"):
+            # 回到新建向导的第 3 步：会话状态是全局的，设置后跳页即可
+            st.session_state["nt_training_id"] = training_id
+            st.session_state["nt_step"] = 3
+            st.session_state["nt_probe"] = None
+            training = queries.get_training(training_id)
+            st.session_state["nt_topic"] = training.topic if training else ""
+            for key in list(st.query_params.keys()):
+                del st.query_params[key]
+            st.query_params["page"] = "new_training"
+            st.rerun()
+    with col2:
+        if st.button("📅 今日任务", key="path_to_daily", width="stretch"):
+            for key in list(st.query_params.keys()):
+                del st.query_params[key]
+            st.query_params["page"] = "daily"
+            st.query_params["training_id"] = str(training_id)
+            st.rerun()
+
 
 def render() -> None:
     st.title("🧭 训练路径")

@@ -545,6 +545,61 @@ def validate_item_chunk_links(training_id: int, conn: sqlite3.Connection | None 
     return dropped_total
 
 
+def current_stage(training_id: int, conn: sqlite3.Connection | None = None) -> tuple[PathStage | None, list[TrainingItem]]:
+    """取当前该练的阶段与其训练项：优先第一个未完成的阶段，其次最后一个阶段。"""
+    path = load_path(training_id, conn=conn)
+    if path is None:
+        return None, []
+    stages = load_stages(path.id, conn=conn)
+    if not stages:
+        return None, []
+
+    for stage in stages:
+        items = load_items(stage.id, conn=conn)
+        if any(item.status in ("pending", "in_progress") for item in items):
+            return stage, items
+    last = stages[-1]
+    return last, load_items(last.id, conn=conn)
+
+
+def today_tasks(
+    training_id: int, *, limit: int = 5, conn: sqlite3.Connection | None = None
+) -> dict[str, list[TrainingItem]]:
+    """今日任务：当前阶段待练的训练项 + 之前阶段已完成但仍需复习的项。
+
+    这是新流程的数据源——老流程读文件系统里的 `04_复习日历.md`，
+    新流程没有那十份文件，所以必须从 `training_items` 取。
+    """
+    stage, items = current_stage(training_id, conn=conn)
+    if stage is None:
+        return {"new": [], "review": []}
+
+    pending = [item for item in items if item.status in ("pending", "in_progress")]
+    passed = [item for item in items if item.status == "passed"]
+    new_items = pending[:limit]
+    review_items = passed[: max(0, min(2, limit - len(new_items)))]
+    return {"new": new_items, "review": review_items}
+
+
+def mark_item(
+    item_id: int, status: str, conn: sqlite3.Connection | None = None
+) -> TrainingItem | None:
+    """更新训练项状态（勾选任务卡时调用）。"""
+    if status not in ("pending", "in_progress", "passed", "failed"):
+        raise ValueError(f"invalid item status: {status}")
+    active = _connect(conn)
+    own = conn is None
+    try:
+        active.execute("UPDATE training_items SET status = ? WHERE id = ?", (status, item_id))
+        if own:
+            active.commit()
+        row = active.execute("SELECT * FROM training_items WHERE id = ?", (item_id,)).fetchone()
+    finally:
+        if own:
+            active.close()
+    return TrainingItem.from_row(row) if row else None
+
+
 __all__ = [
     "MAX_BUDGET_RETRIES",
     "UNDERUSE_RATIO",
@@ -555,10 +610,13 @@ __all__ = [
     "adjust_budget",
     "check_budget",
     "confirm_path",
+    "current_stage",
     "generate_skeleton",
     "load_items",
     "load_path",
     "load_stages",
+    "mark_item",
     "save_skeleton",
+    "today_tasks",
     "validate_item_chunk_links",
 ]

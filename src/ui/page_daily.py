@@ -86,6 +86,13 @@ def _render_task_checkbox(
     if new_value != current:
         with st.spinner("保存任务状态..."):
             check_task(training_id, item.task_id, new_value)
+            # 训练项来自数据库时同步状态，否则它明天还会出现在今日任务里
+            if item.task_id.startswith("T") and item.task_id[1:].isdigit():
+                from src.services import path_service
+
+                path_service.mark_item(
+                    int(item.task_id[1:]), "passed" if new_value else "pending"
+                )
         st.session_state[f"dl_state_{training_id}_{item.task_id}"] = new_value
         st.rerun()
 

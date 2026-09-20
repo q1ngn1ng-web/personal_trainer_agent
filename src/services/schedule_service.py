@@ -151,6 +151,41 @@ def extract_today_tasks(
             )
 
     if not review_items and not new_items:
+        # 新流程不生成十份 md，`trainings.schedule` 是空的——退回从数据库里的训练项取今日任务
+        from src.services import path_service
+
+        # 训练项题型 → 内容维度（老流程只有 concept/read/write 三个维度）
+        type_to_dimension = {
+            "memory": "concept",
+            "comprehension": "read",
+            "practice": "write",
+            "prerequisite": "concept",
+        }
+        db_tasks = path_service.today_tasks(training_id)
+        if db_tasks["new"] or db_tasks["review"]:
+            return TodayTasks(
+                today=effective_today,
+                new_items=[
+                    TaskItem(
+                        task_id=f"T{item.id}",
+                        topic=item.title,
+                        dimension=_coerce_dimension(type_to_dimension.get(item.item_type or "")),
+                        source=item.knowledge_point or "训练路径",
+                        is_required=True,
+                    )
+                    for item in db_tasks["new"]
+                ],
+                review_items=[
+                    TaskItem(
+                        task_id=f"T{item.id}",
+                        topic=item.title,
+                        dimension=_coerce_dimension(type_to_dimension.get(item.item_type or "")),
+                        source=item.knowledge_point or "训练路径",
+                        is_required=True,
+                    )
+                    for item in db_tasks["review"]
+                ],
+            )
         return _placeholder_tasks(effective_today)
 
     return TodayTasks(
