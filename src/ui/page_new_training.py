@@ -254,6 +254,8 @@ def _render_step3() -> None:
     probe = st.session_state.get("nt_probe")
 
     if probe is None:
+        points = edge_service.build_knowledge_points(training_id)
+        st.caption(f"资料里共识别出 {len(points)} 个知识点，本次先探测这些。")
         if st.button("开始探测", key="nt_probe_start", type="primary", width="stretch"):
             with st.spinner("正在从资料里出题..."):
                 try:

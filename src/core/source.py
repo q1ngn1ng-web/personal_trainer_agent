@@ -87,9 +87,11 @@ def split_markdown(text: str, *, max_chars: int = DEFAULT_MAX_CHARS) -> list[Chu
     """按标题层级与段落边界切片。
 
     规则：标题改变层级时先落盘已积累的内容；超长内容递归切分并**保留标题前缀**。
+    标题栈**按层级维护**——同级标题是兄弟而不是父子，否则会出现
+    「A > B > C」这种把并列小节串成链条的错误路径。
     """
     chunks: list[Chunk] = []
-    stack: list[str] = []
+    stack: list[tuple[int, str]] = []
     buffer: list[str] = []
     ordinal = 0
 
@@ -99,7 +101,7 @@ def split_markdown(text: str, *, max_chars: int = DEFAULT_MAX_CHARS) -> list[Chu
         buffer = []
         if not body:
             return
-        heading = " > ".join(stack) if stack else "（未分节）"
+        heading = " > ".join(title for _, title in stack) if stack else "（未分节）"
         for piece in _split_long(body, max_chars):
             chunks.append(Chunk(ordinal=ordinal, heading_path=heading, text=piece))
             ordinal += 1
@@ -110,8 +112,9 @@ def split_markdown(text: str, *, max_chars: int = DEFAULT_MAX_CHARS) -> list[Chu
             flush()
             level = len(match.group(1))
             title = match.group(2).strip()
-            stack = stack[: level - 1]
-            stack.append(title)
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            stack.append((level, title))
             continue
         buffer.append(raw_line)
     flush()

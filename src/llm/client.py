@@ -199,3 +199,31 @@ def complete(
                 "prompt_version": version,
             }
         raise
+
+
+def log_llm_failure(prompt_name: str, input_text: str, exc: Exception) -> None:
+    """把一次彻底失败的 LLM 调用写进 ``llm_calls``。
+
+    ``complete`` 在失败且无 fallback 时会抛异常，调用方若直接捕获，
+    这次失败就**不会留下任何痕迹**，事后无法定位原因。诊断失败必须先有记录。
+    """
+    from src.db.queries import record_llm_call
+
+    _, version = PROMPT_REGISTRY.get(prompt_name, ("", "unknown"))
+    try:
+        record_llm_call(
+            call_purpose=prompt_name,
+            prompt_name=prompt_name,
+            prompt_version=version,
+            model=DEEPSEEK_MODEL,
+            input_text=input_text[:4000],
+            latency_ms=0,
+            tokens_in=0,
+            tokens_out=0,
+            retry_count=3,
+            fallback_used=0,
+            validation_result="fail",
+            failure_reason=f"{type(exc).__name__}: {exc}"[:500],
+        )
+    except Exception:  # pragma: no cover - 审计失败不能影响主流程
+        logger.exception("log_llm_failure: could not persist failure for %s", prompt_name)

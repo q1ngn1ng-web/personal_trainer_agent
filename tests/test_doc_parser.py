@@ -46,8 +46,10 @@ def _make_pdf() -> bytes:
     document = fitz.open()
     page = document.new_page()
     # 必须用内置中文字体，默认字体渲染中文会变成省略号
-    page.insert_text((72, 100), "第三章 虚拟语气", fontsize=16, fontname="china-s")
-    page.insert_text((72, 130), "虚拟语气用于表达与事实相反的假设。", fontsize=11, fontname="china-s")
+    page.insert_text((72, 90), "第三章 虚拟语气", fontsize=18, fontname="china-s")
+    page.insert_text((72, 120), "虚拟语气用于表达与事实相反的假设。", fontsize=11, fontname="china-s")
+    page.insert_text((72, 160), "RDB 的优缺点", fontsize=16, fontname="china-s")
+    page.insert_text((72, 190), "优点是方便备份，缺点是数据可能丢失。", fontsize=11, fontname="china-s")
     data = document.tobytes()
     document.close()
     return data
@@ -91,7 +93,34 @@ class TestDocParser(unittest.TestCase):
     def test_pdf_text_extraction(self) -> None:
         markdown = doc_parser.parse_file("手册.pdf", _make_pdf())
         self.assertIn("虚拟语气", markdown)
-        self.assertIn("第 1 页", markdown)
+
+    def test_pdf_detects_multiple_headings_per_page_by_font_size(self) -> None:
+        """一页里有多个小标题时都要被识别，而不是只取第一个。"""
+        from src.core.source import split_markdown
+
+        markdown = doc_parser.parse_file("手册.pdf", _make_pdf())
+        headings = split_markdown(markdown)
+        paths = [chunk.heading_path for chunk in headings]
+        self.assertIn("第三章 虚拟语气", paths)
+        self.assertIn("RDB 的优缺点", paths)
+        # 正文不能变成知识点
+        self.assertFalse(any("方便备份" in path for path in paths))
+
+    def test_pdf_without_headings_falls_back_to_plain_text(self) -> None:
+        """整页没有标题时，内容并入上一节，不产生「第 N 页」这种假知识点。"""
+        import fitz
+
+        from src.core.source import split_markdown
+
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 90), "这是一段没有标题的正文内容。", fontsize=11, fontname="china-s")
+        page.insert_text((72, 120), "第二行也还是正文。", fontsize=11, fontname="china-s")
+        data = document.tobytes()
+        document.close()
+
+        paths = [chunk.heading_path for chunk in split_markdown(doc_parser.parse_file("无标题.pdf", data))]
+        self.assertEqual(paths, ["（未分节）"])
 
     def test_unsupported_suffix(self) -> None:
         with self.assertRaises(doc_parser.UnsupportedFormatError):

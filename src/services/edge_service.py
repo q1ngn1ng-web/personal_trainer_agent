@@ -134,6 +134,20 @@ def _format_points(points: list[KnowledgePoint]) -> str:
     )
 
 
+def _fallback_question(point: KnowledgePoint) -> str:
+    """模型出题失败时的兜底问法。
+
+    资料本身常常就是题目（如八股文），所以先看片段里有没有现成的问句；
+    没有就针对该知识点的**内容**提问，而不是问「这一页讲的是什么」。
+    """
+    sample = (point.sample_text or "").strip()
+    for raw_line in sample.splitlines():
+        line = raw_line.strip()
+        if 6 <= len(line) <= 60 and line.endswith(("？", "?")):
+            return line
+    return f"请说出「{point.name}」的关键要点（不查资料，凭理解作答）。"
+
+
 def generate_probe_items(
     training_id: int,
     *,
@@ -157,7 +171,10 @@ def generate_probe_items(
         output = result.get("output_json") or {}
     except Exception as exc:
         # 模型不可用不应该让用户卡在向导里：退回按知识点生成的朴素问法
-        logger.warning("generate_probe_items: LLM unavailable (%s), using naive questions", exc)
+        from src.llm.client import log_llm_failure
+
+        logger.warning("generate_probe_items: LLM unavailable (%s), using fallback", exc)
+        log_llm_failure("edge_probe", json.dumps(variables, ensure_ascii=False), exc)
         output = {}
     questions = output.get("questions") or []
 
@@ -179,8 +196,8 @@ def generate_probe_items(
                 knowledge_point=point.name,
                 heading_path=point.heading_path,
                 difficulty=2,
-                question=f"用自己的话说明「{point.name}」讲的是什么。",
-                reference_answer=point.sample_text[:120],
+                question=_fallback_question(point),
+                reference_answer=point.sample_text[:200],
             )
             for point in knowledge_points
         ]
@@ -208,7 +225,10 @@ def grade_probe(
         )
         output = result.get("output_json") or {}
     except Exception as exc:
+        from src.llm.client import log_llm_failure
+
         logger.warning("grade_probe: LLM unavailable (%s), treating all as fail", exc)
+        log_llm_failure("edge_probe_grade", json.dumps(payload, ensure_ascii=False), exc)
         output = {}
     verdicts = {str(v.get("knowledge_point", "")).strip(): v for v in (output.get("verdicts") or [])}
 

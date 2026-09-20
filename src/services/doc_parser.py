@@ -68,41 +68,73 @@ def parse_text(filename: str | None, data: bytes) -> str:
         return data.decode("utf-8", errors="ignore")
 
 
-def parse_pdf(filename: str | None, data: bytes) -> str:
-    """PDF：按页抽取文本，并把疑似标题的行提升为 Markdown 标题。
-
-    每页标题取「第一个像标题的短行」，找不到才退回「第 N 页」——
-    因为下游把标题当知识点名，全是「第 N 页」会让知识点失去意义。
-    """
-    import fitz  # pymupdf
-
-    pieces: list[str] = []
-    with fitz.open(stream=io.BytesIO(data), filetype="pdf") as doc:
-        for page_index, page in enumerate(doc, start=1):
-            text = page.get_text("text") or ""
-            if not text.strip():
+def _page_lines_with_sizes(page: Any) -> list[tuple[str, float]]:
+    """取每行的文本与最大字号，用于区分标题与正文。"""
+    rows: list[tuple[str, float]] = []
+    payload = page.get_text("dict")
+    for block in payload.get("blocks", []):
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            text = "".join(str(span.get("text", "")) for span in spans).strip()
+            if not text:
                 continue
-            lines = [line.strip() for line in text.splitlines() if line.strip()]
-            title = ""
-            for candidate in lines[:3]:
-                if _is_title_candidate(candidate):
-                    title = candidate.strip("\u200b\u200c\u200d\ufeff")
-                    break
-            # 有标题时带上页码便于溯源；没有标题就只用页码，避免「第 2 页（第 2 页）」
-            heading = f"{title}（第 {page_index} 页）" if title else f"第 {page_index} 页"
-            pieces.append(f"# {heading}")
-            for raw_line in text.splitlines():
-                line = raw_line.strip()
-                if not line:
-                    pieces.append("")
-                    continue
-                if line == title:
-                    continue
-                if _looks_like_heading(line):
-                    pieces.append(f"## {line}")
-                else:
-                    pieces.append(line)
-            pieces.append("")
+            size = max((float(span.get("size", 0.0) or 0.0) for span in spans), default=0.0)
+            rows.append((text, size))
+    return rows
+
+
+def _body_font_size(rows: list[tuple[str, float]]) -> float:
+    """正文基准字号：取出现最多的字号（标题是少数）。"""
+    sizes = [round(size, 1) for _, size in rows if size > 0]
+    if not sizes:
+        return 0.0
+    counts: dict[float, int] = {}
+    for size in sizes:
+        counts[size] = counts.get(size, 0) + 1
+    return max(counts.items(), key=lambda item: item[1])[0]
+
+
+def parse_pdf(filename: str | None, data: bytes) -> str:
+    """PDF：按**字号**识别标题层级，而不是把每一页当成一个知识点。
+
+    下游把标题当知识点名，所以粒度必须是内容结构。
+    字号与正文不同的短行判为标题；整页都识别不出标题时才退回「第 N 页」。
+    """
+    import pymupdf
+
+    document = pymupdf.open(stream=io.BytesIO(data), filetype="pdf")
+    pages: list[list[tuple[str, float]]] = []
+    all_rows: list[tuple[str, float]] = []
+    try:
+        for page in document:
+            rows = _page_lines_with_sizes(page)
+            pages.append(rows)
+            all_rows.extend(rows)
+    finally:
+        document.close()
+
+    body_size = _body_font_size(all_rows)
+    pieces: list[str] = []
+    for page_index, rows in enumerate(pages, start=1):
+        if not rows:
+            continue
+        page_lines: list[str] = []
+        for text, size in rows:
+            stripped = text.strip("\u200b\u200c\u200d\ufeff").strip()
+            if not stripped:
+                continue
+            is_heading = _looks_like_heading(stripped) or (
+                body_size > 0
+                and size >= body_size * 1.12
+                and len(stripped) <= 30
+                and _is_title_candidate(stripped)
+            )
+            if is_heading:
+                page_lines.append(f"## {stripped}")
+            else:
+                page_lines.append(stripped)
+        pieces.extend(page_lines)
+        pieces.append("")
     result = "\n".join(pieces).strip()
     if not result:
         raise ValueError("PDF 没有可抽取的文本（可能是扫描件，需要 OCR）")

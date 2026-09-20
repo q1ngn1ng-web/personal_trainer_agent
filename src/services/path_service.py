@@ -270,6 +270,9 @@ def generate_skeleton(
             output = result.get("output_json") or {}
         except Exception as exc:
             logger.warning("generate_skeleton: LLM unavailable (%s), using fallback", exc)
+            from src.llm.client import log_llm_failure
+
+            log_llm_failure("path_skeleton", json.dumps(variables, ensure_ascii=False), exc)
             output = {}
 
         if not output:
