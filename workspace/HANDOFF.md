@@ -161,7 +161,22 @@ openspec archive <change-id> --store store --yes
 
 ## 9. 下一步
 
-### 9.1 下一件事：`training-source-selection`（已拆两段静态层 / 网络层）
+### 9.1 当前进度（2026-09-20 通宵更新，详见 `workspace/SUMMARY-20260920.md`）
+
+个人版链路已能跑通：**描述 → 澄清 → 确认目标 → 选资料 → 定位理解边缘 → 生成路径 → 今日训练 → 四失反馈**。
+
+```
+goal-clarification-confirm     28/28  已归档
+training-source-selection      36/40
+understanding-edge-assessment  12/30
+training-path-generation       16/29
+training-execution-feedback    13/33
+org-and-roles                   0/29  已后置
+```
+
+**建议的下一步**：达标判定 + 逐次作答记录（同时解锁四失冲突裁决与定期测验）。
+
+### 9.2 原计划：`training-source-selection` 的剩余项
 
 这个 change 拆成 **阶段 A 静态层**与 **阶段 B 网络层**，接口契约冻结在
 `workspace/store/openspec/changes/training-source-selection/design.md` 的「阶段 A 设计」一节。
