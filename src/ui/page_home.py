@@ -85,13 +85,21 @@ def _render_today_plan() -> None:
     summary = plan_service.today_summary()
     if not summary["count"]:
         upcoming: list[tuple[date, str]] = []
+        pending_plan = 0
         for training in list_trainings():
             next_due = plan_service.next_due_date(int(training.id))
             if next_due is not None:
                 upcoming.append((next_due, str(training.topic or "未命名")))
+            elif not plan_service.has_plan(int(training.id)):
+                pending_plan += 1
         if upcoming:
             next_due, topic = min(upcoming, key=lambda pair: pair[0])
             st.info(f"今天是休息日。下一次训练：{next_due.isoformat()}（{topic}）")
+        elif pending_plan:
+            st.info(
+                f"还有 {pending_plan} 个训练没有生成计划——"
+                "打开它的「今日任务卡」会自动按创建日排出 5 轮。"
+            )
         else:
             st.info("今天没有训练任务。确认训练路径后会自动生成 5 轮计划。")
         return
