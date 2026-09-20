@@ -19,7 +19,7 @@
   - 验收：连续生成两次路径后，已练过项的 `item_key` 不变、`plan_items` 不悬空、题库登记不失效
 - [x] 1.4 统一"今天"的口径：新增本地时区取日函数（`src/core/plan.py: local_today`），排期先用；`log_date` / 限频的接入待下一批
   - 验收：单测固定时间点（本地 00:30 与 UTC 前一日）断言三处得到同一天
-- [ ] 1.5 `adjustment_log` 补齐"调整前后取值"
+- [x] 1.5 `adjustment_log` 补齐"调整前后取值"（难度调整写 `difficulty_before` / `difficulty_after`）
   - 验收：一次难度调整能查到 `{"before": 2, "after": 3}`
 
 ## 2. 排期生成（纯函数 + 落库）

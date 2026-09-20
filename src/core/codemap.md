@@ -9,6 +9,7 @@
 - `training.py`：一次训练的核心状态模型及时间相关判断。
 - `content_dim.py`：训练内容维度与按比例分配算法。
 - `plan.py`：训练排期与题库口径（固定 5 轮、冷却期、稳定题目键、本地日期）。
+- `mastery.py`：客观表现与达标判定（连续通过、准确率、客观档位、难度增量）。
 
 该目录当前是轻量领域层：以枚举、数据类和纯函数表达业务概念与规则，不直接进行数据库访问、文件读写、网络调用或界面渲染。
 
@@ -280,3 +281,20 @@ Training
 | `local_today()` / `parse_local_date()` | 统一"今天"的口径（默认 `Asia/Shanghai`，可用 `TRAINER_TZ` 覆盖） |
 | `select_today_slots(slots, today)` | 当日取数：`due_date <= 今天` 且未完成，**每个题目只取最早未完成的那一轮**（"累计到下一天"的实现口径） |
 | `total_minutes(tasks)` | 当日预计总时长（用于超限提示） |
+
+---
+
+### `mastery.py`：客观表现与达标判定（2026-09-21 新增）
+
+纯函数。回答两个问题："这道题练到什么程度了"与"四失反馈里的客观一侧该是什么"。
+
+| 符号 | 作用 |
+|---|---|
+| `MASTERY_STREAK = 2` | 连续通过 2 次即达标（change `training-execution-feedback` 任务 5.1） |
+| `MIN_ATTEMPTS_FOR_OBJECTIVE = 3` | 作答少于 3 次时客观口径为 `unknown`，只允许轻微调整（ADR-0015 决策 2） |
+| `ACCURACY_LOW = 0.6` / `ACCURACY_HIGH = 0.9` | 冲突裁决的准确率阈值（ADR-0015） |
+| `consecutive_passes(results)` | 从最近一次往前数的连续通过次数 |
+| `accuracy(results)` | 准确率；**没有数据返回 `None`**，不用 0 冒充 |
+| `evaluate(results)` | → `MasteryState(attempts, passes, accuracy, streak, mastered)` |
+| `objective_state(results)` | `low` / `mid` / `high` / `unknown`（数据不足） |
+| `difficulty_delta(objective, signal_type)` | 难度该升/降/不动，由规则决定（ADR-0010 + ADR-0015） |

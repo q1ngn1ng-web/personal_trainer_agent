@@ -366,7 +366,7 @@ class TestTrainingItemsMigration(unittest.TestCase):
             conn.executescript(self._LEGACY_SQL)
             conn.commit()
             applied = migrate(conn)
-            self.assertIn("training_items:item_key", applied)
+            self.assertIn("training_items:item_key+mastered_at", applied)
 
             row = conn.execute(
                 "SELECT item_key, status, title FROM training_items WHERE id = 1"

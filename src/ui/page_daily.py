@@ -184,13 +184,55 @@ def _render_recall_section(
 def _render_plan_item(training_id: int, task: Any) -> None:
     """计划项勾选：勾上 = **练过**（`practiced`），不产生"达标"（达标由判定写入）。"""
     from src.core.plan import local_today
-    from src.services import plan_service
+    from src.services import attempt_service, plan_service
 
     currently = task.status == "practiced"
     label = f"第 {task.round_index}/5 轮 · {task.title}"
     if task.knowledge_point:
         label += f" · {task.knowledge_point}"
     new_value = st.checkbox(label, key=f"dl_plan_{task.plan_id}", value=currently)
+
+    # 作答结果（客观表现的唯一来源）：答对 / 答错
+    state = attempt_service.item_mastery(training_id, task.item_key)
+    col_ok, col_no, col_info = st.columns([1, 1, 3])
+    if col_ok.button("✓ 答对", key=f"dl_pass_{task.plan_id}"):
+        with st.spinner("记录作答..."):
+            _, just_mastered = attempt_service.record_and_evaluate(
+                training_id,
+                task.item_key,
+                "pass",
+                plan_id=task.plan_id,
+                round_index=task.round_index,
+            )
+            plan_service.complete_tasks([task.plan_id], completed=True)
+            check_task(training_id, f"P{task.plan_id}", True)
+        st.session_state[f"dl_attempt_msg_{task.plan_id}"] = (
+            "已记录：答对。连续 2 次答对即判定达标 🏅" if just_mastered else "已记录：答对。"
+        )
+        st.rerun()
+    if col_no.button("✗ 答错", key=f"dl_fail_{task.plan_id}"):
+        with st.spinner("记录作答..."):
+            attempt_service.record_and_evaluate(
+                training_id,
+                task.item_key,
+                "fail",
+                plan_id=task.plan_id,
+                round_index=task.round_index,
+            )
+            plan_service.complete_tasks([task.plan_id], completed=True)
+            check_task(training_id, f"P{task.plan_id}", True)
+        st.session_state[f"dl_attempt_msg_{task.plan_id}"] = "已记录：答错，下轮会继续安排。"
+        st.rerun()
+    if state.attempts:
+        accuracy_text = f"{state.accuracy:.0%}" if state.accuracy is not None else "—"
+        mastered_text = " · 已达标 🏅" if state.mastered else ""
+        col_info.caption(
+            f"近 {state.attempts} 次准确率 {accuracy_text} · 连续通过 {state.streak} 次{mastered_text}"
+        )
+    message = st.session_state.pop(f"dl_attempt_msg_{task.plan_id}", None)
+    if message:
+        st.success(message)
+
     meta = [f"预计 {task.planned_minutes} 分钟"]
     if task.item_type:
         meta.append(_ITEM_TYPE_LABEL.get(task.item_type, task.item_type))
@@ -249,12 +291,26 @@ def _render_plan_overview(training_id: int, tasks: list[Any]) -> None:
         )
 
 
-def _render_signal_section(training_id: int) -> None:
+def _render_signal_section(training_id: int, focus: Any | None = None) -> None:
     """四失一键反馈：点一下就提交，不填表。"""
-    from src.services import signal_service
+    from src.services import attempt_service, plan_service, signal_service
 
     st.subheader("5. 今天的感受")
     st.caption("点一下就行。系统会据此调整难度、范围或题量——**不用你填表**。")
+
+    objective = attempt_service.objective_for_training(training_id)
+    objective_label = {"low": "偏低", "mid": "中等", "high": "很好", "unknown": "数据不足"}.get(
+        objective, objective
+    )
+    _accuracy, attempts = attempt_service.training_accuracy(training_id)
+    st.caption(
+        f"客观表现：近 {attempts} 次作答 → {objective_label}（少于 3 次只做轻微调整，不结构调）"
+    )
+
+    item_key = getattr(focus, "item_key", None)
+    item_id = plan_service.item_id_for(training_id, item_key) if item_key else None
+    if focus is not None:
+        st.caption(f"本次反馈关联到当前训练项：{focus.title}")
 
     labels = signal_service.SIGNAL_ACTIONS
     columns = st.columns(4)
@@ -266,7 +322,12 @@ def _render_signal_section(training_id: int) -> None:
                 width="stretch",
             ):
                 decision = signal_service.process_signal(
-                    training_id, code, raw_text="", item_status=None
+                    training_id,
+                    code,
+                    item_id=item_id,
+                    item_key=item_key,
+                    objective=objective,
+                    raw_text="",
                 )
                 st.session_state[f"dl_signal_msg_{training_id}"] = decision.message
                 st.rerun()
@@ -386,7 +447,7 @@ def _render_training(training: Any) -> None:
 
     _render_recall_section(recall_questions, training.id)
     _render_progress_section(progress)
-    _render_signal_section(training.id)
+    _render_signal_section(training.id, plan_tasks[0] if plan_tasks else None)
     _render_notes_section(training.id, progress)
     _render_reward_section(progress, training.id)
 

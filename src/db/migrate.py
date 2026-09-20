@@ -114,6 +114,7 @@ CREATE TABLE training_items_new (
     knowledge_point TEXT,
     source_chunk_ids TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'practiced', 'passed', 'failed')),
+    mastered_at DATETIME,
     created_at DATETIME NOT NULL,
     FOREIGN KEY (stage_id) REFERENCES path_stages(id)
 )
@@ -184,10 +185,13 @@ def _rebuild_training_items(conn: sqlite3.Connection) -> None:
     ``item_key`` 是题库与计划表引用的目标（见 change ``training-plan-and-daily-view`` 的 design D7）：
     训练项自身的主键在路径重生成时会变，因此必须有跨重生成稳定的键。
     """
+    has_mastered = "mastered_at" in _column_names(conn, "training_items")
+    mastered_column = "i.mastered_at" if has_mastered else "NULL AS mastered_at"
     rows = conn.execute(
-        """
+        f"""
         SELECT i.id, i.stage_id, i.ordinal, i.title, i.item_type, i.difficulty_tier,
-               i.difficulty_basis, i.knowledge_point, i.source_chunk_ids, i.status, i.created_at,
+               i.difficulty_basis, i.knowledge_point, i.source_chunk_ids, i.status,
+               {mastered_column}, i.created_at,
                tp.training_id AS training_id
         FROM training_items i
         JOIN path_stages s ON s.id = i.stage_id
@@ -208,6 +212,7 @@ def _rebuild_training_items(conn: sqlite3.Connection) -> None:
             row["knowledge_point"],
             row["source_chunk_ids"],
             row["status"],
+            row["mastered_at"],
             row["created_at"],
         )
         for row in rows
@@ -217,8 +222,8 @@ def _rebuild_training_items(conn: sqlite3.Connection) -> None:
     conn.execute(_TRAINING_ITEMS_DDL)
     conn.executemany(
         "INSERT INTO training_items_new (id, stage_id, ordinal, title, item_key, item_type, "
-        "difficulty_tier, difficulty_basis, knowledge_point, source_chunk_ids, status, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "difficulty_tier, difficulty_basis, knowledge_point, source_chunk_ids, status, mastered_at, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         payload,
     )
     conn.execute("DROP TABLE training_items_old")
@@ -245,7 +250,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     item_columns = _column_names(conn, "training_items")
     item_sql = _table_sql(conn, "training_items")
     needs_items = bool(item_columns) and (
-        "item_key" not in item_columns or "'practiced'" not in item_sql
+        "item_key" not in item_columns
+        or "mastered_at" not in item_columns
+        or "'practiced'" not in item_sql
     )
 
     if not (needs_trainings or needs_llm_calls or needs_sources or needs_items):
@@ -276,7 +283,7 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
                 applied.append("sources:enabled_flag")
             if needs_items:
                 _rebuild_training_items(conn)
-                applied.append("training_items:item_key")
+                applied.append("training_items:item_key+mastered_at")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

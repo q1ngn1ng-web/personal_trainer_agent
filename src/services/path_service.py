@@ -602,6 +602,48 @@ def mark_item(
     return TrainingItem.from_row(row) if row else None
 
 
+def adjust_difficulty(
+    training_id: int,
+    item_key: str,
+    delta: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[int, int] | None:
+    """按稳定题目键调整难度档位（限制在 1..4），返回 ``(before, after)``。
+
+    这是 ADR-0015 结构性调整的执行点：难度由规则层依据客观表现调整（ADR-0010），
+    **不动排期日期**（ADR-0021：题量不裁剪）。
+    """
+    if delta == 0:
+        return None
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT i.id, i.difficulty_tier FROM training_items i "
+            "JOIN path_stages s ON s.id = i.stage_id "
+            "JOIN training_paths p ON p.id = s.path_id "
+            "WHERE p.training_id = ? AND i.item_key = ? "
+            "ORDER BY (p.status = 'confirmed') DESC, p.version DESC LIMIT 1",
+            (int(training_id), str(item_key)),
+        ).fetchone()
+        if row is None:
+            return None
+        before = int(row["difficulty_tier"] or 2)
+        after = max(1, min(4, before + int(delta)))
+        if after == before:
+            return (before, before)
+        active.execute(
+            "UPDATE training_items SET difficulty_tier = ? WHERE id = ?", (after, int(row["id"]))
+        )
+        if own:
+            active.commit()
+    finally:
+        if own:
+            active.close()
+    return (before, after)
+
+
 __all__ = [
     "MAX_BUDGET_RETRIES",
     "UNDERUSE_RATIO",
@@ -610,6 +652,7 @@ __all__ = [
     "PlannedItem",
     "PlannedStage",
     "adjust_budget",
+    "adjust_difficulty",
     "check_budget",
     "confirm_path",
     "current_stage",

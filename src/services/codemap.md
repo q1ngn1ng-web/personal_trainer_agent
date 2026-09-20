@@ -14,7 +14,7 @@
 
 - **分层清晰**：
   - 编排层：`trainer_service`（新建）、`review_service`（周复盘）。
-  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`plan_service` / `schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
+  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`plan_service` / `attempt_service` / `schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
   - 共享基础：每个 LLM 子服务都遵循同一套 `complete → 解析 output_json → record_llm_call` 三段式套路，便于排查。
 - **鲁棒性策略统一**：
   - **失败兜底**：LLM 服务一旦调用失败/回退，会写一条 `validation_result="fail"`、`fallback_used=1` 的审计记录，然后回退到 `fallback_for(...)` 或启发式算法。
@@ -143,6 +143,20 @@ UI 在"今日训练"页面按以下顺序读取：
 **注意**：`_consecutive_days` 与 `metrics_calculator._consecutive_completed` 实现相似但窗口不同（30 天 vs 全部），是两套并存实现。
 
 ### 5. `schedule_service.py` — 间隔复习任务抽取
+
+### 4.5 `attempt_service.py` — 作答记录与达标判定（2026-09-21 新增）
+
+`practice_attempts` 是**客观表现的唯一数据源**，也是审计报告 M1（四失无闭环）的修复前提：
+没有逐次作答，`signal_service` 的客观一侧永远只能返回"数据不足"。
+
+| 函数 | 作用 |
+|---|---|
+| `record_attempt(...)` | 写一次作答（`pass` / `fail`），校验题目键与结果枚举 |
+| `recent_results(...)` / `recent_training_results(...)` | 取最近 N 次结果（时间正序） |
+| `item_mastery(...)` / `training_accuracy(...)` | 单题 / 训练级客观摘要 |
+| `objective_for_item(...)` / `objective_for_training(...)` | 供 `signal_service` 的客观通道（<3 次 → `unknown`） |
+| `mark_mastered_if_ready(...)` | **唯一的"达标"写入点**：连续 2 次通过 → `training_items.status='passed'` + `mastered_at` |
+| `record_and_evaluate(...)` | 记录作答并顺带判定达标，返回是否刚刚达标 |
 
 > ⚠️ 2026-09-20 起，新链路（已有训练路径的训练）由 `plan_service` 接手；
 > `schedule_service` 的 `trainings.schedule.units` 分支只服务老训练，属 legacy。

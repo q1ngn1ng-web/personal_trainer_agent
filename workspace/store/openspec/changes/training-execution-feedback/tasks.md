@@ -10,6 +10,8 @@
   - 验收：每次结构性调整都能查到一条完整记录
 - [ ] 1.3 新增 `assessments` 与 `assessment_items` 表（测验批次、取题与判分结果）
   - 验收：一次测验能查到其全部题目与各自判分结果
+  - 注（2026-09-21）：**日常**作答记录已由 change `training-plan-and-daily-view` 落地（`practice_attempts` 表 +
+    `src/services/attempt_service.py`）；本任务剩下的是**测验批次**那两张表
 - [ ] 1.4 `daily_logs` 扩展字段：`signal_submitted_at`、`assessment_id`（可空）
   - 验收：迁移可重复执行，老数据不丢
 
@@ -58,6 +60,9 @@
 
 - [ ] 5.1 训练项达标 = 判据满足且连续 2 次达标
   - 验收：单测覆盖"单次达标不算"与"连续两次达标算"
+  - 注（2026-09-21）：**连续 2 次**这半句已实现（`attempt_service.mark_mastered_if_ready`，
+    依据 `practice_attempts` 的最近两次结果，达标时写 `training_items.mastered_at`）；
+    "判据满足"（与 `acceptance` 口径比对）仍未实现
 - [ ] 5.2 阶段达标：覆盖模式看必修项全达标，达成模式看阶段验收标准
   - 验收：两种模式各一组单测
 - [ ] 5.3 任务达标 = 必修覆盖 100% 且最终测验通过

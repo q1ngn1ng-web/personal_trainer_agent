@@ -209,6 +209,7 @@ CREATE TABLE IF NOT EXISTS training_items (
     knowledge_point TEXT,
     source_chunk_ids TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'practiced', 'passed', 'failed')),
+    mastered_at DATETIME,
     created_at DATETIME NOT NULL,
     FOREIGN KEY (stage_id) REFERENCES path_stages(id)
 );
@@ -261,6 +262,24 @@ CREATE TABLE IF NOT EXISTS question_bank (
 );
 
 CREATE INDEX IF NOT EXISTS idx_question_bank_drawable ON question_bank(training_id, cooldown_until);
+
+-- 逐次作答记录：客观表现的唯一数据源（准确率 / 连续达标都以它为准）
+-- item_key 是稳定题目键，与 plan_items / question_bank 一致
+CREATE TABLE IF NOT EXISTS practice_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    plan_id INTEGER,
+    round_index INTEGER,
+    result TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
+    source TEXT DEFAULT 'self' CHECK (source IN ('self', 'quiz', 'llm')),
+    note TEXT,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_practice_attempts_item
+    ON practice_attempts(training_id, item_key, id);
 
 CREATE TABLE IF NOT EXISTS learning_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

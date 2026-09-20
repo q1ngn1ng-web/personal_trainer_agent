@@ -205,6 +205,27 @@ def generate_plan(
             active.close()
 
 
+def item_id_for(
+    training_id: int, item_key: str, *, conn: sqlite3.Connection | None = None
+) -> int | None:
+    """按稳定题目键取当前路径里的训练项主键（信号归因用：`learning_signals.item_id`）。"""
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT i.id FROM training_items i "
+            "JOIN path_stages s ON s.id = i.stage_id "
+            "JOIN training_paths p ON p.id = s.path_id "
+            "WHERE p.training_id = ? AND i.item_key = ? "
+            "ORDER BY (p.status = 'confirmed') DESC, p.version DESC LIMIT 1",
+            (int(training_id), str(item_key)),
+        ).fetchone()
+        return int(row["id"]) if row else None
+    finally:
+        if own:
+            active.close()
+
+
 def has_plan(training_id: int, *, conn: sqlite3.Connection | None = None) -> bool:
     active = _connect(conn)
     own = conn is None
@@ -594,6 +615,7 @@ __all__ = [
     "ensure_plan",
     "generate_plan",
     "has_plan",
+    "item_id_for",
     "item_key_for",
     "next_due_date",
     "plan_progress",

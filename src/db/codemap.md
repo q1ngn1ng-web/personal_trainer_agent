@@ -80,6 +80,8 @@ SCHEDULE / RECALL_PRACTICE / THREE_REFLECTIONS / REWARD / WEEKLY_REVIEW
 | `question_bank` | 测验题库：练过的题入池，`cooldown_until` = 练过日 + 14 天（冷却期内的题不得被抽中，ADR-0016） |
 | `training_items.item_key` | **稳定题目键**（`sha1(training_id + 知识点 + 规范化标题)[:12]`）。`plan_items` 与 `question_bank` 引用它，而不是会随路径重生成变化的 `id` |
 | `training_items.status` 新增 `practiced` | "练过"（勾选写入）；`passed` 收窄为"达标"，只由达标判定写入 |
+| `practice_attempts`（2026-09-21） | 逐次作答记录：`(training_id, item_key, plan_id, round_index, result, source)`。准确率、连续达标、客观通道都以它为准 |
+| `training_items.mastered_at` | 达标时间（由 `attempt_service.mark_mastered_if_ready` 写入） |
 
 迁移由 `migrate._rebuild_training_items` 负责：重建表 + 回填 `item_key`，走迁移三件套
 （`isolation_level=None` + `foreign_keys=OFF` + `legacy_alter_table=ON` + 显式事务），迁移后自检 `foreign_key_check`。

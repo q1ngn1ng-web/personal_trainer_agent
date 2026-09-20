@@ -216,9 +216,25 @@ class TrainingItem(RowModel):
     knowledge_point: str | None = None
     source_chunk_ids: Any = None
     status: str = "pending"
+    mastered_at: str | None = None
     created_at: str = ""
 
     json_fields: ClassVar[frozenset[str]] = frozenset({"difficulty_basis", "source_chunk_ids"})
+
+
+@dataclass
+class PracticeAttempt(RowModel):
+    """一次作答记录（客观表现的原子数据）。"""
+
+    id: int
+    training_id: int
+    item_key: str
+    plan_id: int | None = None
+    round_index: int | None = None
+    result: str = "fail"
+    source: str = "self"
+    note: str | None = None
+    created_at: str = ""
 
 
 @dataclass

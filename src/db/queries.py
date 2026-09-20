@@ -171,6 +171,7 @@ _TRAINING_CASCADE: tuple[str, ...] = (
     "DELETE FROM adjustment_log WHERE training_id = ?",
     "DELETE FROM plan_items WHERE training_id = ?",
     "DELETE FROM question_bank WHERE training_id = ?",
+    "DELETE FROM practice_attempts WHERE training_id = ?",
     "DELETE FROM baseline_history WHERE training_id = ?",
     "DELETE FROM review_archives WHERE training_id = ?",
     "DELETE FROM llm_calls WHERE training_id = ?",

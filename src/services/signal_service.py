@@ -212,10 +212,16 @@ def process_signal(
     *,
     item_id: int | None = None,
     item_status: str | None = None,
+    item_key: str | None = None,
+    objective: str | None = None,
     raw_text: str = "",
     conn: sqlite3.Connection | None = None,
 ) -> AdjustmentDecision:
-    """记录信号 → 裁决 → 写调整日志（含被拦截的情形）。"""
+    """记录信号 → 裁决 → 落动作 → 写调整日志（含被拦截的情形）。
+
+    ``objective`` 给出时优先使用（来自逐次作答的准确率，见 ``attempt_service``）；
+    没给时才退回 ``item_status`` 的代理口径（老调用点兼容）。
+    """
     record_signal(training_id, signal_type, item_id=item_id, raw_text=raw_text, conn=conn)
     active = _connect(conn)
     own = conn is None
@@ -238,10 +244,18 @@ def process_signal(
 
     decision = decide(
         signal_type,
-        objective=objective_state(item_status),
+        objective=objective if objective is not None else objective_state(item_status),
         same_signal_today=max(same_today, 0),
         structural_today=structural_today,
     )
+
+    # 结构性动作的执行点（ADR-0015 + ADR-0021）
+    if decision.applied:
+        detail = apply_decision(
+            decision, training_id=training_id, item_key=item_key, item_id=item_id, conn=conn
+        )
+        if detail:
+            decision.detail.update(detail)
 
     active = _connect(conn)
     own = conn is None
@@ -266,6 +280,45 @@ def process_signal(
         if own:
             active.close()
     return decision
+
+
+def apply_decision(
+    decision: AdjustmentDecision,
+    *,
+    training_id: int,
+    item_key: str | None = None,
+    item_id: int | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """把规则层裁定的动作真正落到数据上，返回写进调整日志的补充信息。
+
+    | 动作 | 执行点 |
+    |---|---|
+    | `raise_difficulty` / `lower_difficulty` | 调整该题难度档位（1..4），**不动排期日期** |
+    | `reduce_load` | ADR-0021 决策 4：**题量不裁剪**；未完成项按累计顺延，这里只记录说明 |
+    | `expand_scope` | 需要补充资料/重新生成路径，属人工动作，这里只记录"待补充" |
+
+    这样做的底线是：**没有真实执行点就不假装调整过**（审计报告 M1 的教训）。
+    """
+    action = decision.action
+    if action in ("raise_difficulty", "lower_difficulty") and item_key:
+        from src.services import path_service
+
+        delta = 1 if action == "raise_difficulty" else -1
+        changed = path_service.adjust_difficulty(training_id, item_key, delta, conn=conn)
+        if changed is not None:
+            before, after = changed
+            return {"difficulty_before": before, "difficulty_after": after}
+        return {"difficulty_before": None, "difficulty_after": None, "reason": "item_not_found"}
+    if action in ("raise_difficulty", "lower_difficulty"):
+        return {"note": "信号未关联到具体训练项，难度未调整（只留痕）"}
+    if action == "reduce_load":
+        return {"note": "按 ADR-0021 不裁剪题量：未完成项累计到次日，用户可自行分两天完成"}
+    if action == "expand_scope":
+        return {"note": "需要补充资料或重新生成路径（人工动作，未自动改计划）"}
+    if action == "light_hint":
+        return {"note": "仅轻微提示，未改动计划或难度"}
+    return {}
 
 
 def list_signals(
@@ -323,6 +376,7 @@ __all__ = [
     "SIGNAL_ACTIONS",
     "STRUCTURAL_THRESHOLD",
     "AdjustmentDecision",
+    "apply_decision",
     "decide",
     "list_adjustments",
     "list_signals",
