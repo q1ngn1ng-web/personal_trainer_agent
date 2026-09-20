@@ -155,6 +155,41 @@ class TestPlanPages(unittest.TestCase):
             [subheader.value for subheader in app.subheader],
         )
 
+    def test_answer_button_records_attempt(self) -> None:
+        """点「✓ 答对」应写一条作答记录并把训练项标为练过（不是达标）。"""
+        from streamlit.testing.v1 import AppTest
+
+        from src.db import queries
+        from src.services import plan_service
+
+        training_id = self._training_with_plan()
+        plan_service.generate_plan(training_id)
+        task = plan_service.today_tasks(training_id=training_id)[0]
+
+        app = AppTest.from_file(self._daily_wrapper, default_timeout=60)
+        app.query_params["page"] = "daily"
+        app.query_params["training_id"] = str(training_id)
+        app.run()
+        self.assertFalse(app.exception)
+        app.button(key=f"dl_pass_{task.plan_id}").click().run()
+        self.assertFalse(app.exception)
+
+        conn = queries.get_connection()
+        try:
+            attempt = conn.execute(
+                "SELECT result, item_key, plan_id FROM practice_attempts WHERE training_id = ?",
+                (training_id,),
+            ).fetchone()
+            item = conn.execute(
+                "SELECT status FROM training_items WHERE item_key = ?", (task.item_key,)
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(attempt, "点答对必须留下作答记录")
+        self.assertEqual(attempt["result"], "pass")
+        self.assertEqual(attempt["plan_id"], task.plan_id)
+        self.assertEqual(item["status"], "practiced")
+
 
 if __name__ == "__main__":
     unittest.main()
