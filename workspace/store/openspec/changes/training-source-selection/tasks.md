@@ -28,11 +28,11 @@
   - 验收：单测断言 `heading_path` 形如 `第三章 > 3.2 虚拟语气`
 - [x] A2.2 切片函数：先按标题层级、再按段落边界；超长递归切分并保留标题前缀
   - 验收：单测覆盖「不跨知识点」「超长切分后前缀保留」
-- [ ] A2.3 PDF 解析（选型见 ADR-0012，优先复用 `PythonProject16` 的方案）
+- [x] A2.3 PDF 解析（选型见 ADR-0012，优先复用 `PythonProject16` 的方案）
   - 验收：一份真实 PDF 解析成功并输出 Markdown
-- [ ] A2.4 Word（.docx）解析：按标题样式与段落层级转 Markdown
+- [x] A2.4 Word（.docx）解析：按标题样式与段落层级转 Markdown
   - 验收：2 份真实 docx 讲义解析成功，层级正确
-- [ ] A2.5 Excel（.xlsx）题库解析：识别题干 / 选项 / 正确答案 / 解析列，输出结构化题目
+- [x] A2.5 Excel（.xlsx）题库解析：识别题干 / 选项 / 正确答案 / 解析列，输出结构化题目
   - 验收：2 份真实题库表格解析成功；表头不规整时判失败并提示，不猜列含义
 - [x] A2.6 解析失败路径：写 `parse_status=failed` + `parse_error`，不阻塞其他来源
   - 验收：传入损坏文件，流程不中断且状态为 failed
@@ -52,9 +52,9 @@
 
 ### A4 训练项回指
 
-- [ ] A4.1 训练项增加 `source_chunk_ids`，写入时校验切片 ID 存在性
+- [ ] A4.1 训练项增加 `source_chunk_ids`，写入时校验切片 ID 存在性 —— **依赖 `training_items` 表（属 `training-path-generation`，未建）**；校验函数 `link_chunk_ids` 已实现并测试
   - 验收：单测断言无效 ID 被丢弃 + 记日志，训练项本身保留
-- [ ] A4.2 提供「查看出处」查询：返回切片原文与标题路径
+- [x] A4.2 提供「查看出处」查询：返回切片原文与标题路径
   - 验收：能把某训练项对应原文取出来
 
 ### A5 UI（静态部分）
@@ -72,9 +72,9 @@
 
 - [x] A6.1 补单测并跑通 `uv run pytest -q`
 - [ ] A6.2 用 3 份真实资料统计解析成功率、切片数分布、解析耗时，写入 `workspace/evidence/`
-- [ ] A6.3 写 `workspace/record/` 变更记录（标注「阶段 A 完成，change 未归档」）
+- [x] A6.3 写 `workspace/record/` 变更记录（标注「阶段 A 完成，change 未归档」）
 - [x] A6.4 `openspec validate --all --store store` 通过
-- [ ] A6.5 提交（**不 archive**）
+- [x] A6.5 提交（**不 archive**）
 
 ---
 

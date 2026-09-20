@@ -183,6 +183,49 @@ class TestSourceService(unittest.TestCase):
         self.assertFalse(report.is_empty)
         self.assertIn("第三章 虚拟语气 > 3.4 新增章节", report.added)
 
+    def test_unsupported_file_marks_unsupported(self) -> None:
+        source = svc.create_source_from_file(
+            self.training.id, filename="图片.png", data=b"\x89PNG"
+        )
+        self.assertEqual(source.parse_status, "unsupported")
+        self.assertIn("png", (source.parse_error or "").lower())
+
+    def test_broken_xlsx_marks_failed(self) -> None:
+        source = svc.create_source_from_file(
+            self.training.id, filename="乱表.xlsx", data=b"not a real xlsx"
+        )
+        self.assertEqual(source.parse_status, "failed")
+
+    def test_xlsx_file_becomes_chunks(self) -> None:
+        import io
+
+        import openpyxl
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "题库"
+        sheet.append(["题干", "选项", "正确答案", "解析"])
+        sheet.append(["虚拟语气表示什么？", "A 事实 B 假设", "B", "表达与事实相反"])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+
+        source = svc.create_source_from_file(
+            self.training.id, filename="题库.xlsx", data=buffer.getvalue()
+        )
+        self.assertEqual(source.parse_status, "ok")
+        chunks = svc.list_chunks(source.id)
+        self.assertTrue(chunks)
+        self.assertTrue(any("题目 1" in (chunk.heading_path or "") for chunk in chunks))
+
+    def test_get_chunks_by_ids_returns_provenance(self) -> None:
+        source = self._import("user_paste", _SAMPLE_MD)
+        ids = sorted(svc.existing_chunk_ids(source.id))[:2]
+        rows = svc.get_chunks_by_ids(ids)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["source_title"], "样例")
+        self.assertTrue(rows[0]["heading_path"])
+        self.assertEqual(svc.get_chunks_by_ids([]), [])
+
 
 if __name__ == "__main__":
     unittest.main()

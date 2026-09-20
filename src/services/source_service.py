@@ -213,6 +213,96 @@ def mark_failed(
     return Source.from_row(row) if row else None
 
 
+def mark_unsupported(
+    source_id: int, reason: str, conn: sqlite3.Connection | None = None
+) -> Source | None:
+    """把来源标为「格式暂不支持」，与解析失败区分开。"""
+    active = _connect(conn)
+    own = conn is None
+    try:
+        active.execute(
+            "UPDATE sources SET parse_status = 'unsupported', parse_error = ? WHERE id = ?",
+            (reason, source_id),
+        )
+        if own:
+            active.commit()
+        row = active.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+    finally:
+        if own:
+            active.close()
+    return Source.from_row(row) if row else None
+
+
+def create_source_from_file(
+    training_id: int,
+    *,
+    filename: str,
+    data: bytes,
+    scope: str = "personal",
+    conn: sqlite3.Connection | None = None,
+) -> Source:
+    """从上传文件的字节登记来源。
+
+    先把文件解析成 Markdown（PDF / Word / Excel / 文本），再走与粘贴文本
+    完全相同的切片流程。失败时**显式落状态**，不静默吞掉。
+    """
+    from src.services.doc_parser import UnsupportedFormatError, parse_file
+
+    try:
+        text = parse_file(filename, data)
+    except UnsupportedFormatError as exc:
+        source = create_source(
+            training_id, type="user_upload", title=filename, origin=filename, conn=conn
+        )
+        logger.warning("create_source_from_file: unsupported %s (%s)", filename, exc)
+        return mark_unsupported(source.id, str(exc), conn=conn) or source
+    except Exception as exc:
+        source = create_source(
+            training_id, type="user_upload", title=filename, origin=filename, conn=conn
+        )
+        logger.exception("create_source_from_file: failed to parse %s", filename)
+        return mark_failed(source.id, f"文件解析失败：{exc}", conn=conn) or source
+
+    source = create_source(
+        training_id,
+        type="user_upload",
+        title=filename,
+        origin=filename,
+        content=text,
+        scope=scope,
+        conn=conn,
+    )
+    return parse_source(source.id, conn=conn)
+
+
+def get_chunks_by_ids(
+    chunk_ids: list[int], conn: sqlite3.Connection | None = None
+) -> list[dict[str, Any]]:
+    """按切片 ID 取原文与标题路径，供「查看出处」使用。"""
+    ids = [int(value) for value in (chunk_ids or [])]
+    if not ids:
+        return []
+    placeholders = ", ".join("?" for _ in ids)
+    active = _connect(conn)
+    own = conn is None
+    try:
+        rows = active.execute(
+            f"""
+            SELECT c.id, c.text, c.heading_path, c.ordinal,
+                   s.id AS source_id, s.title AS source_title, s.type AS source_type
+            FROM source_chunks c
+            JOIN sources s ON s.id = c.source_id
+            WHERE c.id IN ({placeholders})
+            ORDER BY c.id
+            """,
+            ids,
+        ).fetchall()
+    finally:
+        if own:
+            active.close()
+    return [dict(row) for row in rows]
+
+
 def search_chunks(
     training_id: int, query: str, *, limit: int = 10, conn: sqlite3.Connection | None = None
 ) -> list[SourceChunk]:
@@ -311,12 +401,15 @@ __all__ = [
     "STATIC_SOURCE_TYPES",
     "compute_impact",
     "create_source",
+    "create_source_from_file",
     "existing_chunk_ids",
+    "get_chunks_by_ids",
     "get_source",
     "link_chunk_ids",
     "list_chunks",
     "list_sources",
     "mark_failed",
+    "mark_unsupported",
     "parse_source",
     "search_chunks",
 ]

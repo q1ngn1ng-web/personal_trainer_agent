@@ -72,25 +72,24 @@ def _render_add_forms(training_id: int) -> None:
                 st.rerun()
 
     with tab_upload:
-        uploaded = st.file_uploader("上传 Markdown / 文本文件", type=["md", "markdown", "txt"], key="src_upload_file")
+        uploaded = st.file_uploader(
+            "上传资料文件",
+            type=["md", "markdown", "txt", "pdf", "docx", "xlsx"],
+            key="src_upload_file",
+            help="支持 Markdown / 文本 / PDF / Word / Excel（Excel 按表头识别题干、选项、答案、解析）",
+        )
         if uploaded is not None and st.button("解析上传文件", key="src_upload_submit", type="primary"):
-            raw = uploaded.read()
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                text = raw.decode("utf-8", errors="ignore")
-                st.warning("文件不是 UTF-8，已按可读部分导入")
-            source = svc.create_source(
-                training_id,
-                type="user_upload",
-                title=uploaded.name,
-                origin=uploaded.name,
-                content=text,
+            source = svc.create_source_from_file(
+                training_id, filename=uploaded.name, data=uploaded.read()
             )
-            parsed = svc.parse_source(source.id)
-            st.success(f"已解析 {uploaded.name}，共 {len(svc.list_chunks(parsed.id))} 个切片")
+            if source.parse_status == "ok":
+                st.success(f"已解析 {uploaded.name}，共 {len(svc.list_chunks(source.id))} 个切片")
+            elif source.parse_status == "unsupported":
+                st.warning(source.parse_error or "该格式暂不支持")
+            else:
+                st.error(source.parse_error or "解析失败")
             st.rerun()
-        st.caption("PDF / Word / Excel 的解析尚未接入（需要额外依赖）。")
+        st.caption("扫描件（图片型 PDF）暂不支持，需要 OCR。")
 
     with tab_ai:
         st.caption("选择后将由 AI 生成训练资料，本阶段仅登记来源，生成逻辑在路径阶段接入。")
