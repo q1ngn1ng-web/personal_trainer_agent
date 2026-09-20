@@ -22,7 +22,6 @@ def _init_state() -> None:
         "nt_step": 1,
         "nt_topic": "",
         "nt_clarify_session": None,
-        "nt_clarify_answer": "",
         "nt_validation": None,
         "nt_keywords": None,
         "nt_keywords_input": "",
@@ -44,7 +43,6 @@ def _reset_state() -> None:
         "nt_step",
         "nt_topic",
         "nt_clarify_session",
-        "nt_clarify_answer",
         "nt_validation",
         "nt_keywords",
         "nt_keywords_input",
@@ -115,7 +113,10 @@ def _render_draft(draft) -> None:
     ]
     for label, value in rows:
         name = {"学习内容": "content", "目标等级": "level", "验收标准": "acceptance"}[label]
-        mark = " 🟡系统建议" if draft.field_sources.get(name) == GoalFieldSource.INFERRED.value else ""
+        # 只有「有值且来源是推断」时才标系统建议；空字段标的是待补充
+        has_value = bool(str(value or "").strip())
+        is_inferred = draft.field_sources.get(name) == GoalFieldSource.INFERRED.value
+        mark = " 🟡系统建议" if (has_value and is_inferred) else ""
         st.markdown(f"- **{label}**：{value or '（待补充）'}{mark}")
 
 
@@ -175,16 +176,17 @@ def _render_step1() -> None:
     if session.fallback_used:
         st.warning("LLM 暂时不可用，已降级为表单式提问。")
 
-    if session.question and not session.can_confirm:
+    # 只要还有追问（含软限后的「也可以自己改」提示）就保留回答入口
+    if session.question:
         st.markdown(f"**{session.question}**")
-        answer = st.text_input("你的回答", key="nt_clarify_answer")
+        # 每轮用不同的 key：既能拿到空白的输入框，又避免在控件实例化后改写 session_state
+        answer = st.text_input("你的回答", key=f"nt_clarify_answer_{session.rounds}")
         if st.button("提交回答", key="nt_answer", type="primary"):
             from src.services.goal_clarification_service import continue_session
 
             with st.spinner("正在更新目标..."):
                 updated = continue_session(session.training_id, answer)
             st.session_state["nt_clarify_session"] = updated
-            st.session_state["nt_clarify_answer"] = ""
             st.rerun()
 
     col1, col2 = st.columns([1, 1])
