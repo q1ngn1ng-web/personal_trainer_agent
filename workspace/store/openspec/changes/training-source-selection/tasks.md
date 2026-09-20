@@ -8,6 +8,8 @@
   - 验收：`uv run python -m src.cli init-db` 后 `.schema sources` 与 `.schema source_chunks` 可见
 - [ ] 1.2 新增 FTS5 虚表与同步触发器（切片写入/更新/删除时同步索引）
   - 验收：插入一条切片后，用 `MATCH` 查询能命中
+- [ ] 1.2b `sources` 增加 `org_id` 与 `scope`（org_shared / personal）字段并写入默认值
+  - 验收：新建来源时两个字段均有值；**本 change 不实现鉴权**
 - [ ] 1.3 增加可重复执行的迁移逻辑（老库不丢数据）
   - 验收：对已有 `data/trainer.db` 跑一次迁移，训练列表条数不变
 - [ ] 1.4 `src/db/models.py` 增加 `Source` / `SourceChunk` dataclass
@@ -19,6 +21,10 @@
   - 验收：单测断言 `heading_path` 形如 `第三章 > 3.2 虚拟语气`
 - [ ] 2.2 实现 PDF 解析（选型见 ADR-0007，优先复用 `PythonProject16` 的方案）
   - 验收：对一份真实 PDF 解析成功并能输出 Markdown
+- [ ] 2.2b 实现 Word（.docx）解析：按标题样式与段落层级转 Markdown
+  - 验收：用 2 份真实 docx 讲义解析成功，标题层级正确
+- [ ] 2.2c 实现 Excel（.xlsx）题库解析：识别题干 / 选项 / 正确答案 / 解析列，输出结构化题目
+  - 验收：用 2 份真实题库表格解析成功；表头不规整时判失败并提示，不猜列含义
 - [ ] 2.3 实现切片函数：按标题层级 + 段落边界，超长时递归切分并保留标题前缀
   - 验收：单测覆盖「不跨知识点」「超长切分后前缀保留」两种情况
 - [ ] 2.4 解析失败路径：写 `parse_status=failed`、保留原始记录、不阻塞其他来源
