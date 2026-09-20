@@ -4,6 +4,7 @@
   - home (default)         → page_home
   - new_training           → page_new_training
   - sources + ?training_id → page_sources
+  - path + ?training_id    → page_path
   - detail + ?training_id  → page_training
   - daily + ?training_id   → page_daily
   - review + ?training_id  → page_review
@@ -47,6 +48,7 @@ def _register_pages() -> None:
     from src.ui.page_home import render as render_home
     from src.ui.page_new_training import render as render_new_training
     from src.ui.page_sources import render as render_sources
+    from src.ui.page_path import render as render_path
     from src.ui.page_training import render as render_training
     from src.ui.page_daily import render as render_daily
     from src.ui.page_review import render as render_review
@@ -55,6 +57,7 @@ def _register_pages() -> None:
         "home": render_home,
         "new_training": render_new_training,
         "sources": render_sources,
+        "path": render_path,
         "detail": render_training,
         "daily": render_daily,
         "review": render_review,
@@ -106,6 +109,10 @@ def _render_sidebar() -> None:
         if st.button("📚 资料", key="nav_sources", width="stretch",
                      type="primary" if current_page == "sources" else "secondary"):
             _goto(page="sources", training_id=int(current_training_id) if current_training_id else None)
+
+        if st.button("🧭 路径", key="nav_path", width="stretch",
+                     type="primary" if current_page == "path" else "secondary"):
+            _goto(page="path", training_id=int(current_training_id) if current_training_id else None)
 
         st.markdown("---")
 

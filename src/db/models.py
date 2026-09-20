@@ -201,6 +201,56 @@ class EdgeAssessment(RowModel):
     created_at: str = ""
 
 
+@dataclass
+class TrainingItem(RowModel):
+    """路径里的一个训练项。``difficulty_basis`` / ``source_chunk_ids`` 是 JSON。"""
+
+    id: int
+    stage_id: int
+    ordinal: int
+    title: str
+    item_type: str | None = None
+    difficulty_tier: int | None = None
+    difficulty_basis: Any = None
+    knowledge_point: str | None = None
+    source_chunk_ids: Any = None
+    status: str = "pending"
+    created_at: str = ""
+
+    json_fields: ClassVar[frozenset[str]] = frozenset({"difficulty_basis", "source_chunk_ids"})
+
+
+@dataclass
+class PathStage(RowModel):
+    """路径的一个阶段。"""
+
+    id: int
+    path_id: int
+    ordinal: int
+    title: str
+    goal: str | None = None
+    estimated_minutes: int = 0
+    status: str = "locked"
+
+
+@dataclass
+class TrainingPath(RowModel):
+    """一条训练路径（可有多版本，旧版本标 superseded）。"""
+
+    id: int
+    training_id: int
+    version: int = 1
+    status: str = "draft"
+    mode: str = "mastery"
+    horizon_weeks: int | None = None
+    weekly_frequency: int | None = None
+    daily_budget_minutes: int | None = None
+    budget_minutes: int | None = None
+    planned_minutes: int | None = None
+    created_at: str = ""
+    confirmed_at: str | None = None
+
+
 class Element(str, Enum):
     TRAINING_GOAL = "training_goal"
     BASELINE = "baseline"

@@ -241,6 +241,49 @@ EDGE_PROBE_GRADE_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+PATH_SKELETON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "horizon_weeks": {"type": "integer", "minimum": 1, "maximum": 52},
+        "weekly_frequency": {"type": "integer", "minimum": 1, "maximum": 14},
+        "daily_budget_minutes": {"type": "integer", "minimum": 5, "maximum": 240},
+        "stages": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "items": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "item_type": {
+                                    "type": "string",
+                                    "enum": ["memory", "comprehension", "practice", "prerequisite"],
+                                },
+                                "difficulty": {"type": "integer", "minimum": 1, "maximum": 4},
+                                "knowledge_point": {"type": "string"},
+                                "minutes": {"type": "integer", "minimum": 1, "maximum": 120},
+                            },
+                            "required": ["title", "item_type", "difficulty", "knowledge_point", "minutes"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["title", "goal", "items"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["horizon_weeks", "weekly_frequency", "daily_budget_minutes", "stages"],
+    "additionalProperties": False,
+}
+
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "topic_validation": TOPIC_VALIDATION_SCHEMA,
     "keyword_generation": KEYWORD_GENERATION_SCHEMA,
@@ -252,4 +295,5 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "goal_clarification": GOAL_CLARIFICATION_SCHEMA,
     "edge_probe": EDGE_PROBE_SCHEMA,
     "edge_probe_grade": EDGE_PROBE_GRADE_SCHEMA,
+    "path_skeleton": PATH_SKELETON_SCHEMA,
 }

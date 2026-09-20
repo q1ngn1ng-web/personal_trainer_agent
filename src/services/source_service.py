@@ -481,6 +481,24 @@ def existing_chunk_ids(source_id: int, conn: sqlite3.Connection | None = None) -
     return {int(row["id"]) for row in rows}
 
 
+def existing_chunk_ids_for_training(
+    training_id: int, conn: sqlite3.Connection | None = None
+) -> set[int]:
+    """某训练下所有启用来源的切片 ID 集合，用于校验训练项回指是否还有效。"""
+    active = _connect(conn)
+    own = conn is None
+    try:
+        rows = active.execute(
+            "SELECT c.id FROM source_chunks c JOIN sources s ON s.id = c.source_id "
+            "WHERE s.training_id = ? AND s.enabled = 1",
+            (training_id,),
+        ).fetchall()
+    finally:
+        if own:
+            active.close()
+    return {int(row["id"]) for row in rows}
+
+
 def link_chunk_ids(
     raw_ids: Any, source_id: int, conn: sqlite3.Connection | None = None
 ) -> tuple[list[int], list[int]]:
@@ -504,6 +522,7 @@ __all__ = [
     "create_source",
     "create_source_from_file",
     "existing_chunk_ids",
+    "existing_chunk_ids_for_training",
     "fetch_web_source",
     "get_chunks_by_ids",
     "get_source",

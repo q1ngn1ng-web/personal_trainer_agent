@@ -199,6 +199,30 @@ EDGE_PROBE_GRADE_PROMPT: str = """你是答案评定助手。请判断用户的�
 
 EDGE_PROBE_GRADE_PROMPT_VERSION: str = "v1.0.0"
 
+PATH_SKELETON_PROMPT: str = """你是训练路径设计助手。用户已确认目的、导入资料、并完成了理解边缘定位。
+请给出一条可执行的训练路径骨架：投入参数 + 阶段划分 + 每个阶段的训练项。
+
+训练目的: {goal}
+理解边缘定位结果（已掌握 / 边缘 / 未达）:
+{edge_states}
+可用来源知识点:
+{knowledge_points}
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
+
+要求:
+1. horizon_weeks / weekly_frequency / daily_budget_minutes 是**建议值**，用户会微调；要贴合任务总工作量，不要明显超出常人可承受范围
+2. **已掌握**的知识点不要生成训练项；**边缘**的是教学重点；**未达**的必须先给一条 item_type=prerequisite 的铺垫项
+3. 每个训练项写清 knowledge_point（要与输入的来源知识点名称一致），便于回指原文
+4. difficulty 取 1-4，与 item_type 匹配：记忆性偏 1-2、理解性偏 2-3、实践性偏 3-4
+5. 不要输出具体日期——日期由调度器计算
+
+你只能输出 JSON。
+"""
+
+PATH_SKELETON_PROMPT_VERSION: str = "v1.0.0"
+
 PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "topic_validation": (TOPIC_VALIDATION_PROMPT, TOPIC_VALIDATION_PROMPT_VERSION),
     "keyword_generation": (KEYWORD_GENERATION_PROMPT, KEYWORD_GENERATION_PROMPT_VERSION),
@@ -210,4 +234,5 @@ PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "goal_clarification": (GOAL_CLARIFICATION_PROMPT, GOAL_CLARIFICATION_PROMPT_VERSION),
     "edge_probe": (EDGE_PROBE_PROMPT, EDGE_PROBE_PROMPT_VERSION),
     "edge_probe_grade": (EDGE_PROBE_GRADE_PROMPT, EDGE_PROBE_GRADE_PROMPT_VERSION),
+    "path_skeleton": (PATH_SKELETON_PROMPT, PATH_SKELETON_PROMPT_VERSION),
 }

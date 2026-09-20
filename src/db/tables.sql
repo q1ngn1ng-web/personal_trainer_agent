@@ -169,3 +169,49 @@ CREATE INDEX IF NOT EXISTS idx_review_archives_training_week ON review_archives(
 CREATE INDEX IF NOT EXISTS idx_sources_training ON sources(training_id);
 CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_edge_assessments_training ON edge_assessments(training_id, knowledge_point);
+
+CREATE TABLE IF NOT EXISTS training_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'confirmed', 'superseded')),
+    mode TEXT DEFAULT 'mastery' CHECK (mode IN ('coverage', 'mastery')),
+    horizon_weeks INTEGER,
+    weekly_frequency INTEGER,
+    daily_budget_minutes INTEGER,
+    budget_minutes INTEGER,
+    planned_minutes INTEGER,
+    created_at DATETIME NOT NULL,
+    confirmed_at DATETIME,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE TABLE IF NOT EXISTS path_stages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    goal TEXT,
+    estimated_minutes INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'locked' CHECK (status IN ('locked', 'active', 'completed')),
+    FOREIGN KEY (path_id) REFERENCES training_paths(id)
+);
+
+CREATE TABLE IF NOT EXISTS training_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stage_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    item_type TEXT CHECK (item_type IN ('memory', 'comprehension', 'practice', 'prerequisite')),
+    difficulty_tier INTEGER,
+    difficulty_basis TEXT,
+    knowledge_point TEXT,
+    source_chunk_ids TEXT,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'passed', 'failed')),
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (stage_id) REFERENCES path_stages(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_paths_training ON training_paths(training_id, version);
+CREATE INDEX IF NOT EXISTS idx_path_stages_path ON path_stages(path_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_training_items_stage ON training_items(stage_id, ordinal);

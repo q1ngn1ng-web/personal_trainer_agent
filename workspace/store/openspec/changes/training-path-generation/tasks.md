@@ -5,20 +5,20 @@
 
 ## 1. 数据层
 
-- [ ] 1.1 新增 `training_paths` / `path_stages` / `training_items` 三张表
+- [x] 1.1 新增 `training_paths` / `path_stages` / `training_items` 三张表
   - 验收：`uv run python -m src.cli init-db` 后三张表均可查看
-- [ ] 1.2 `training_items` 增加 `source_chunk_ids` 与 `acceptance` 字段，并对接来源切片表
+- [x] 1.2 `training_items` 增加 `source_chunk_ids` 与 `acceptance` 字段，并对接来源切片表
   - 验收：能写入并读回切片回指
-- [ ] 1.3 迁移逻辑可重复执行，老库不丢数据
+- [x] 1.3 迁移逻辑可重复执行，老库不丢数据
   - 验收：对已有 `data/trainer.db` 跑一次迁移，训练列表条数不变
-- [ ] 1.4 `src/db/models.py` 增加 `TrainingPath` / `PathStage` / `TrainingItem` dataclass
+- [x] 1.4 `src/db/models.py` 增加 `TrainingPath` / `PathStage` / `TrainingItem` dataclass
   - 验收：`uv run pytest -q` 通过
 
 ## 2. 预算与模式（纯函数，先写测试）
 
-- [ ] 2.1 预算换算：`horizon_weeks × weekly_frequency × daily_budget`
+- [x] 2.1 预算换算：`horizon_weeks × weekly_frequency × daily_budget`
   - 验收：单测覆盖正常值、缺参、异常值
-- [ ] 2.2 预算校验：超支拒绝、低于 50% 提示
+- [x] 2.2 预算校验：超支拒绝、低于 50% 提示
   - 验收：单测断言超支路径被拒、过松路径仅提示
 - [ ] 2.3 覆盖模式的知识点覆盖校验：总量锁定、不许跳过必修知识点
   - 验收：单测断言"减少题量"的操作不会移除必修知识点
@@ -27,24 +27,24 @@
 
 ## 3. LLM 用途
 
-- [ ] 3.1 新增用途 `path_skeleton`：输入目的与来源摘要，输出骨架（阶段、目标、题量与题型分布、预估时长）
+- [x] 3.1 新增用途 `path_skeleton`：输入目的与来源摘要，输出骨架（阶段、目标、题量与题型分布、预估时长）
   - 验收：输出通过 JSON Schema 校验，且不含具体日期字段
 - [ ] 3.2 新增用途 `stage_items`：输入阶段目标 + 前置阶段表现 + 候选切片，输出训练项
   - 验收：输出包含题型、难度档位与 `basis`
 - [ ] 3.3 难度依据校验：缺 `basis` 或档位越界视为不合格并重试
   - 验收：单测用缺依据的样本断言被拒
-- [ ] 3.4 切片回指校验：不存在的切片 ID 丢弃并记日志
+- [x] 3.4 切片回指校验：不存在的切片 ID 丢弃并记日志
   - 验收：单测断言无效 ID 被丢弃、训练项仍保留
 
 ## 4. 路径服务
 
-- [ ] 4.1 生成骨架草案并落库（`status=draft`）
+- [x] 4.1 生成骨架草案并落库（`status=draft`）
   - 验收：生成后能从库里读回阶段与题量分布
-- [ ] 4.2 确认路径：`status=confirmed` + 写入确认时间
+- [x] 4.2 确认路径：`status=confirmed` + 写入确认时间
   - 验收：确认后训练可进入执行阶段
 - [ ] 4.3 阶段激活与细节生成：进入阶段时生成该阶段训练项
   - 验收：手动推进到第 2 阶段，训练项按第 1 阶段表现生成
-- [ ] 4.4 版本管理：骨架重构产生新版本，旧版本标记为已被取代
+- [x] 4.4 版本管理：骨架重构产生新版本，旧版本标记为已被取代
   - 验收：重构后旧版本仍可查询，已完成训练项归属版本正确
 - [ ] 4.5 就地微调：修改阶段内未完成训练项不产生新版本
   - 验收：微调后版本号不变
@@ -53,11 +53,11 @@
 
 ## 5. UI
 
-- [ ] 5.1 路径详情页：嵌套列表展示阶段 → 训练项，含题型分布、预估时长与进度条
+- [x] 5.1 路径详情页：嵌套列表展示阶段 → 训练项，含题型分布、预估时长与进度条
   - 验收：手动跑一遍，能看到阶段、题量、题型分布与进度；**页面不出现 mermaid 图**
 - [ ] 5.2 路径编辑页：骨架微调（阶段顺序、目标、题量）
   - 验收：修改后重新校验预算并提示结果
-- [ ] 5.3 预算对比展示：实际预估时长 vs 预算，超支时给出提示
+- [x] 5.3 预算对比展示：实际预估时长 vs 预算，超支时给出提示
   - 验收：把总时长改到超预算，界面给出拒绝提示
 - [ ] 5.4 阶段锁定状态展示：前置阶段未完成时后续阶段锁定
   - 验收：锁定阶段不产生每日任务
@@ -66,11 +66,11 @@
 
 ## 6. 收尾
 
-- [ ] 6.1 补单测并跑通 `uv run pytest -q`
+- [x] 6.1 补单测并跑通 `uv run pytest -q`
 - [ ] 6.2 抽样 20 个训练项人工复核难度档位，统计一致率，写入 `workspace/evidence/`
   - 验收：`workspace/evidence/` 下新增带口径与样本的 md，未实测标【待验证】
 - [ ] 6.3 统计路径总量与预算的偏差分布，写入 `workspace/evidence/`
   - 验收：有一份可复核的偏差数据
-- [ ] 6.4 写 `workspace/record/` 变更记录
-- [ ] 6.5 `openspec validate --all --store store` 通过
+- [x] 6.4 写 `workspace/record/` 变更记录
+- [x] 6.5 `openspec validate --all --store store` 通过
 - [ ] 6.6 archive 本 change，并把 `path-generation` spec 的 `Purpose` 从 TBD 改成一句话

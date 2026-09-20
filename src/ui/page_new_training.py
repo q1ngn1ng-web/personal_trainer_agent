@@ -357,17 +357,17 @@ def _render_step4() -> None:
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("📅 去今日任务卡", key="nt_step4_daily", type="primary", width="stretch"):
+        if st.button("🧭 去生成训练路径", key="nt_step4_path", type="primary", width="stretch"):
             for key in list(st.query_params.keys()):
                 del st.query_params[key]
-            st.query_params["page"] = "daily"
+            st.query_params["page"] = "path"
             st.query_params["training_id"] = str(training_id)
             st.rerun()
     with col2:
-        if st.button("📚 查看资料", key="nt_step4_sources", width="stretch"):
+        if st.button("📅 去今日任务卡", key="nt_step4_daily", width="stretch"):
             for key in list(st.query_params.keys()):
                 del st.query_params[key]
-            st.query_params["page"] = "sources"
+            st.query_params["page"] = "daily"
             st.query_params["training_id"] = str(training_id)
             st.rerun()
 
