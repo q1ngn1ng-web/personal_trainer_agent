@@ -90,9 +90,65 @@ CREATE TABLE IF NOT EXISTS daily_log_tasks (
     FOREIGN KEY (daily_log_id) REFERENCES daily_logs(id)
 );
 
+CREATE TABLE IF NOT EXISTS sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('ai_generated', 'user_upload', 'user_paste', 'web_url')),
+    title TEXT NOT NULL,
+    origin TEXT,
+    origin_url TEXT,
+    fetched_at DATETIME,
+    snapshot_text TEXT,
+    org_id INTEGER,
+    scope TEXT DEFAULT 'personal' CHECK (scope IN ('org_shared', 'personal')),
+    checksum TEXT,
+    parse_status TEXT DEFAULT 'pending' CHECK (parse_status IN ('pending', 'ok', 'failed', 'unsupported')),
+    parse_error TEXT,
+    imported_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE TABLE IF NOT EXISTS source_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    heading_path TEXT,
+    text TEXT NOT NULL,
+    char_count INTEGER NOT NULL,
+    FOREIGN KEY (source_id) REFERENCES sources(id)
+);
+
+-- 全文索引：用 trigram 分词，中文才能按子串命中（unicode61 会把整句当成一个词）
+CREATE VIRTUAL TABLE IF NOT EXISTS source_chunks_fts USING fts5(
+    text,
+    heading_path,
+    content='source_chunks',
+    content_rowid='id',
+    tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS source_chunks_ai AFTER INSERT ON source_chunks BEGIN
+    INSERT INTO source_chunks_fts(rowid, text, heading_path)
+    VALUES (new.id, new.text, new.heading_path);
+END;
+
+CREATE TRIGGER IF NOT EXISTS source_chunks_ad AFTER DELETE ON source_chunks BEGIN
+    INSERT INTO source_chunks_fts(source_chunks_fts, rowid, text, heading_path)
+    VALUES ('delete', old.id, old.text, old.heading_path);
+END;
+
+CREATE TRIGGER IF NOT EXISTS source_chunks_au AFTER UPDATE ON source_chunks BEGIN
+    INSERT INTO source_chunks_fts(source_chunks_fts, rowid, text, heading_path)
+    VALUES ('delete', old.id, old.text, old.heading_path);
+    INSERT INTO source_chunks_fts(rowid, text, heading_path)
+    VALUES (new.id, new.text, new.heading_path);
+END;
+
 CREATE INDEX IF NOT EXISTS idx_trainings_last_active_at ON trainings(last_active_at);
 CREATE INDEX IF NOT EXISTS idx_daily_logs_training_date ON daily_logs(training_id, log_date);
 CREATE INDEX IF NOT EXISTS idx_baseline_history_training ON baseline_history(training_id, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_purpose ON llm_calls(call_purpose);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_prompt_version ON llm_calls(prompt_name, prompt_version);
 CREATE INDEX IF NOT EXISTS idx_review_archives_training_week ON review_archives(training_id, week_start);
+CREATE INDEX IF NOT EXISTS idx_sources_training ON sources(training_id);
+CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, ordinal);

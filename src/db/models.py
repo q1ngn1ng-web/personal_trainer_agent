@@ -151,6 +151,38 @@ class DailyLogTask(RowModel):
     is_required: int = 1
 
 
+@dataclass
+class Source(RowModel):
+    """一条训练资料来源（AI 生成 / 上传文件 / 粘贴文本 / 网络 URL）。"""
+
+    id: int
+    training_id: int
+    type: str
+    title: str
+    origin: str | None = None
+    origin_url: str | None = None
+    fetched_at: str | None = None
+    snapshot_text: str | None = None
+    org_id: int | None = None
+    scope: str = "personal"
+    checksum: str | None = None
+    parse_status: str = "pending"
+    parse_error: str | None = None
+    imported_at: str = ""
+
+
+@dataclass
+class SourceChunk(RowModel):
+    """来源解析后的一段切片。"""
+
+    id: int
+    source_id: int
+    ordinal: int
+    heading_path: str | None
+    text: str
+    char_count: int
+
+
 class Element(str, Enum):
     TRAINING_GOAL = "training_goal"
     BASELINE = "baseline"

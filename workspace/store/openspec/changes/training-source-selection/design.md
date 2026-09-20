@@ -2,11 +2,7 @@
 
 ---
 
-## 接口冻结（阶段 A 实现契约，2026-09-20 冻结）
-
-> **为什么有这一节**：本 change 拆成两个实现阶段——A 静态层、B 网络层。
-> A 的接口由本文件冻结，实现方按此开工，不再回头改规格。
-> **冻结后改接口 = 触发 high 介入**（见 `workspace/HANDOFF.md` 的 stop signals）。
+## 阶段 A 设计（静态层）
 
 ### 分层与拆法
 
@@ -63,7 +59,7 @@ def list_sources(training_id: int) -> list[Source]
 def get_source(source_id: int) -> Source | None
 def list_chunks(source_id: int, *, limit: int = 200) -> list[SourceChunk]
 def search_chunks(training_id: int, query: str, *, limit: int = 10) -> list[SourceChunk]
-def compute_impact(source_id: int, new_checksum: str) -> ImpactReport
+def compute_impact(source_id: int, new_content: str | None = None) -> ImpactReport
 ```
 
 阶段 B 只**新增**函数，不修改以上签名：
@@ -96,11 +92,6 @@ def refresh_snapshot(source_id: int) -> Source
 
 **节奏**：每完成一小步跑 `uv run pytest -q` 与 `openspec validate --all --store store`，
 小步提交（一次不超过 3 个文件）。
-
-### 阶段 B 的 stop signals
-
-出现以下任一情况**立即停下并交接给 high**：需要改本节的字段或函数签名、
-需要跨模块重构、测试写不出来、同一处反复修 2 次以上。
 
 ---
 

@@ -10,23 +10,23 @@
 
 ### A1 数据层
 
-- [ ] A1.1 新增 `sources` 表：字段与 CHECK 完全按 `design.md` 冻结的模型
+- [x] A1.1 新增 `sources` 表：字段与 CHECK 完全按 `design.md` 冻结的模型
   - 注意：`type` 的 CHECK **必须包含 `web_url`**，`parse_status` 必须包含 `unsupported`（阶段 B 用）
   - 验收：`init-db` 后 `.schema sources` 可见，且 `web_url` 在 CHECK 内
-- [ ] A1.2 新增 `source_chunks` 表
+- [x] A1.2 新增 `source_chunks` 表
   - 验收：`init-db` 后可查看，`ordinal` 非空
-- [ ] A1.3 新增 `source_chunks_fts` 虚表与同步触发器（写入/更新/删除时同步索引）
+- [x] A1.3 新增 `source_chunks_fts` 虚表与同步触发器（写入/更新/删除时同步索引）
   - 验收：插入一条切片后用 `MATCH` 能命中
-- [ ] A1.4 迁移逻辑接入既有 `migrate()`（新表用 `CREATE TABLE IF NOT EXISTS`，无需重建）
+- [x] A1.4 迁移逻辑接入既有 `migrate()`（新表用 `CREATE TABLE IF NOT EXISTS`，无需重建）
   - 验收：对已有 `data/trainer.db` 跑 `init-db`，训练条数不变，新表出现
-- [ ] A1.5 `src/db/models.py` 增加 `Source` / `SourceChunk` dataclass
+- [x] A1.5 `src/db/models.py` 增加 `Source` / `SourceChunk` dataclass
   - 验收：`uv run pytest -q` 通过
 
 ### A2 解析与切片（纯函数优先）
 
-- [ ] A2.1 Markdown / txt 解析：保留标题层级
+- [x] A2.1 Markdown / txt 解析：保留标题层级
   - 验收：单测断言 `heading_path` 形如 `第三章 > 3.2 虚拟语气`
-- [ ] A2.2 切片函数：先按标题层级、再按段落边界；超长递归切分并保留标题前缀
+- [x] A2.2 切片函数：先按标题层级、再按段落边界；超长递归切分并保留标题前缀
   - 验收：单测覆盖「不跨知识点」「超长切分后前缀保留」
 - [ ] A2.3 PDF 解析（选型见 ADR-0012，优先复用 `PythonProject16` 的方案）
   - 验收：一份真实 PDF 解析成功并输出 Markdown
@@ -34,20 +34,20 @@
   - 验收：2 份真实 docx 讲义解析成功，层级正确
 - [ ] A2.5 Excel（.xlsx）题库解析：识别题干 / 选项 / 正确答案 / 解析列，输出结构化题目
   - 验收：2 份真实题库表格解析成功；表头不规整时判失败并提示，不猜列含义
-- [ ] A2.6 解析失败路径：写 `parse_status=failed` + `parse_error`，不阻塞其他来源
+- [x] A2.6 解析失败路径：写 `parse_status=failed` + `parse_error`，不阻塞其他来源
   - 验收：传入损坏文件，流程不中断且状态为 failed
 
 ### A3 来源服务（签名见冻结章节）
 
-- [ ] A3.1 `create_source`：三类静态来源登记
+- [x] A3.1 `create_source`：三类静态来源登记
   - 验收：三种来源各跑一遍都能在库里看到记录
-- [ ] A3.2 `parse_source`：解析 + 切片 + 建索引，幂等
+- [x] A3.2 `parse_source`：解析 + 切片 + 建索引，幂等
   - 验收：同一内容导入两次，第二次日志显示跳过解析
-- [ ] A3.3 `list_sources` / `get_source` / `list_chunks`
+- [x] A3.3 `list_sources` / `get_source` / `list_chunks`
   - 验收：查询接口返回结构与冻结签名一致
-- [ ] A3.4 `search_chunks`（FTS5）：返回按相关度排序的切片，**不产生任何 LLM 调用**
+- [x] A3.4 `search_chunks`（FTS5）：返回按相关度排序的切片，**不产生任何 LLM 调用**
   - 验收：单测断言查询路径不触发 `complete()`
-- [ ] A3.5 `compute_impact`：切片的新增 / 删除 / 修改清单
+- [x] A3.5 `compute_impact`：切片的新增 / 删除 / 修改清单
   - 验收：修改资料后能看到清单，且**不自动删除任何训练项**
 
 ### A4 训练项回指
@@ -70,10 +70,10 @@
 
 ### A6 阶段 A 收尾
 
-- [ ] A6.1 补单测并跑通 `uv run pytest -q`
+- [x] A6.1 补单测并跑通 `uv run pytest -q`
 - [ ] A6.2 用 3 份真实资料统计解析成功率、切片数分布、解析耗时，写入 `workspace/evidence/`
 - [ ] A6.3 写 `workspace/record/` 变更记录（标注「阶段 A 完成，change 未归档」）
-- [ ] A6.4 `openspec validate --all --store store` 通过
+- [x] A6.4 `openspec validate --all --store store` 通过
 - [ ] A6.5 提交（**不 archive**）
 
 ---
