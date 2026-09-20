@@ -167,25 +167,35 @@ def _render_recall_section(
                     st.rerun()
 
 
-def _render_reflections_section(training_id: int, progress: DailyProgress) -> dict[str, str]:
-    st.subheader("4. 三省")
+def _render_notes_section(training_id: int, progress: DailyProgress) -> None:
+    """留言（推荐填）+ 三省（可选）。不再强制用户填写。"""
+    st.subheader("5. 给教练留言")
+    st.caption("今天的感受、卡住的地方、想调整的地方，随便写一句就行。**不填也能领奖励。**")
+
+    note = st.text_area(
+        "留言",
+        key=f"dl_note_{training_id}",
+        height=100,
+        placeholder="例如：今天这 5 道题里有两道完全不会 / 感觉太简单了 / 明天想少做一点",
+    )
+
+    with st.expander("三省（可选，想写再写）", expanded=False):
+        loyal = st.text_area("忠于目标吗", key=f"dl_ref_loyal_{training_id}", max_chars=100, height=80)
+        method = st.text_area("方法有效吗", key=f"dl_ref_method_{training_id}", max_chars=100, height=80)
+        applied = st.text_area("付诸实践了吗", key=f"dl_ref_applied_{training_id}", max_chars=100, height=80)
+
     if progress.reflection_submitted_at:
-        st.caption(f"已提交于 {progress.reflection_submitted_at}")
+        st.caption(f"上次保存于 {progress.reflection_submitted_at}")
 
-    loyal = st.text_area("忠于目标吗", key=f"dl_ref_loyal_{training_id}", max_chars=100, height=80)
-    method = st.text_area("方法有效吗", key=f"dl_ref_method_{training_id}", max_chars=100, height=80)
-    applied = st.text_area("付诸实践了吗", key=f"dl_ref_applied_{training_id}", max_chars=100, height=80)
-
-    if st.button("保存三省", key=f"dl_save_ref_{training_id}"):
-        with st.spinner("保存三省..."):
-            submit_reflections(training_id, loyal, method, applied)
-        st.success("三省已保存")
+    if st.button("保存留言", key=f"dl_save_ref_{training_id}", type="primary"):
+        with st.spinner("保存中..."):
+            submit_reflections(training_id, loyal, method, applied, note=note)
+        st.success("已保存")
         st.rerun()
-    return {"loyal_to_goal": loyal, "method_effective": method, "applied_to_practice": applied}
 
 
 def _render_progress_section(progress: DailyProgress) -> None:
-    st.subheader("5. 完成度")
+    st.subheader("4. 完成度")
     if progress.total_tasks <= 0:
         st.progress(0.0)
         st.metric("今日完成度", "0/0")
@@ -207,8 +217,7 @@ def _render_progress_section(progress: DailyProgress) -> None:
 def _render_reward_section(progress: DailyProgress, training_id: int) -> None:
     st.subheader("6. 奖励领取")
     all_done = progress.total_tasks > 0 and progress.completed_count == progress.total_tasks
-    submitted = bool(progress.reflection_submitted_at)
-    if all_done and submitted:
+    if all_done:
         if st.button("🎁 领取今日奖励", key=f"dl_reward_{training_id}"):
             st.balloons()
             st.success("奖励领取成功！参考 07_奖励机制.md 选择你心仪的奖励。")
@@ -220,8 +229,6 @@ def _render_reward_section(progress: DailyProgress, training_id: int) -> None:
                 pending.append(f"还需完成 {missing} 项")
             else:
                 pending.append("尚无已完成任务")
-        if not submitted:
-            pending.append("提交三省")
         st.info(" · ".join(pending))
 
 
@@ -236,8 +243,8 @@ def _render_training(training: Any) -> None:
     _render_review_section(tasks.review_items, training.id, progress)
     _render_new_section(tasks.new_items, training.id, progress)
     _render_recall_section(recall_questions, training.id)
-    _render_reflections_section(training.id, progress)
     _render_progress_section(progress)
+    _render_notes_section(training.id, progress)
     _render_reward_section(progress, training.id)
 
 

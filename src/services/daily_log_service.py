@@ -140,6 +140,7 @@ def submit_reflections(
     method_effective: str,
     applied_to_practice: str,
     *,
+    note: str = "",
     today: date | None = None,
 ) -> ReflectionResult:
     """Persist the three daily reflections for today."""
@@ -151,6 +152,7 @@ def submit_reflections(
         "loyal_to_goal": loyal_to_goal,
         "method_effective": method_effective,
         "applied_to_practice": applied_to_practice,
+        "note": note,
     }
     updated = submit_three_reflections(log.id, json.dumps(reflections, ensure_ascii=False))
     iso_now = _now_iso()
