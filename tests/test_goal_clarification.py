@@ -67,6 +67,17 @@ class TestAcceptanceValidation(unittest.TestCase):
 
     def test_quantitative_target_out_of_range(self) -> None:
         result = validate_acceptance({"type": "quantitative", "metric": "accuracy", "target": 1.5})
+        # 1.5 落在 1-100 之间，视为百分比 → 归一化为 0.015
+        self.assertTrue(result.ok)
+        self.assertAlmostEqual(result.normalized["target"], 0.015)
+
+    def test_percentage_target_is_normalized(self) -> None:
+        result = validate_acceptance({"type": "quantitative", "metric": "accuracy", "target": 80})
+        self.assertTrue(result.ok)
+        self.assertAlmostEqual(result.normalized["target"], 0.8)
+
+    def test_impossible_target_rejected(self) -> None:
+        result = validate_acceptance({"type": "quantitative", "metric": "accuracy", "target": 180})
         self.assertFalse(result.ok)
 
     def test_qualitative_without_check_needs_check(self) -> None:

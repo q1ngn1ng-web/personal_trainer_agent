@@ -132,8 +132,18 @@ def _target_is_valid(metric: str, target: Any) -> bool:
         return False
     value = float(target)
     if metric == "accuracy":
-        return 0.0 < value <= 1.0
+        # 同时接受比例（0-1）与百分比（0-100）：模型和用户都习惯写 80%
+        return 0.0 < value <= 1.0 or 1.0 < value <= 100.0
     return value > 0.0
+
+
+def normalize_acceptance_target(metric: str, target: Any) -> Any:
+    """把百分比统一成比例：accuracy 的 80 → 0.8。其它口径原样返回。"""
+    if metric == "accuracy" and not isinstance(target, bool) and isinstance(target, (int, float)):
+        value = float(target)
+        if 1.0 < value <= 100.0:
+            return round(value / 100.0, 6)
+    return target
 
 
 def is_vague(text: str) -> bool:
@@ -164,7 +174,9 @@ def validate_acceptance(value: Any) -> AcceptanceCheck:
                 return AcceptanceCheck(False, "invalid", f"unknown metric: {metric!r}")
             if not _target_is_valid(metric, target):
                 return AcceptanceCheck(False, "invalid", "target out of range")
-            return AcceptanceCheck(True, "quantitative", "", dict(value))
+            normalized = dict(value)
+            normalized["target"] = normalize_acceptance_target(metric, target)
+            return AcceptanceCheck(True, "quantitative", "", normalized)
         if kind == "qualitative":
             statement = str(value.get("statement", "")).strip()
             check = str(value.get("check", "")).strip()

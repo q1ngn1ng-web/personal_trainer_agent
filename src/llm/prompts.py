@@ -146,7 +146,7 @@ GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会�
 要求:
 1. draft.content: 学习内容，保留用户原话的核心表述，不要摘要式改写
 2. draft.level: 目标等级，只能取「了解 / 会用 / 熟练 / 能讲清」之一
-3. draft.acceptance: 验收标准，必须可判定。优先给量化判据（type=quantitative，配 metric 与 target，metric 取 accuracy / volume / speed / streak）；给不出数字时用 type=qualitative，并给出可观察的 statement 与检查方式 check
+3. draft.acceptance: 验收标准，必须可判定。优先给量化判据（type=quantitative，配 metric 与 target，metric 取 accuracy / volume / speed / streak）；accuracy 的 target 用 0-1 的比例（如 0.8），不要写 80。给不出数字时用 type=qualitative，并给出可观察的 statement 与检查方式 check
 4. missing_fields: 仍然缺失或不合格的字段名列表
 5. follow_up_question: 只针对第一个缺失字段提一个问题；若没有缺失则为空字符串
 6. 若用户描述里已经提到训练周期、每周次数或每次时长，只把它保留在 content 里，不要追问，也不要输出成字段
