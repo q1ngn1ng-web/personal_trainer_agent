@@ -28,6 +28,24 @@ _STATUS_LABELS: dict[str, str] = {
 }
 
 
+def _flash(message: str, level: str = "success") -> None:
+    """暂存一条提示，等 rerun 之后再显示（否则会被 rerun 冲掉）。"""
+    st.session_state["src_flash"] = {"message": message, "level": level}
+
+
+def _render_flash() -> None:
+    payload = st.session_state.pop("src_flash", None)
+    if not payload:
+        return
+    message = str(payload.get("message", ""))
+    level = str(payload.get("level", "success"))
+    renderer = getattr(st, level, None)
+    if callable(renderer):
+        renderer(message)
+    else:
+        st.info(message)
+
+
 def _resolve_training() -> object | None:
     """从 query param 或下拉框确定当前训练。"""
     trainings = queries.list_trainings()
@@ -70,7 +88,7 @@ def _render_add_forms(training_id: int) -> None:
                     content=body,
                 )
                 parsed = svc.parse_source(source.id)
-                st.success(f"已导入并解析，共 {len(svc.list_chunks(parsed.id))} 个切片")
+                _flash(f"已导入并解析，共 {len(svc.list_chunks(parsed.id))} 个切片")
                 st.rerun()
 
     with tab_upload:
@@ -85,11 +103,11 @@ def _render_add_forms(training_id: int) -> None:
                 training_id, filename=uploaded.name, data=uploaded.read()
             )
             if source.parse_status == "ok":
-                st.success(f"已解析 {uploaded.name}，共 {len(svc.list_chunks(source.id))} 个切片")
+                _flash(f"已解析 {uploaded.name}，共 {len(svc.list_chunks(source.id))} 个切片")
             elif source.parse_status == "unsupported":
-                st.warning(source.parse_error or "该格式暂不支持")
+                _flash(source.parse_error or "该格式暂不支持", "warning")
             else:
-                st.error(source.parse_error or "解析失败")
+                _flash(source.parse_error or "解析失败", "error")
             st.rerun()
         st.caption("扫描件（图片型 PDF）暂不支持，需要 OCR。")
 
@@ -104,9 +122,9 @@ def _render_add_forms(training_id: int) -> None:
                     source = svc.fetch_web_source(training_id, url.strip())
                 if source.parse_status == "ok":
                     chunks = len(svc.list_chunks(source.id, limit=1000))
-                    st.success(f"已抓取 {source.origin_url}，共 {chunks} 个切片")
+                    _flash(f"已抓取 {source.origin_url}，共 {chunks} 个切片")
                 else:
-                    st.error(source.parse_error or "抓取失败")
+                    _flash(source.parse_error or "抓取失败", "error")
                 st.rerun()
         st.caption("只抓你给出的这个网址：不跟随页面内链接、不做定时重抓、不绕过反爬。")
 
@@ -118,7 +136,7 @@ def _render_add_forms(training_id: int) -> None:
                 training_id, type="ai_generated", title=title or "AI 生成资料", origin="ai"
             )
             svc.parse_source(source.id)
-            st.success("已登记 AI 生成来源（无原文，训练项将标记「AI 生成，无原文出处」）")
+            _flash("已登记 AI 生成来源（无原文，训练项将标记「AI 生成，无原文出处」）")
             st.rerun()
 
 
@@ -152,7 +170,7 @@ def _render_source_list(training_id: int) -> None:
         source = toggle_labels[picked]
         if st.button("切换", key="src_toggle_apply"):
             svc.set_source_enabled(source.id, not bool(source.enabled))
-            st.success("已切换（停用不会删除资料，只是不再参与检索与出题）")
+            _flash("已切换（停用不会删除资料，只是不再参与检索与出题）")
             st.rerun()
 
     if any(source.type == "web_url" for source in sources):
@@ -162,9 +180,9 @@ def _render_source_list(training_id: int) -> None:
             with st.spinner("正在重新抓取…"):
                 refreshed = svc.refresh_snapshot(web_sources[picked_web].id)
             if refreshed.parse_status == "ok":
-                st.success("快照已刷新，切片已更新")
+                _flash("快照已刷新，切片已更新")
             else:
-                st.error(refreshed.parse_error or "刷新失败")
+                _flash(refreshed.parse_error or "刷新失败", "error")
             st.rerun()
 
     if any(source.parse_status == "failed" for source in sources):
@@ -206,6 +224,7 @@ def _render_source_detail(training_id: int) -> None:
 def render() -> None:
     """渲染资料来源页。"""
     st.title("📚 训练资料来源")
+    _render_flash()
     training = _resolve_training()
     if training is None:
         return
