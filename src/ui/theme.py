@@ -110,25 +110,18 @@ div[data-testid="stAlert"] { border-radius: 10px; }
 /* ---------- 进度条 ---------- */
 div[data-testid="stProgress"] > div > div > div { background: #2563eb; }
 
-/* ---------- 隐藏默认噪音（注意：只有这里没被隐藏时侧边栏才能被重新展开） ---------- */
-#MainMenu,
-footer,
-[data-testid="stToolbar"],
-[data-testid="stDecoration"],
-[data-testid="stStatusWidget"] {
-    visibility: hidden;
-}
-/* 顶部条保留但透明：侧边栏的展开/收起按钮在它里面，整块隐藏会让侧边栏收不回来 */
-header[data-testid="stHeader"] {
-    background: transparent;
-    box-shadow: none;
-}
-/* 侧边栏折叠时的展开按钮必须始终可点 */
-[data-testid="stSidebarCollapsedControl"],
+/* ---------- 默认界面元素一律不隐藏（用户明确要求：不要动 Streamlit 自带的东西） ---------- */
+
+/* ---------- 侧边栏的展开 / 收起箭头：始终可见、可点 ----------
+   Streamlit 1.60 里：
+     · 折叠时的展开箭头 → [data-testid="stExpandSidebarButton"]
+     · 展开时的收起箭头 → [data-testid="stSidebarCollapseButton"]
+   两个都强制可见，保证任何宽度下都能把侧边栏叫回来。 */
+[data-testid="stExpandSidebarButton"],
 [data-testid="stSidebarCollapseButton"] {
     visibility: visible !important;
-    display: flex !important;
     opacity: 1 !important;
+    display: inline-flex !important;
 }
 
 /* ---------- 状态徽标 ---------- */
