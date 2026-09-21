@@ -188,6 +188,37 @@ def _rebuild_sources(conn: sqlite3.Connection) -> None:
     logger.info("migrate: rebuilt sources (added enabled flag)")
 
 
+def _add_missing_columns(
+    conn: sqlite3.Connection, table: str, columns: dict[str, str]
+) -> list[str]:
+    """给已有表补列（``ALTER TABLE ADD COLUMN`` 是轻量迁移，不用重建表）。
+
+    返回实际新增的列名。SQLite 允许 ADD COLUMN，只要新列不带 CHECK、
+    也不依赖别的列做默认值。
+    """
+    existing = _column_names(conn, table)
+    if not existing:
+        return []
+    added: list[str] = []
+    for name, ddl in columns.items():
+        if name in existing:
+            continue
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        added.append(name)
+    return added
+
+
+#: plan_items 的题目/作答列（系统出题、用户作答、系统判分）
+_PLAN_ITEM_QUESTION_COLUMNS: dict[str, str] = {
+    "question": "TEXT",
+    "reference_answer": "TEXT",
+    "answer_text": "TEXT",
+    "verdict": "TEXT",
+    "graded_by": "TEXT",
+    "graded_at": "DATETIME",
+}
+
+
 def _rebuild_training_items(conn: sqlite3.Connection) -> None:
     """给训练项补上稳定题目键 ``item_key`` 与 ``practiced`` 状态。
 
@@ -266,8 +297,12 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or "mastered_at" not in item_columns
         or "'practiced'" not in item_sql
     )
+    plan_columns = _column_names(conn, "plan_items")
+    needs_plan_questions = bool(plan_columns) and "question" not in plan_columns
 
-    if not (needs_trainings or needs_llm_calls or needs_sources or needs_items):
+    if not (
+        needs_trainings or needs_llm_calls or needs_sources or needs_items or needs_plan_questions
+    ):
         return applied
 
     # 两处必须处理：
@@ -296,6 +331,10 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_items:
                 _rebuild_training_items(conn)
                 applied.append("training_items:item_key+mastered_at")
+            if needs_plan_questions:
+                added = _add_missing_columns(conn, "plan_items", _PLAN_ITEM_QUESTION_COLUMNS)
+                if added:
+                    applied.append("plan_items:question_columns")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

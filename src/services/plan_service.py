@@ -286,6 +286,11 @@ def _row_to_task(
         difficulty_tier=item.get("difficulty_tier"),
         training_topic=training_topic,
         ordinal=int(item.get("ordinal") or 0),
+        question=str(data.get("question") or ""),
+        reference_answer=str(data.get("reference_answer") or ""),
+        answer_text=str(data.get("answer_text") or ""),
+        verdict=data.get("verdict"),
+        graded_by=data.get("graded_by"),
     )
 
 

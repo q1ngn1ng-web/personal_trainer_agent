@@ -284,6 +284,17 @@ PATH_SKELETON_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+TRAIN_QUESTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "reference_answer": {"type": "string"},
+        "difficulty": {"type": "integer", "minimum": 1, "maximum": 4},
+    },
+    "required": ["question", "reference_answer", "difficulty"],
+    "additionalProperties": False,
+}
+
 QUIZ_VARIANT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -343,4 +354,5 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "path_skeleton": PATH_SKELETON_SCHEMA,
     "quiz_variant": QUIZ_VARIANT_SCHEMA,
     "quiz_grade": QUIZ_GRADE_SCHEMA,
+    "train_question": TRAIN_QUESTION_SCHEMA,
 }

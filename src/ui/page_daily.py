@@ -184,57 +184,15 @@ def _render_recall_section(
 
 
 def _render_plan_item(training_id: int, task: Any) -> None:
-    """计划项勾选：勾上 = **练过**（`practiced`），不产生"达标"（达标由判定写入）。"""
+    """一道训练题：**系统出题 → 用户作答 → 系统判分**。
+
+    不再让用户点"答对/答错"自评——判分由系统给（口径与测验一致）。
+    判分服务不可用时如实提示，并把参考答案摆出来让用户自己核对（不伪造对错）。
+    """
     from src.core.plan import local_today
-    from src.services import attempt_service, plan_service
+    from src.services import answer_service, attempt_service, plan_service
 
-    currently = task.status == "practiced"
-    label = f"第 {task.round_index}/5 轮 · {task.title}"
-    if task.knowledge_point:
-        label += f" · {task.knowledge_point}"
-    new_value = st.checkbox(label, key=f"dl_plan_{task.plan_id}", value=currently)
-
-    # 作答结果（客观表现的唯一来源）：答对 / 答错
     state = attempt_service.item_mastery(training_id, task.item_key)
-    col_ok, col_no, col_info = st.columns([1, 1, 3])
-    if col_ok.button("✓ 答对", key=f"dl_pass_{task.plan_id}"):
-        with st.spinner("记录作答..."):
-            _, just_mastered = attempt_service.record_and_evaluate(
-                training_id,
-                task.item_key,
-                "pass",
-                plan_id=task.plan_id,
-                round_index=task.round_index,
-            )
-            plan_service.complete_tasks([task.plan_id], completed=True)
-            check_task(training_id, f"P{task.plan_id}", True)
-        st.session_state[f"dl_attempt_msg_{task.plan_id}"] = (
-            "已记录：答对。连续 2 次答对即判定达标 🏅" if just_mastered else "已记录：答对。"
-        )
-        st.rerun()
-    if col_no.button("✗ 答错", key=f"dl_fail_{task.plan_id}"):
-        with st.spinner("记录作答..."):
-            attempt_service.record_and_evaluate(
-                training_id,
-                task.item_key,
-                "fail",
-                plan_id=task.plan_id,
-                round_index=task.round_index,
-            )
-            plan_service.complete_tasks([task.plan_id], completed=True)
-            check_task(training_id, f"P{task.plan_id}", True)
-        st.session_state[f"dl_attempt_msg_{task.plan_id}"] = "已记录：答错，下轮会继续安排。"
-        st.rerun()
-    if state.attempts:
-        accuracy_text = f"{state.accuracy:.0%}" if state.accuracy is not None else "—"
-        mastered_text = " · 已达标 🏅" if state.mastered else ""
-        col_info.caption(
-            f"近 {state.attempts} 次准确率 {accuracy_text} · 连续通过 {state.streak} 次{mastered_text}"
-        )
-    message = st.session_state.pop(f"dl_attempt_msg_{task.plan_id}", None)
-    if message:
-        st.success(message)
-
     meta = [f"预计 {task.planned_minutes} 分钟"]
     if task.item_type:
         meta.append(_ITEM_TYPE_LABEL.get(task.item_type, task.item_type))
@@ -242,12 +200,87 @@ def _render_plan_item(training_id: int, task: Any) -> None:
         meta.append(f"原定 {task.original_date.isoformat()}，已累计到今天")
     st.caption("　·　".join(meta))
 
-    if new_value != currently:
-        with st.spinner("保存训练状态..."):
-            plan_service.complete_tasks([task.plan_id], completed=new_value)
-            # 保留打卡记录：完成度与奖励机制依赖 daily_log_tasks
-            check_task(training_id, f"P{task.plan_id}", new_value)
+    # 题目由系统出（首次打开时生成并落库，之后直接读）
+    question = answer_service.ensure_question(task.plan_id)
+    st.markdown(f"**题目**：{question['question']}")
+    if task.status == "practiced" and task.verdict:
+        badge = "✅ 答对" if task.verdict == "pass" else "❌ 答错"
+        st.markdown(f"{badge}　你的作答：{task.answer_text or '（空）'}")
+        if task.reference_answer:
+            with st.expander("参考答案", expanded=False):
+                st.write(task.reference_answer)
+        finished = True
+    else:
+        finished = False
+
+    answer = st.text_area(
+        "你的作答",
+        value=task.answer_text or "",
+        key=f"dl_answer_{task.plan_id}",
+        height=90,
+        placeholder="不查资料，凭理解写；系统会按参考答案判分",
+        label_visibility="collapsed",
+    )
+    col_submit, col_skip, col_info = st.columns([1.2, 1.2, 3])
+    if col_submit.button(
+        "提交并判分" if not finished else "重新作答",
+        key=f"dl_submit_{task.plan_id}",
+        type="primary",
+    ):
+        if not (answer or "").strip():
+            st.warning("先写下你的作答再提交。")
+        else:
+            with st.spinner("系统正在判分..."):
+                outcome = answer_service.submit_answer(task.plan_id, answer)
+                check_task(training_id, f"P{task.plan_id}", True)
+            st.session_state["dl_last_grade"] = {**outcome, "title": task.title}
+            st.rerun()
+    if col_skip.button("只标记练过", key=f"dl_practice_only_{task.plan_id}"):
+        with st.spinner("保存..."):
+            answer_service.mark_practiced_only(task.plan_id)
+            check_task(training_id, f"P{task.plan_id}", True)
+        st.session_state["dl_last_grade"] = {
+            "graded": False,
+            "practiced_only": True,
+            "title": task.title,
+            "reference_answer": task.reference_answer or question["reference_answer"],
+        }
         st.rerun()
+    if state.attempts:
+        accuracy_text = f"{state.accuracy:.0%}" if state.accuracy is not None else "—"
+        mastered_text = " · 已达标 🏅" if state.mastered else ""
+        col_info.caption(
+            f"近 {state.attempts} 次准确率 {accuracy_text} · 连续通过 {state.streak} 次{mastered_text}"
+        )
+
+
+
+def _render_last_grade() -> None:
+    """刚提交的那道题的判分结果（置顶显示——判定完成后该题会从"今天到期"里移走）。"""
+    outcome = st.session_state.pop("dl_last_grade", None)
+    if not outcome:
+        return
+    title = outcome.get("title") or "刚才那道题"
+    if outcome.get("practiced_only"):
+        st.info(f"「{title}」已标记为练过（本次未判分，不计入客观表现）。")
+    elif outcome.get("graded"):
+        if outcome.get("verdict") == "pass":
+            st.success(
+                f"「{title}」系统判定：**答对**"
+                + ("（连续 2 次通过，已达标 🏅）" if outcome.get("mastered") else "")
+            )
+        else:
+            st.error(f"「{title}」系统判定：**答错**")
+        if outcome.get("reason"):
+            st.caption(f"判分依据：{outcome['reason']}")
+    else:
+        st.warning(
+            f"「{title}」判分服务暂时不可用：本次**不计入客观表现**，请对照参考答案自行核对。"
+        )
+    reference = outcome.get("reference_answer")
+    if reference:
+        with st.expander("参考答案", expanded=True):
+            st.write(reference)
 
 
 def _render_plan_section(
@@ -569,6 +602,7 @@ def _render_training(training: Any) -> None:
 
     if plan_tasks or plan_service.has_plan(training.id):
         _render_plan_overview(training.id, plan_tasks)
+        _render_last_grade()
         _render_plan_section(
             "1. 待补（累计到今天）",
             [task for task in plan_tasks if task.is_overdue(today)],

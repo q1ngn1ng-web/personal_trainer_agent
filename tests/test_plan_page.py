@@ -114,9 +114,14 @@ class TestPlanPages(unittest.TestCase):
         self.assertFalse(app.exception)
         labels = [expander.label for expander in app.expander]
         self.assertTrue(any("第 1/5 轮" in label for label in labels), labels)
-        self.assertEqual(len(app.checkbox), 2)
+        # 每个训练题都有一个作答框（不再是"勾选 + 自评对错"）
+        self.assertEqual(
+            len([area for area in app.text_area if str(getattr(area, "key", "")).startswith("dl_answer_")]),
+            2,
+        )
 
-        app.checkbox[0].check().run()
+        task = plan_service.today_tasks(training_id=training_id)[0]
+        app.button(key=f"dl_practice_only_{task.plan_id}").click().run()
         self.assertFalse(app.exception)
 
         conn = queries.get_connection()
@@ -155,8 +160,8 @@ class TestPlanPages(unittest.TestCase):
         ]
         self.assertTrue(any("今日训练" in text for text in texts), "首页必须有今日训练区块")
 
-    def test_answer_button_records_attempt(self) -> None:
-        """点「✓ 答对」应写一条作答记录并把训练项标为练过（不是达标）。"""
+    def test_task_shows_question_and_accepts_answer(self) -> None:
+        """任务卡必须给出**具体题目**与作答框；提交后系统判分（LLM 不可用时不伪造对错）。"""
         from streamlit.testing.v1 import AppTest
 
         from src.db import queries
@@ -171,24 +176,30 @@ class TestPlanPages(unittest.TestCase):
         app.query_params["training_id"] = str(training_id)
         app.run()
         self.assertFalse(app.exception)
-        app.button(key=f"dl_pass_{task.plan_id}").click().run()
+
+        rendered = [item.value for item in app.markdown if isinstance(item.value, str)]
+        self.assertTrue(any("题目" in text for text in rendered), "界面必须给出具体题目")
+        app.text_area(key=f"dl_answer_{task.plan_id}").set_value("子进程写快照")
+        app.button(key=f"dl_submit_{task.plan_id}").click().run()
         self.assertFalse(app.exception)
 
         conn = queries.get_connection()
         try:
-            attempt = conn.execute(
-                "SELECT result, item_key, plan_id FROM practice_attempts WHERE training_id = ?",
+            row = conn.execute(
+                "SELECT question, answer_text, status, graded_by FROM plan_items WHERE id = ?",
+                (task.plan_id,),
+            ).fetchone()
+            attempts = conn.execute(
+                "SELECT COUNT(*) AS n FROM practice_attempts WHERE training_id = ?",
                 (training_id,),
-            ).fetchone()
-            item = conn.execute(
-                "SELECT status FROM training_items WHERE item_key = ?", (task.item_key,)
-            ).fetchone()
+            ).fetchone()["n"]
         finally:
             conn.close()
-        self.assertIsNotNone(attempt, "点答对必须留下作答记录")
-        self.assertEqual(attempt["result"], "pass")
-        self.assertEqual(attempt["plan_id"], task.plan_id)
-        self.assertEqual(item["status"], "practiced")
+        self.assertTrue(row["question"], "题目必须落库（不是只有知识点名）")
+        self.assertEqual(row["answer_text"], "子进程写快照", "作答必须保存")
+        self.assertEqual(row["status"], "practiced")
+        self.assertEqual(row["graded_by"], "unavailable", "LLM 不可用时如实标记未判分")
+        self.assertEqual(int(attempts), 0, "没判分就不该写客观记录")
 
     def test_quiz_section_starts_assessment(self) -> None:
         """点「开始测验」应生成一次测验批次（题目来自冷却期外的题库）。"""

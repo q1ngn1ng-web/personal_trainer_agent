@@ -251,6 +251,23 @@ QUIZ_GRADE_PROMPT: str = """你是测验评分员。请依据参考答案，判�
 
 QUIZ_GRADE_PROMPT_VERSION: str = "v1.0.0"
 
+TRAIN_QUESTION_PROMPT: str = """你是训练出题助手。请针对给定知识点出一道**训练题**，并给出参考答案。
+
+主题：{topic}
+知识点：{knowledge_point}
+轮次：第 {round_index} 轮（共 {total_rounds} 轮）
+资料片段：
+{sample_text}
+
+要求：
+1. 题目必须能**凭上面的资料回答**，不要问资料之外的内容；
+2. 轮次越靠后越难：第 1 轮直接回忆/复述，第 2-3 轮应用与辨析，第 4-5 轮综合表达或举一反三；
+3. 参考答案写成"应包含哪些要点"，便于后续判分；
+4. 只输出 JSON，字段见 schema。
+"""
+
+TRAIN_QUESTION_PROMPT_VERSION: str = "v1.0.0"
+
 
 PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "topic_validation": (TOPIC_VALIDATION_PROMPT, TOPIC_VALIDATION_PROMPT_VERSION),
@@ -266,4 +283,5 @@ PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "path_skeleton": (PATH_SKELETON_PROMPT, PATH_SKELETON_PROMPT_VERSION),
     "quiz_variant": (QUIZ_VARIANT_PROMPT, QUIZ_VARIANT_PROMPT_VERSION),
     "quiz_grade": (QUIZ_GRADE_PROMPT, QUIZ_GRADE_PROMPT_VERSION),
+    "train_question": (TRAIN_QUESTION_PROMPT, TRAIN_QUESTION_PROMPT_VERSION),
 }

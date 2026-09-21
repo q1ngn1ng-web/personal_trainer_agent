@@ -233,6 +233,13 @@ CREATE TABLE IF NOT EXISTS plan_items (
     planned_minutes INTEGER DEFAULT 0,
     practiced_at DATETIME,
     reason TEXT,
+    -- 题目与作答（系统出题、用户作答、系统判分）
+    question TEXT,
+    reference_answer TEXT,
+    answer_text TEXT,
+    verdict TEXT,
+    graded_by TEXT,
+    graded_at DATETIME,
     created_at DATETIME NOT NULL,
     UNIQUE (training_id, item_key, round_index),
     FOREIGN KEY (training_id) REFERENCES trainings(id)

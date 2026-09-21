@@ -129,6 +129,11 @@ class PlannedTask:
     difficulty_tier: int | None = None
     training_topic: str = ""
     ordinal: int = 0
+    question: str = ""
+    reference_answer: str = ""
+    answer_text: str = ""
+    verdict: str | None = None
+    graded_by: str | None = None
 
     def is_overdue(self, today: date) -> bool:
         """原定到期日早于今天 = 这一项是"累计到今天"的（原定日期可在 ``original_date`` 里看到）。"""
