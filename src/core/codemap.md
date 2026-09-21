@@ -298,3 +298,6 @@ Training
 | `evaluate(results)` | → `MasteryState(attempts, passes, accuracy, streak, mastered)` |
 | `objective_state(results)` | `low` / `mid` / `high` / `unknown`（数据不足） |
 | `difficulty_delta(objective, signal_type)` | 难度该升/降/不动，由规则决定（ADR-0010 + ADR-0015） |
+| `coverage_satisfied(statuses)` | 覆盖口径：全部训练项 `passed` |
+| `acceptance_satisfied(acceptance, ...)` | 验收判据比对（accuracy / volume / streak；speed 与质性判不了 → `None`） |
+| `stage_mastered(mode, statuses, ...)` | 阶段达标：覆盖模式看全员达标；达成模式看判据（判不了退回覆盖口径） |

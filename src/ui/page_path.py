@@ -144,6 +144,21 @@ def _render_path(training_id: int) -> None:
         st.error("路径超出预算，请调整投入或压缩内容后再确认。")
 
     stages = path_service.load_stages(path.id)
+    from src.services import mastery_service
+
+    report = mastery_service.evaluate(training_id)
+    stage_report = {item.stage_id: item for item in report.stages}
+    st.markdown("### 达标进度")
+    quiz_text = "已通过 ✅" if report.quiz_passed else "未通过 / 未做"
+    st.caption(
+        f"必修覆盖 {report.passed_items}/{report.total_items} 已达标 · 最终测验：{quiz_text}"
+        f" · 模式：{'覆盖' if report.mode == mastery_service.COVERAGE_MODE else '达成'}"
+    )
+    if report.mastered:
+        st.success("🎉 任务达标：必修覆盖 100% 且最终测验已通过，训练已置为 completed。")
+    else:
+        st.caption(f"距达标还差：{report.reason}")
+
     st.markdown("### 阶段与训练项")
     for stage in stages:
         items = path_service.load_items(stage.id)
@@ -152,11 +167,12 @@ def _render_path(training_id: int) -> None:
             key = _TYPE_LABELS.get(item.item_type or "", item.item_type or "其他")
             distribution[key] = distribution.get(key, 0) + 1
         distribution_text = " · ".join(f"{name} {count}" for name, count in distribution.items())
-        # 第一段默认可进入，其余按前置完成情况展示锁定态（ADR-0011 的线性阶段）
-        if stage.ordinal == 1:
+        # 锁定态来自 mastery_service 写回的 path_stages.status（不再永远 locked）
+        verdict = stage_report.get(stage.id)
+        if verdict is not None and verdict.mastered:
+            lock_label = "✅ 已达标"
+        elif verdict is not None and verdict.status == "active":
             lock_label = "▶ 进行中"
-        elif all(prev.status == "completed" for prev in stages if prev.ordinal < stage.ordinal):
-            lock_label = "▶ 可进入"
         else:
             lock_label = "🔒 待解锁"
         with st.expander(
@@ -166,6 +182,10 @@ def _render_path(training_id: int) -> None:
         ):
             if stage.goal:
                 st.caption(stage.goal)
+            if verdict is not None:
+                st.caption(
+                    f"达标 {verdict.passed}/{verdict.total} 项 · {verdict.reason}"
+                )
             _render_items(stage.id)
 
     if path.status == "draft":
@@ -229,7 +249,10 @@ def render() -> None:
     training = _resolve_training()
     if training is None:
         return
-    if not is_generation_ready(training.status) and training.status != "active":
+    if (
+        not is_generation_ready(training.status)
+        and training.status not in ("active", "completed")
+    ):
         st.warning(
             f"训练 #{training.id} 当前状态是 `{training.status}`。请先确认训练目标并选好资料。"
         )

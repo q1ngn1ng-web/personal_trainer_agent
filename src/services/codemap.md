@@ -14,7 +14,7 @@
 
 - **分层清晰**：
   - 编排层：`trainer_service`（新建）、`review_service`（周复盘）。
-  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`plan_service` / `attempt_service` / `quiz_service` / `schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
+  - 子服务（按功能）：`keyword_service` / `baseline_service` / `scoring_service` / `calibration_service`（LLM）；`topic_validation`（LLM）；`plan_service` / `attempt_service` / `quiz_service` / `mastery_service` / `schedule_service` / `recall_service` / `daily_log_service` / `progress_service`（数据视图）；`metrics_calculator`（聚合）；`renderer` / `file_writer`（产物落盘）。
   - 共享基础：每个 LLM 子服务都遵循同一套 `complete → 解析 output_json → record_llm_call` 三段式套路，便于排查。
 - **鲁棒性策略统一**：
   - **失败兜底**：LLM 服务一旦调用失败/回退，会写一条 `validation_result="fail"`、`fallback_used=1` 的审计记录，然后回退到 `fallback_for(...)` 或启发式算法。
@@ -172,6 +172,18 @@ UI 在"今日训练"页面按以下顺序读取：
 | `grade_with_llm(...)` | LLM 判分（`quiz_grade`，只出 pass / fail） |
 | `finish_assessment(...)` | 结算成绩（通过线 80%）、把测验结果写进 `practice_attempts`、未通过的题**追加补练轮次**（`reason='quiz_failed'`） |
 | `pending_quiz_plan(...)` / `latest_assessment(...)` | 今日到期测验 / 最近一次测验（页面用） |
+
+### 4.7 `mastery_service.py` — 阶段达标与任务达标（2026-09-21 新增）
+
+把"练到什么程度算完成"变成确定状态（ADR-0011 + change `training-execution-feedback` 的 5.2 / 5.3）。
+
+| 函数 | 作用 |
+|---|---|
+| `stage_statuses(...)` | 逐阶段算达标（覆盖模式看必修全 `passed`；达成模式看验收判据，判不了退回覆盖口径） |
+| `sync_stages(...)` | **写回** `path_stages.status`：全部达标 → `completed`，第一个未达标 → `active`，其余 `locked`（修掉"阶段永远 locked"的老问题） |
+| `training_progress(...)` | 任务达标报告：必修覆盖比例 + 最近一次测验是否通过 |
+| `sync_training_status(...)` | 任务达标 → `trainings.status='completed'`（终态） |
+| `evaluate(...)` | 一站式：同步阶段状态 → 同步任务状态 → 返回报告（页面进入时调用） |
 
 > ⚠️ 2026-09-20 起，新链路（已有训练路径的训练）由 `plan_service` 接手；
 > `schedule_service` 的 `trainings.schedule.units` 分支只服务老训练，属 legacy。

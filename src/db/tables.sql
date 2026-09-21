@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS trainings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     topic TEXT NOT NULL,
-    status TEXT DEFAULT 'draft' CHECK (status IN ('created', 'draft', 'pending_confirm', 'confirmed', 'active', 'paused', 'archived', 'failed')),
+    status TEXT DEFAULT 'draft' CHECK (status IN ('created', 'draft', 'pending_confirm', 'confirmed', 'active', 'paused', 'completed', 'archived', 'failed')),
     goal_json TEXT,
     goal_confirmed_at DATETIME,
     clarification_rounds INTEGER DEFAULT 0,

@@ -59,6 +59,7 @@ class TrainingStatus(str, Enum):
     CONFIRMED = "confirmed"
     ACTIVE = "active"
     PAUSED = "paused"
+    COMPLETED = "completed"
     ARCHIVED = "archived"
     FAILED = "failed"
 
@@ -71,10 +72,28 @@ STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
         {TrainingStatus.PENDING_CONFIRM.value, TrainingStatus.CONFIRMED.value, TrainingStatus.ARCHIVED.value}
     ),
     TrainingStatus.CONFIRMED.value: frozenset(
-        {TrainingStatus.ACTIVE.value, TrainingStatus.PENDING_CONFIRM.value, TrainingStatus.ARCHIVED.value}
+        {
+            TrainingStatus.ACTIVE.value,
+            TrainingStatus.PENDING_CONFIRM.value,
+            TrainingStatus.COMPLETED.value,
+            TrainingStatus.ARCHIVED.value,
+        }
     ),
-    TrainingStatus.ACTIVE.value: frozenset({TrainingStatus.PAUSED.value, TrainingStatus.ARCHIVED.value}),
-    TrainingStatus.PAUSED.value: frozenset({TrainingStatus.ACTIVE.value, TrainingStatus.ARCHIVED.value}),
+    TrainingStatus.ACTIVE.value: frozenset(
+        {
+            TrainingStatus.PAUSED.value,
+            TrainingStatus.COMPLETED.value,
+            TrainingStatus.ARCHIVED.value,
+        }
+    ),
+    TrainingStatus.PAUSED.value: frozenset(
+        {
+            TrainingStatus.ACTIVE.value,
+            TrainingStatus.COMPLETED.value,
+            TrainingStatus.ARCHIVED.value,
+        }
+    ),
+    TrainingStatus.COMPLETED.value: frozenset(),
     TrainingStatus.FAILED.value: frozenset({TrainingStatus.DRAFT.value, TrainingStatus.ARCHIVED.value}),
     TrainingStatus.ARCHIVED.value: frozenset(),
 }

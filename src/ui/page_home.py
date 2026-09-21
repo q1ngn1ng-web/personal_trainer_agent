@@ -24,6 +24,7 @@ _STATUS_BADGE: dict[TrainingStatus, str] = {
     TrainingStatus.CONFIRMED: "📚 待选资料/路径",
     TrainingStatus.ACTIVE: "🟢 活跃",
     TrainingStatus.PAUSED: "⏸️ 暂停",
+    TrainingStatus.COMPLETED: "🎉 已达标",
     TrainingStatus.ARCHIVED: "📦 已归档",
     TrainingStatus.FAILED: "⚠️ 失败",
 }

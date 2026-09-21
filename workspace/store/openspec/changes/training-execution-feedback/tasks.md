@@ -70,10 +70,14 @@
   - 注（2026-09-21）：**连续 2 次**这半句已实现（`attempt_service.mark_mastered_if_ready`，
     依据 `practice_attempts` 的最近两次结果，达标时写 `training_items.mastered_at`）；
     "判据满足"（与 `acceptance` 口径比对）仍未实现
-- [ ] 5.2 阶段达标：覆盖模式看必修项全达标，达成模式看阶段验收标准
+- [x] 5.2 阶段达标：覆盖模式看必修项全达标，达成模式看阶段验收标准
   - 验收：两种模式各一组单测
-- [ ] 5.3 任务达标 = 必修覆盖 100% 且最终测验通过
+  - 注（2026-09-21）：`mastery_service.stage_statuses` / `sync_stages`；达成模式按 `goal_json.acceptance`
+    的 accuracy / volume / streak 比对，判不了（speed、质性）时**退回覆盖口径**；阶段状态写回 `path_stages.status`
+- [x] 5.3 任务达标 = 必修覆盖 100% 且最终测验通过
   - 验收：单测覆盖"覆盖满但测验未过"不达标的情形
+  - 注（2026-09-21）：`mastery_service.training_progress` / `sync_training_status`；达标时训练置 `completed`
+    （`trainings.status` 新增该枚举值，需重建表，迁移脚本已含）
 
 ## 6. UI
 

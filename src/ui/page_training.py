@@ -246,6 +246,7 @@ def _status_label(progress: TrainingProgress) -> str:
         "created": "🆕 已创建",
         "active": "🟢 活跃",
         "paused": "⏸️ 暂停",
+        "completed": "🎉 已达标",
         "archived": "📦 已归档",
         "failed": "⚠️ 失败",
     }

@@ -18,7 +18,7 @@ _TRAININGS_DDL = """
 CREATE TABLE trainings_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     topic TEXT NOT NULL,
-    status TEXT DEFAULT 'draft' CHECK (status IN ('created', 'draft', 'pending_confirm', 'confirmed', 'active', 'paused', 'archived', 'failed')),
+    status TEXT DEFAULT 'draft' CHECK (status IN ('created', 'draft', 'pending_confirm', 'confirmed', 'active', 'paused', 'completed', 'archived', 'failed')),
     goal_json TEXT,
     goal_confirmed_at DATETIME,
     clarification_rounds INTEGER DEFAULT 0,
@@ -139,10 +139,19 @@ def _column_names(conn: sqlite3.Connection, table: str) -> set[str]:
 
 
 def _rebuild_trainings(conn: sqlite3.Connection) -> None:
+    """重建 trainings（补目标字段 / 新状态值）。
+
+    只搬运**新旧表都有的列**——老库可能比当前 DDL 少列（真实事故来源），
+    缺的列让新表的默认值兜住，而不是让迁移直接失败。
+    """
+    old_columns = _column_names(conn, "trainings")
+    target_columns = [name.strip() for name in _TRAININGS_COLUMNS.split(",")]
+    shared = [name for name in target_columns if name in old_columns]
     conn.execute("ALTER TABLE trainings RENAME TO trainings_old")
     conn.execute(_TRAININGS_DDL)
     conn.execute(
-        f"INSERT INTO trainings_new ({_TRAININGS_COLUMNS}) SELECT {_TRAININGS_COLUMNS} FROM trainings_old"
+        f"INSERT INTO trainings_new ({', '.join(shared)}) "
+        f"SELECT {', '.join(shared)} FROM trainings_old"
     )
     conn.execute("DROP TABLE trainings_old")
     conn.execute("ALTER TABLE trainings_new RENAME TO trainings")
@@ -239,7 +248,10 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     applied: list[str] = []
 
     columns = _column_names(conn, "trainings")
-    needs_trainings = bool(columns) and "goal_json" not in columns
+    trainings_sql = _table_sql(conn, "trainings")
+    needs_trainings = bool(columns) and (
+        "goal_json" not in columns or "'completed'" not in trainings_sql
+    )
     llm_sql = _table_sql(conn, "llm_calls")
     # 去掉 call_purpose 的 CHECK：用途列表是应用层知识，每加一个用途就重建一次表不值得
     needs_llm_calls = bool(llm_sql) and "call_purpose TEXT NOT NULL CHECK" in llm_sql

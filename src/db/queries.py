@@ -18,6 +18,7 @@ _TRAINING_STATUSES = {
     "confirmed",
     "active",
     "paused",
+    "completed",
     "archived",
     "failed",
 }
