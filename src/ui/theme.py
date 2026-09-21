@@ -110,9 +110,26 @@ div[data-testid="stAlert"] { border-radius: 10px; }
 /* ---------- 进度条 ---------- */
 div[data-testid="stProgress"] > div > div > div { background: #2563eb; }
 
-/* ---------- 隐藏默认噪音 ---------- */
-#MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; }
-div[data-testid="stStatusWidget"] { display: none; }
+/* ---------- 隐藏默认噪音（注意：只有这里没被隐藏时侧边栏才能被重新展开） ---------- */
+#MainMenu,
+footer,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"] {
+    visibility: hidden;
+}
+/* 顶部条保留但透明：侧边栏的展开/收起按钮在它里面，整块隐藏会让侧边栏收不回来 */
+header[data-testid="stHeader"] {
+    background: transparent;
+    box-shadow: none;
+}
+/* 侧边栏折叠时的展开按钮必须始终可点 */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarCollapseButton"] {
+    visibility: visible !important;
+    display: flex !important;
+    opacity: 1 !important;
+}
 
 /* ---------- 状态徽标 ---------- */
 .tc-badge {
