@@ -61,17 +61,17 @@ def _parse_created_at(value: Any) -> datetime | None:
 
 
 def _training_header(training: Any) -> None:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("主题", training.topic or "—")
-    with col2:
-        baseline_score = float(training.baseline_score or 0)
-        st.metric("基线分", f"{baseline_score:.1f}", delta=None)
-    with col3:
-        level = training.baseline_level or "—"
-        created_at = _parse_created_at(training.created_at)
-        days = (datetime.now(timezone.utc) - created_at).days if created_at else 0
-        st.metric("档位 / 坚持天数", f"{level} · {days} 天")
+    from src.ui import components
+
+    baseline_score = float(training.baseline_score or 0)
+    created_at = _parse_created_at(training.created_at)
+    days = (datetime.now(timezone.utc) - created_at).days if created_at else 0
+    components.stat_cards(
+        [
+            ("基线分", f"{baseline_score:.1f}", training.baseline_level or "档位未知"),
+            ("坚持天数", f"{days} 天", f"创建于 {(created_at or datetime.now(timezone.utc)).date().isoformat()}"),
+        ]
+    )
 
 
 def _ensure_task_state(training_id: int, task_id: str, default: bool) -> bool:
@@ -140,7 +140,9 @@ def _render_recall_section(
     questions: list[RecallQuestion],
     training_id: int,
 ) -> None:
-    st.subheader("3. 主动回忆题")
+    from src.ui import components
+
+    components.section("3. 主动回忆题")
     if not questions:
         st.info("暂无回忆题 — 跑完基线诊断后会自动生成。")
         return
@@ -252,8 +254,9 @@ def _render_plan_section(
     title: str, tasks: list[Any], training_id: int, empty_hint: str
 ) -> None:
     from src.core.plan import local_today
+    from src.ui import components
 
-    st.subheader(title)
+    components.section(title)
     if not tasks:
         st.info(empty_hint)
         return
@@ -270,11 +273,26 @@ def _render_plan_section(
 def _render_plan_overview(training_id: int, tasks: list[Any]) -> None:
     """当日负荷概览：只提示不裁剪（ADR-0021）。"""
     from src.services import path_service, plan_service
+    from src.ui import components
 
     minutes = sum(int(task.planned_minutes or 0) for task in tasks)
     rounds = sorted({task.round_index for task in tasks})
     round_text = "、".join(f"第 {index} 轮" for index in rounds) or "—"
-    st.caption(f"今天 {len(tasks)} 项 · 预计 {minutes} 分钟 · {round_text}")
+    progress = plan_service.plan_progress(training_id)
+    with components.card():
+        components.stat_cards(
+            [
+                ("今日任务", f"{len(tasks)} 项", round_text),
+                ("预计用时", f"{minutes} 分钟", "整轮不裁剪"),
+                (
+                    "计划进度",
+                    f"{progress['practiced']}/{progress['total']}",
+                    "已练次数 / 总计划次数",
+                ),
+            ]
+        )
+        if progress["total"]:
+            st.progress(min(max(progress["practiced"] / progress["total"], 0.0), 1.0))
 
     path = path_service.load_path(training_id)
     budget = int(getattr(path, "daily_budget_minutes", 0) or 0)
@@ -282,12 +300,6 @@ def _render_plan_overview(training_id: int, tasks: list[Any]) -> None:
         st.warning(
             f"今天预计 {minutes} 分钟，超过你设定的 {budget} 分钟——"
             "整轮不裁剪，做不完的部分明天继续（会累计）。"
-        )
-    progress = plan_service.plan_progress(training_id)
-    if progress["total"]:
-        st.progress(
-            min(max(progress["practiced"] / progress["total"], 0.0), 1.0),
-            text=f"计划进度 {progress['practiced']}/{progress['total']} 次",
         )
 
 
@@ -297,8 +309,9 @@ def _render_quiz_section(training_id: int) -> None:
     取题只从题库里**冷却期已过**的题里选（ADR-0016）；LLM 不可用时降级为自评，并明确标注。
     """
     from src.services import quiz_service
+    from src.ui import components
 
-    st.subheader("3. 测验")
+    components.section("4. 测验", "每 14 天一次 · 内容不可挑 · 无提示")
     key_id = f"dl_quiz_{training_id}"
     key_result = f"dl_quiz_result_{training_id}"
 
@@ -412,9 +425,9 @@ def _render_quiz_section(training_id: int) -> None:
 def _render_signal_section(training_id: int, focus: Any | None = None) -> None:
     """四失一键反馈：点一下就提交，不填表。"""
     from src.services import attempt_service, plan_service, signal_service
+    from src.ui import components
 
-    st.subheader("5. 今天的感受")
-    st.caption("点一下就行。系统会据此调整难度、范围或题量——**不用你填表**。")
+    components.section("6. 今天的感受", "点一下就行，不用填表")
 
     objective = attempt_service.objective_for_training(training_id)
     objective_label = {"low": "偏低", "mid": "中等", "high": "很好", "unknown": "数据不足"}.get(
@@ -465,7 +478,9 @@ def _render_signal_section(training_id: int, focus: Any | None = None) -> None:
 
 def _render_notes_section(training_id: int, progress: DailyProgress) -> None:
     """留言（推荐填）+ 三省（可选）。不再强制用户填写。"""
-    st.subheader("6. 留言（可选）")
+    from src.ui import components
+
+    components.section("7. 留言（可选）")
     st.caption("今天的感受、卡住的地方、想调整的地方，随便写一句就行。**不填也能领奖励。**")
 
     note = st.text_area(
@@ -491,7 +506,9 @@ def _render_notes_section(training_id: int, progress: DailyProgress) -> None:
 
 
 def _render_progress_section(progress: DailyProgress) -> None:
-    st.subheader("4. 完成度")
+    from src.ui import components
+
+    components.section("5. 完成度")
     if progress.total_tasks <= 0:
         st.progress(0.0)
         st.metric("今日完成度", "0/0")
@@ -511,7 +528,9 @@ def _render_progress_section(progress: DailyProgress) -> None:
 
 
 def _render_reward_section(progress: DailyProgress, training_id: int) -> None:
-    st.subheader("7. 奖励领取")
+    from src.ui import components
+
+    components.section("8. 奖励领取")
     all_done = progress.total_tasks > 0 and progress.completed_count == progress.total_tasks
     if all_done:
         if st.button("🎁 领取今日奖励", key=f"dl_reward_{training_id}"):
@@ -529,7 +548,12 @@ def _render_reward_section(progress: DailyProgress, training_id: int) -> None:
 
 
 def _render_training(training: Any) -> None:
-    st.title(f"📅 今日任务卡 — {training.topic}")
+    from src.ui import components
+
+    components.page_header(
+        f"📅 今日任务卡 · {training.topic or '未命名'}",
+        "勾选＝练过（不产生达标）；答对/答错才是客观记录；连续 2 次答对才算达标",
+    )
     _training_header(training)
 
     from src.core.plan import local_today

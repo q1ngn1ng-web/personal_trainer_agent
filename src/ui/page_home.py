@@ -47,31 +47,17 @@ def _format_relative(value: datetime | None) -> str:
 
 
 def _render_hero() -> None:
-    st.markdown(
-        """
-        <div style="padding: 8px 0 16px 0;">
-          <h1 style="margin-bottom: 4px;">🎯 训练教练 MVP</h1>
-          <p style="color: #6b7280; font-size: 1.05rem; margin-top: 0;">
-            基于「训练之道·十要素完整闭环 v3」的自用训练教练应用
-          </p>
-          <p style="margin-top: 8px;">
-            把"如何高效训练任何技能"工程化为可执行代码：
-            主题 → LLM 校验 → 基线诊断 → 10 份 md → 日常 surface → 周复盘。
-          </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    from src.ui import components
+
+    components.page_header(
+        "🎯 训练教练",
+        "描述想学什么 → AI 澄清目标 → 选资料 → 定位理解边缘 → 生成路径 → 每天按计划练到熟",
+        chips=[
+            "每道题练 5 轮（第 1/3/7/15/30 天）",
+            "练过即入题库，每 14 天测验",
+            "连续 2 次答对才算达标",
+        ],
     )
-    cols = st.columns(3)
-    with cols[0]:
-        st.markdown("### 🧭 闭环训练")
-        st.caption("十要素覆盖：对象 / 基 / 的 / 器 / 序 / 术 / 境 / 奖 / 省 / 止")
-    with cols[1]:
-        st.markdown("### 📊 进展可视化")
-        st.caption("基线评分、坚持天数、今日完成度，一眼看到进展")
-    with cols[2]:
-        st.markdown("### 🤖 LLM 增强")
-        st.caption("主题校验、关键词白名单、基线题、周复盘校准，全部可追溯")
 
 
 def _render_today_plan() -> None:
@@ -82,7 +68,9 @@ def _render_today_plan() -> None:
     from src.db.queries import list_trainings
     from src.services import plan_service
 
-    st.subheader("📌 今日训练")
+    from src.ui import components
+
+    components.section("📌 今日训练", "跨训练聚合，只读")
     summary = plan_service.today_summary()
     if not summary["count"]:
         upcoming: list[tuple[date, str]] = []
@@ -105,28 +93,41 @@ def _render_today_plan() -> None:
             st.info("今天没有训练任务。确认训练路径后会自动生成 5 轮计划。")
         return
 
-    st.caption(f"共 {summary['count']} 项 · 预计 {summary['minutes']} 分钟")
-    for group in summary["groups"]:
-        st.markdown(
-            f"- **{group['topic'] or '未命名'}** · {group['count']} 项 · 约 {group['minutes']} 分钟"
+    with components.card():
+        components.stat_cards(
+            [
+                ("今日训练项", f"{summary['count']} 项", "跨全部训练"),
+                ("预计用时", f"{summary['minutes']} 分钟", "按题型默认时长估算"),
+                ("涉及训练", f"{len(summary['groups'])} 个", "同一天可能多主题并行"),
+            ]
         )
-    if st.button("进入今日任务卡", key="home_today_enter", type="primary"):
-        for key in list(st.query_params.keys()):
-            del st.query_params[key]
-        st.query_params["page"] = "daily"
-        st.rerun()
+        for group in summary["groups"]:
+            st.markdown(
+                f"{components.badge('今日', 'run')} **{group['topic'] or '未命名'}**"
+                f"　{group['count']} 项 · 约 {group['minutes']} 分钟"
+            )
+        if st.button("进入今日任务卡", key="home_today_enter", type="primary"):
+            for key in list(st.query_params.keys()):
+                del st.query_params[key]
+            st.query_params["page"] = "daily"
+            st.rerun()
 
 
 def _render_metrics(dashboard: HomeDashboard) -> None:
-    cols = st.columns(3)
-    cols[0].metric("训练主题数", dashboard.total_all)
-    cols[1].metric("活跃训练", dashboard.total_active)
+    from src.ui import components
+
     avg_label = (
         f"{dashboard.avg_baseline:.1f}/5"
         if dashboard.avg_baseline is not None
         else "—"
     )
-    cols[2].metric("平均基线", avg_label)
+    components.stat_cards(
+        [
+            ("训练主题数", dashboard.total_all, "全部状态"),
+            ("活跃训练", dashboard.total_active, "status = active"),
+            ("平均基线", avg_label, "来自基线诊断"),
+        ]
+    )
 
 
 def _build_dataframe(progresses: list[TrainingProgress]) -> pd.DataFrame:
@@ -174,7 +175,9 @@ def _render_empty_state() -> None:
 
 
 def _render_training_list(dashboard: HomeDashboard) -> None:
-    st.subheader("📚 训练列表")
+    from src.ui import components
+
+    components.section("📚 训练列表", "点击进入训练详情")
     if not dashboard.trainings:
         _render_empty_state()
         return

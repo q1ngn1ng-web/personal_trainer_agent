@@ -148,6 +148,9 @@ def main() -> None:
     )
 
     _register_pages()
+    from src.ui import theme
+
+    theme.inject()
     _render_sidebar()
 
     page = st.query_params.get("page", "home")

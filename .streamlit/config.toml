@@ -1,0 +1,17 @@
+# 应用主题与启动参数（放仓库里，任何人 clone 后 `uv run streamlit run src/main.py` 直接就是配置好的样子）
+
+[theme]
+base = "light"
+primaryColor = "#2563eb"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f8fb"
+textColor = "#1f2937"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+address = "0.0.0.0"
+port = 8501

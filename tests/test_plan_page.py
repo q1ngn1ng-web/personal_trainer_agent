@@ -150,10 +150,10 @@ class TestPlanPages(unittest.TestCase):
         app = AppTest.from_file(self._home_wrapper, default_timeout=60)
         app.run()
         self.assertFalse(app.exception)
-        self.assertTrue(
-            any("今日训练" in subheader.value for subheader in app.subheader),
-            [subheader.value for subheader in app.subheader],
-        )
+        texts = [item.value for item in app.subheader] + [
+            item.value for item in app.markdown if isinstance(item.value, str)
+        ]
+        self.assertTrue(any("今日训练" in text for text in texts), "首页必须有今日训练区块")
 
     def test_answer_button_records_attempt(self) -> None:
         """点「✓ 答对」应写一条作答记录并把训练项标为练过（不是达标）。"""

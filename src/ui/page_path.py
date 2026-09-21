@@ -82,8 +82,12 @@ def _render_items(stage_id: int) -> None:
 
 
 def _render_editor(training_id: int, path) -> None:
-    st.markdown("### 调整投入")
-    st.caption("周期 / 每周次数 / 每次时长由你定；训练项总量不能超出这个预算。")
+    from src.ui import components
+
+    components.section(
+        "调整投入",
+        "每次时长现在是「单日负荷提示阈值」；周期与每周次数已不参与排期（ADR-0021）",
+    )
     col1, col2, col3 = st.columns(3)
     horizon = col1.number_input("周期（周）", 1, 52, int(path.horizon_weeks or 2), key="path_horizon")
     frequency = col2.number_input("每周训练次数", 1, 14, int(path.weekly_frequency or 5), key="path_freq")
@@ -148,7 +152,7 @@ def _render_path(training_id: int) -> None:
 
     report = mastery_service.evaluate(training_id)
     stage_report = {item.stage_id: item for item in report.stages}
-    st.markdown("### 达标进度")
+    components.section("达标进度")
     quiz_text = "已通过 ✅" if report.quiz_passed else "未通过 / 未做"
     st.caption(
         f"必修覆盖 {report.passed_items}/{report.total_items} 已达标 · 最终测验：{quiz_text}"
@@ -159,7 +163,7 @@ def _render_path(training_id: int) -> None:
     else:
         st.caption(f"距达标还差：{report.reason}")
 
-    st.markdown("### 阶段与训练项")
+    components.section("阶段与训练项")
     for stage in stages:
         items = path_service.load_items(stage.id)
         distribution: dict[str, int] = {}
@@ -220,7 +224,7 @@ def _render_path(training_id: int) -> None:
         st.caption("已确认的路径不会就地大改；需要重构时会产生新版本。")
 
     st.divider()
-    st.markdown("### 其他操作")
+    components.section("其他操作")
     col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("🎯 重新定位理解边缘", key="path_redo_probe", width="stretch"):
@@ -244,7 +248,9 @@ def _render_path(training_id: int) -> None:
 
 
 def render() -> None:
-    st.title("🧭 训练路径")
+    from src.ui import components
+
+    components.page_header("🧭 训练路径", "阶段 → 训练项 → 每道题 5 轮 · 练到达标")
     _render_flash()
     training = _resolve_training()
     if training is None:
