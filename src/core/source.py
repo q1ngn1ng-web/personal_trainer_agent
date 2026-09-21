@@ -129,14 +129,11 @@ def chunk_keys(chunks: Iterable[Chunk]) -> dict[str, str]:
 def compute_impact(old_chunks: Iterable[Chunk], new_chunks: Iterable[Chunk]) -> ImpactReport:
     """比较两次解析的切片集合，给出新增 / 删除 / 修改清单。
 
-    以「标题路径」为对齐键：同一路径下内容变了算修改，只在一侧出现算新增或删除。
+    以「标题路径」为对齐键，并且把**同一标题下的所有切片拼起来**再比对——
+    长小节会被切成多片，只比第一片会漏报（审计报告 S2）。
     """
-    old_map: dict[str, str] = {}
-    for chunk in old_chunks:
-        old_map.setdefault(chunk.heading_path, chunk.text)
-    new_map: dict[str, str] = {}
-    for chunk in new_chunks:
-        new_map.setdefault(chunk.heading_path, chunk.text)
+    old_map = _merge_by_heading(old_chunks)
+    new_map = _merge_by_heading(new_chunks)
 
     added = [key for key in new_map if key not in old_map]
     removed = [key for key in old_map if key not in new_map]
@@ -146,6 +143,14 @@ def compute_impact(old_chunks: Iterable[Chunk], new_chunks: Iterable[Chunk]) -> 
         if key in old_map and content_checksum(old_map[key]) != content_checksum(value)
     ]
     return ImpactReport(added=sorted(added), removed=sorted(removed), changed=sorted(changed))
+
+
+def _merge_by_heading(chunks: Iterable[Chunk]) -> dict[str, str]:
+    """把同一标题路径下的所有切片拼成一段文本（顺序保留）。"""
+    grouped: dict[str, list[str]] = {}
+    for chunk in chunks:
+        grouped.setdefault(chunk.heading_path, []).append(chunk.text)
+    return {heading: "\n\n".join(parts) for heading, parts in grouped.items()}
 
 
 def validate_source_type(source_type: str) -> str:

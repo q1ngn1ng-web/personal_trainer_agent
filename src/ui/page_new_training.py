@@ -255,7 +255,15 @@ def _render_step3() -> None:
 
     if probe is None:
         points = edge_service.build_knowledge_points(training_id)
-        st.caption(f"资料里共识别出 {len(points)} 个知识点，本次先探测这些。")
+        total_points = edge_service.count_knowledge_points(training_id)
+        if total_points > len(points):
+            st.warning(
+                f"资料里共识别出 **{total_points}** 个知识点，本次只探测前 **{len(points)}** 个"
+                "（一次探测有题量上限）。其余知识点会在训练路径里按资料顺序覆盖——"
+                "想先探完，可以之后用「重新定位理解边缘」再来一次。"
+            )
+        else:
+            st.caption(f"资料里共识别出 {len(points)} 个知识点，本次先探测这些。")
         if st.button("开始探测", key="nt_probe_start", type="primary", width="stretch"):
             with st.spinner("正在从资料里出题..."):
                 try:
@@ -280,6 +288,11 @@ def _render_step3() -> None:
 
     if probe.fallback_used:
         st.warning("模型出题失败，已退回按知识点生成的朴素问法。")
+    elif probe.truncated:
+        st.caption(
+            f"本次探测覆盖 {probe.selected_points}/{probe.total_points} 个知识点"
+            "（其余在后续路径里覆盖）。"
+        )
 
     for index, item in enumerate(probe.items):
         st.markdown(

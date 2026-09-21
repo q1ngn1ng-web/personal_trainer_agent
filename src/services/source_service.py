@@ -161,6 +161,7 @@ def parse_source(
 
     active = _connect(conn)
     own = conn is None
+    replaced = False
     try:
         if not text:
             active.execute(
@@ -169,6 +170,11 @@ def parse_source(
                 (source_id,),
             )
         else:
+            replaced = bool(
+                active.execute(
+                    "SELECT 1 FROM source_chunks WHERE source_id = ? LIMIT 1", (source_id,)
+                ).fetchone()
+            )
             _store_chunks(active, source_id, split_markdown(text))
             active.execute(
                 "UPDATE sources SET parse_status = 'ok', checksum = ?, parse_error = NULL "
@@ -192,7 +198,27 @@ def parse_source(
     finally:
         if own:
             active.close()
+    if replaced:
+        # 切片被整体替换过 → 训练项里指向旧切片的回指已经悬空，必须清理（A4.1 / 审计 M3）
+        _cleanup_links(source.training_id, conn=None if own else conn)
     return Source.from_row(row)
+
+
+def _cleanup_links(training_id: int, *, conn: sqlite3.Connection | None = None) -> int:
+    """清理训练项里悬空的来源切片回指，返回被清理的条数。
+
+    局部导入 `path_service` 避免模块级循环依赖。
+    """
+    from src.services import path_service
+
+    try:
+        dropped = path_service.validate_item_chunk_links(int(training_id), conn=conn)
+    except Exception:  # 清理失败不该让解析/刷新整体失败
+        logger.exception("cleanup_links: failed for training %s", training_id)
+        return 0
+    if dropped:
+        logger.info("cleanup_links: dropped %d stale chunk link(s) for training %s", dropped, training_id)
+    return int(dropped or 0)
 
 
 def mark_failed(
@@ -404,6 +430,74 @@ def refresh_snapshot(
     return parse_source(source_id, force=True, conn=conn)
 
 
+def _items_referencing_chunks(chunk_ids: set[int], *, conn: sqlite3.Connection) -> int:
+    """统计有多少训练项回指着给定的切片集合（影响面提示用）。"""
+    if not chunk_ids:
+        return 0
+    rows = conn.execute(
+        "SELECT source_chunk_ids FROM training_items WHERE source_chunk_ids IS NOT NULL"
+    ).fetchall()
+    affected = 0
+    for row in rows:
+        raw = row["source_chunk_ids"]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(raw, list):
+            continue
+        for value in raw:
+            try:
+                if int(value) in chunk_ids:
+                    affected += 1
+                    break
+            except (TypeError, ValueError):
+                continue
+    return affected
+
+
+def refresh_snapshot_report(
+    source_id: int, *, timeout: float | None = None, conn: sqlite3.Connection | None = None
+) -> dict[str, Any]:
+    """刷新网页快照，并返回**影响面摘要**（新增/删除/修改 + 受影响的训练项数）。
+
+    这是审计 M3 的修复：刷新会整体替换切片，旧 id 对应的训练项回指会悬空，
+    因此必须在刷新后清理并告诉用户"哪些内容变了、动了多少条训练项的出处"。
+    """
+    source = get_source(source_id, conn=conn)
+    if source is None:
+        raise ValueError(f"source not found: {source_id}")
+    if source.type != "web_url" or not source.origin_url:
+        raise ValueError("只有网络来源可以刷新快照")
+
+    old_ids = existing_chunk_ids(source_id, conn=conn)
+    old_chunks = [
+        Chunk(ordinal=row.ordinal, heading_path=row.heading_path or "（未分节）", text=row.text)
+        for row in list_chunks(source_id, limit=10_000, conn=conn)
+    ]
+    active = _connect(conn)
+    own = conn is None
+    try:
+        affected = _items_referencing_chunks(old_ids, conn=active)
+    finally:
+        if own:
+            active.close()
+
+    refreshed = refresh_snapshot(source_id, timeout=timeout, conn=conn)
+    new_chunks = [
+        Chunk(ordinal=row.ordinal, heading_path=row.heading_path or "（未分节）", text=row.text)
+        for row in list_chunks(source_id, limit=10_000, conn=conn)
+    ]
+    impact = _core_compute_impact(old_chunks, new_chunks)
+    return {
+        "source": refreshed,
+        "impact": impact,
+        "chunk_count": len(new_chunks),
+        "affected_items": affected,
+    }
+
+
 def search_chunks(
     training_id: int, query: str, *, limit: int = 10, conn: sqlite3.Connection | None = None
 ) -> list[SourceChunk]:
@@ -533,6 +627,7 @@ __all__ = [
     "mark_unsupported",
     "parse_source",
     "refresh_snapshot",
+    "refresh_snapshot_report",
     "search_chunks",
     "set_source_enabled",
 ]

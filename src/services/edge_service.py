@@ -66,10 +66,19 @@ class ProbeResult:
     training_id: int
     items: list[ProbeItem] = field(default_factory=list)
     fallback_used: bool = False
+    #: 资料里识别出的知识点总数（用于告诉用户"这次只探了前几个"）
+    total_points: int = 0
+    #: 本次实际探测的知识点数
+    selected_points: int = 0
 
     @property
     def is_graded(self) -> bool:
         return bool(self.items) and all(item.verdict for item in self.items)
+
+    @property
+    def truncated(self) -> bool:
+        """是否发生了"只探了一部分知识点"的截断。"""
+        return self.total_points > self.selected_points > 0
 
     def state_counts(self) -> dict[str, int]:
         counts = {"mastered": 0, "edge": 0, "unreached": 0}
@@ -127,6 +136,28 @@ def build_knowledge_points(
     return points
 
 
+def count_knowledge_points(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> int:
+    """资料里一共有多少个去重后的知识点（标题路径）——用于诚实告知探测覆盖面。"""
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            """
+            SELECT COUNT(DISTINCT COALESCE(NULLIF(TRIM(c.heading_path), ''), '（未分节）')) AS n
+            FROM source_chunks c
+            JOIN sources s ON s.id = c.source_id
+            WHERE s.training_id = ? AND s.enabled = 1
+            """,
+            (training_id,),
+        ).fetchone()
+        return int(row["n"] or 0)
+    finally:
+        if own:
+            active.close()
+
+
 def _format_points(points: list[KnowledgePoint]) -> str:
     return "\n\n".join(
         f"[知识点 {index + 1}] {point.name}\n标题路径: {point.heading_path}\n来源片段: {point.sample_text}"
@@ -157,6 +188,7 @@ def generate_probe_items(
     conn: sqlite3.Connection | None = None,
 ) -> ProbeResult:
     """按知识点出题。题目只依据来源片段，不考资料之外的内容。"""
+    total_points = count_knowledge_points(training_id, conn=conn)
     knowledge_points = points if points is not None else build_knowledge_points(training_id, conn=conn)
     if not knowledge_points:
         raise ValueError("没有可用的资料切片，无法出题")
@@ -201,7 +233,15 @@ def generate_probe_items(
             )
             for point in knowledge_points
         ]
-    return ProbeResult(training_id=training_id, items=items, fallback_used=not questions)
+    if not total_points:
+        total_points = len(knowledge_points)
+    return ProbeResult(
+        training_id=training_id,
+        items=items,
+        fallback_used=not questions,
+        total_points=total_points,
+        selected_points=len(knowledge_points),
+    )
 
 
 def grade_probe(
@@ -329,6 +369,7 @@ __all__ = [
     "ProbeItem",
     "ProbeResult",
     "build_knowledge_points",
+    "count_knowledge_points",
     "generate_probe_items",
     "grade_probe",
     "judge_state",

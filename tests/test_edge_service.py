@@ -48,6 +48,27 @@ class TestJudgeState(unittest.TestCase):
 
 
 class TestEdgeService(unittest.TestCase):
+
+    def test_knowledge_point_truncation_is_disclosed(self) -> None:
+        """知识点超过上限时必须如实告知（审计 M4）：总数、本次探测数、是否截断。"""
+        before = edge_service.count_knowledge_points(self.training.id)
+        sections = "\n\n".join(
+            f"## 知识点 {index}\n\n第 {index} 个知识点的内容。" for index in range(1, 13)
+        )
+        source = svc.create_source(
+            self.training.id, type="user_paste", title="大资料", content=f"# 总览\n\n{sections}"
+        )
+        svc.parse_source(source.id)
+
+        total = edge_service.count_knowledge_points(self.training.id)
+        selected = edge_service.build_knowledge_points(self.training.id)
+        self.assertEqual(total - before, 12, "新增资料带来 12 个知识点")
+        self.assertEqual(len(selected), edge_service.MAX_KNOWLEDGE_POINTS)
+
+        probe = edge_service.generate_probe_items(self.training.id, topic="虚拟语气")
+        self.assertEqual(probe.total_points, total)
+        self.assertEqual(probe.selected_points, len(selected))
+        self.assertTrue(probe.truncated, "截断必须可被页面识别")
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self._old_db = os.environ.get("DB_PATH")

@@ -178,9 +178,19 @@ def _render_source_list(training_id: int) -> None:
         picked_web = st.selectbox("刷新网页快照", ["（不操作）", *web_sources], key="src_refresh_pick")
         if picked_web != "（不操作）" and st.button("重新抓取", key="src_refresh_apply"):
             with st.spinner("正在重新抓取…"):
-                refreshed = svc.refresh_snapshot(web_sources[picked_web].id)
+                report = svc.refresh_snapshot_report(web_sources[picked_web].id)
+            refreshed = report["source"]
             if refreshed.parse_status == "ok":
-                _flash("快照已刷新，切片已更新")
+                impact = report["impact"]
+                if impact.is_empty:
+                    _flash(f"快照已刷新：内容没有变化（共 {report['chunk_count']} 个切片）")
+                else:
+                    _flash(
+                        f"快照已刷新：新增 {len(impact.added)} 节 / 删除 {len(impact.removed)} 节 / "
+                        f"修改 {len(impact.changed)} 节；受影响的训练项 {report['affected_items']} 个"
+                        "（悬空的出处回指已自动清理）",
+                        "warning",
+                    )
             else:
                 _flash(refreshed.parse_error or "刷新失败", "error")
             st.rerun()
