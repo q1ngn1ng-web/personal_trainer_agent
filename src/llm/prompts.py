@@ -263,7 +263,10 @@ TRAIN_QUESTION_PROMPT: str = """你是训练出题助手。请针对给定知识
 1. 题目必须能**凭上面的资料回答**，不要问资料之外的内容；
 2. 轮次越靠后越难：第 1 轮直接回忆/复述，第 2-3 轮应用与辨析，第 4-5 轮综合表达或举一反三；
 3. 参考答案写成"应包含哪些要点"，便于后续判分；
-4. 只输出 JSON，字段见 schema。
+4. **按题型出题**：`question_type` 取 choice / fill / qa 之一。定义类知识点用 fill，辨析类用 choice，理解类用 qa；
+5. **要点清单**：输出 `points`，每条含 `point_id`（p1、p2…）、`text`（这条要点是什么）、`weight`（0.5—5 的相对权重，越关键越大）、`is_required`（是否必答；由你建议，用户可改）。qa 至少 3 条；fill / choice 至少 1 条；
+6. **选择题**：输出 `options`，至少 3 个，每个含 `key`（A/B/C…）、`text`、`is_correct`，且**有且仅有一个** `is_correct` 为 true；干扰项 MUST 取自上面的资料片段，MUST NOT 编造资料里没有的说法；
+7. 只输出 JSON，字段见 schema。
 """
 
 TRAIN_QUESTION_PROMPT_VERSION: str = "v1.0.0"

@@ -109,13 +109,14 @@ def test_pass_threshold_is_eight_tenths() -> None:
 
 
 def test_overall_score_uses_type_weights() -> None:
-    """整场评分：客观题权重 0.6、主观题 0.4（2026-10-15 用户决策）。"""
+    """整场评分：客观题权重 0.4、主观题 0.6（2026-10-15 用户决策）。"""
     choice = grade_question("choice", answer="A", expected_answer="A")
     qa_wrong = grade_question(
         "qa", answer="...", points=[PointSpec("p1", "要点")], point_verdicts={"p1": WRONG}
     )
 
-    assert overall_score([choice, qa_wrong]) == pytest.approx(0.6)
+    assert overall_score([choice, qa_wrong]) == pytest.approx(0.4)
+    assert overall_score([choice]) == pytest.approx(1.0)
     assert overall_score([qa_wrong]) == pytest.approx(0.0)
     assert overall_score([]) is None
 

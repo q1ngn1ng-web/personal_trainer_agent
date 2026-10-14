@@ -290,8 +290,37 @@ TRAIN_QUESTION_SCHEMA: dict[str, Any] = {
         "question": {"type": "string"},
         "reference_answer": {"type": "string"},
         "difficulty": {"type": "integer", "minimum": 1, "maximum": 4},
+        "question_type": {"type": "string", "enum": ["choice", "fill", "qa"]},
+        "options": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "text": {"type": "string"},
+                    "is_correct": {"type": "boolean"},
+                },
+                "required": ["key", "text", "is_correct"],
+                "additionalProperties": False,
+            },
+        },
+        "points": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "point_id": {"type": "string"},
+                    "text": {"type": "string"},
+                    "weight": {"type": "number", "minimum": 0.5, "maximum": 5},
+                    "is_required": {"type": "boolean"},
+                },
+                "required": ["point_id", "text", "weight", "is_required"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["question", "reference_answer", "difficulty"],
+    "required": ["question", "reference_answer", "difficulty", "question_type", "points"],
     "additionalProperties": False,
 }
 

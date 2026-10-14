@@ -40,7 +40,7 @@
 用户敲定三个产品参数，已落到代码与 ADR：
 
 - 达标阈值 `DEFAULT_PASS_THRESHOLD = 0.8`；
-- 整场评分权重：客观题 `0.6` / 主观题 `0.4`，新增 `type_weight()` 与 `overall_score()` 两个纯函数；
+- 整场评分权重：客观题 `0.4` / 主观题 `0.6`（同日修正过方向），新增 `type_weight()` 与 `overall_score()` 两个纯函数；
 - 必答要点由 LLM 建议、人工可改（落在阶段 3 的出题链路）。
 
 **依赖发现**：2.5 的接线无法独立完成——`quiz_service` 目前直接采信 LLM 给出的 pass/fail，

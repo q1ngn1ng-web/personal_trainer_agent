@@ -31,17 +31,22 @@
     但**尚未接入** `core/mastery.evaluate` 与 `attempt_service` 的通过/连续管线。
   - 依赖发现（2026-10-15）：接线**依赖阶段 3**——`quiz_service` 现在拿的是 LLM 直接给的 pass/fail，
     要用要点评分必须先让题目带要点清单、并让判分 prompt 产出逐条判定。**2.5 应在 3.1/3.3 之后收口。**
-  - 已定参数：达标阈值 `0.8`；整场评分权重 客观题 `0.6` / 主观题 `0.4`；必答点 LLM 建议 + 人工改。
+  - 已定参数：达标阈值 `0.8`；整场评分权重 客观题 `0.4` / 主观题 `0.6`；必答点 LLM 建议 + 人工改。
 
 ## 3. 出题
 
-- [ ] 3.1 出题 prompt 支持按题型出题，并同时产出结构化要点清单
+- [x] 3.1 出题 prompt 支持按题型出题，并同时产出结构化要点清单
   - 验收：三类题型都能生成，要点清单带权重与必答标记
   - 注（2026-10-15）：**必答标记由 LLM 建议、用户可改**（用户决策）。
-- [ ] 3.2 选择题干扰项必须取自同一资料片段
+  - 注（2026-10-15）：已改 `TRAIN_QUESTION_PROMPT` 与 `TRAIN_QUESTION_SCHEMA`（新增 `question_type` / `options` / `points`）。
+- [x] 3.2 选择题干扰项必须取自同一资料片段
   - 验收：抽样检查，干扰项均能在来源切片中找到依据
-- [ ] 3.3 题目落库时写入 `source_chunk_ids` 与 `question_type`
+  - 注（2026-10-15）：prompt 已约束，且在 `validate_generated_question` 里做成**可断言的校验**——
+    传入资料原文时，选项文本若在原文中找不到依据即判为"疑似编造"并拒绝落库。
+- [x] 3.3 题目落库时写入 `source_chunk_ids` 与 `question_type`
   - 验收：每道题都能回指资料来源
+  - 注（2026-10-15）：`source_chunk_ids` 原本就由 `plan_service.register_in_question_bank` 写入；
+    `question_type` / `options` / 要点清单由 `question_service.save_generated_question` 落库。
 
 ## 4. 记忆
 

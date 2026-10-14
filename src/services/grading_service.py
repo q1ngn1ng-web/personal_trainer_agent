@@ -39,10 +39,11 @@ _VERDICT_FACTOR: dict[str, float] = {HIT: 1.0, PARTIAL: 0.5, WRONG: 0.0, MISSING
 #: 2026-10-15 用户决策：取 0.8。仍需用人工标注样本校准（见 ADR-0022 的"后果与验证"）。
 DEFAULT_PASS_THRESHOLD: float = 0.8
 
-#: 整场评分的题型权重：客观题（选择 / 填空）0.6，主观题 0.4。
-#: 2026-10-15 用户决策。理由：选择题容易满分、区分度低，主观题更能反映真实掌握程度。
-OBJECTIVE_WEIGHT: float = 0.6
-SUBJECTIVE_WEIGHT: float = 0.4
+#: 整场评分的题型权重：客观题（选择 / 填空）0.4，主观题 0.6。
+#: 2026-10-15 用户决策（同日修正过一次方向）。理由：选择题容易满分、区分度低，
+#: 主观题更能反映真实掌握程度，所以主观题权重更高。
+OBJECTIVE_WEIGHT: float = 0.4
+SUBJECTIVE_WEIGHT: float = 0.6
 
 #: 客观题题型
 OBJECTIVE_TYPES: tuple[str, ...] = ("choice", "fill")
@@ -185,7 +186,7 @@ def score_points(
 
 
 def type_weight(question_type: str) -> float:
-    """题型的整场评分权重：客观题 0.6，主观题 0.4。"""
+    """题型的整场评分权重：客观题 0.4，主观题 0.6。"""
     return OBJECTIVE_WEIGHT if str(question_type) in OBJECTIVE_TYPES else SUBJECTIVE_WEIGHT
 
 
