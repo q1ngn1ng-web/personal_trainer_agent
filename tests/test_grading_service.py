@@ -12,6 +12,7 @@ import pytest
 from src.db.migrate import migrate
 from src.db.sqlite import get_connection, init_db
 from src.services.grading_service import (
+    DEFAULT_PASS_THRESHOLD,
     HIT,
     MISSING,
     PARTIAL,
@@ -20,6 +21,7 @@ from src.services.grading_service import (
     grade_choice,
     grade_fill,
     grade_question,
+    overall_score,
     score_points,
 )
 
@@ -81,6 +83,41 @@ def test_qa_without_points_is_rejected() -> None:
 def test_unknown_verdict_is_rejected() -> None:
     with pytest.raises(ValueError):
         score_points(_three_points(), {"p1": "maybe"})
+
+
+def test_pass_threshold_is_eight_tenths() -> None:
+    """2026-10-15 用户决策：达标阈值 0.8。"""
+    assert DEFAULT_PASS_THRESHOLD == pytest.approx(0.8)
+
+    points = [PointSpec(f"p{i}", "要点", weight=1) for i in range(1, 6)]
+    exactly_08 = grade_question(
+        "qa",
+        answer="...",
+        points=points,
+        point_verdicts={f"p{i}": HIT for i in range(1, 5)} | {"p5": MISSING},
+    )
+    below = grade_question(
+        "qa",
+        answer="...",
+        points=points,
+        point_verdicts={f"p{i}": HIT for i in range(1, 4)} | {"p4": MISSING, "p5": MISSING},
+    )
+
+    assert exactly_08.score == pytest.approx(0.8)
+    assert exactly_08.passed is True
+    assert below.passed is False
+
+
+def test_overall_score_uses_type_weights() -> None:
+    """整场评分：客观题权重 0.6、主观题 0.4（2026-10-15 用户决策）。"""
+    choice = grade_question("choice", answer="A", expected_answer="A")
+    qa_wrong = grade_question(
+        "qa", answer="...", points=[PointSpec("p1", "要点")], point_verdicts={"p1": WRONG}
+    )
+
+    assert overall_score([choice, qa_wrong]) == pytest.approx(0.6)
+    assert overall_score([qa_wrong]) == pytest.approx(0.0)
+    assert overall_score([]) is None
 
 
 def test_choice_grading_uses_rules_only() -> None:

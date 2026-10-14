@@ -34,3 +34,17 @@
 ## 关联 OpenSpec change
 
 `learner-memory-and-grading` —— 已完成阶段 1 与阶段 2 的 2.1—2.4；2.5 与后续阶段待做。
+
+## 补记（同日）
+
+用户敲定三个产品参数，已落到代码与 ADR：
+
+- 达标阈值 `DEFAULT_PASS_THRESHOLD = 0.8`；
+- 整场评分权重：客观题 `0.6` / 主观题 `0.4`，新增 `type_weight()` 与 `overall_score()` 两个纯函数；
+- 必答要点由 LLM 建议、人工可改（落在阶段 3 的出题链路）。
+
+**依赖发现**：2.5 的接线无法独立完成——`quiz_service` 目前直接采信 LLM 给出的 pass/fail，
+要改走要点评分必须先让题目带要点清单、并让判分 prompt 产出逐条判定。因此 2.5 应排在 3.1 / 3.3 之后，
+已在 change 的 tasks.md 中注明。
+
+验证：`uv run pytest -q tests/test_grading_service.py` → 14 passed。

@@ -36,9 +36,16 @@ POINT_VERDICTS: tuple[str, ...] = (HIT, PARTIAL, WRONG, MISSING)
 _VERDICT_FACTOR: dict[str, float] = {HIT: 1.0, PARTIAL: 0.5, WRONG: 0.0, MISSING: 0.0}
 
 #: 主观题达标阈值。
-#: 【待确认】这是产品决策（见 HANDOFF 第 2 节第 5 条），当前取 0.6 作为可配置初值，
-#: 需要用人工标注样本校准后再定稿。
-DEFAULT_PASS_THRESHOLD: float = 0.6
+#: 2026-10-15 用户决策：取 0.8。仍需用人工标注样本校准（见 ADR-0022 的"后果与验证"）。
+DEFAULT_PASS_THRESHOLD: float = 0.8
+
+#: 整场评分的题型权重：客观题（选择 / 填空）0.6，主观题 0.4。
+#: 2026-10-15 用户决策。理由：选择题容易满分、区分度低，主观题更能反映真实掌握程度。
+OBJECTIVE_WEIGHT: float = 0.6
+SUBJECTIVE_WEIGHT: float = 0.4
+
+#: 客观题题型
+OBJECTIVE_TYPES: tuple[str, ...] = ("choice", "fill")
 
 _PUNCT_PATTERN = re.compile(r"[\s，。、；：！？,.;:!?\"'“”‘’（）()\[\]【】<>《》\-—_/\\|]+")
 
@@ -172,6 +179,32 @@ def score_points(
         incorrect=tuple(incorrect),
         required_missing=tuple(required_missing),
     )
+
+
+# ---------------------------------------------------------------- 整场评分
+
+
+def type_weight(question_type: str) -> float:
+    """题型的整场评分权重：客观题 0.6，主观题 0.4。"""
+    return OBJECTIVE_WEIGHT if str(question_type) in OBJECTIVE_TYPES else SUBJECTIVE_WEIGHT
+
+
+def overall_score(results: Sequence["GradeResult"]) -> float | None:
+    """整场评分：按题型权重对单题得分做加权平均。
+
+    权重和不为 1 时按实际权重归一化；没有任何成绩时返回 ``None``
+    （不要用 0 冒充"考了零分"）。整场评分**不重新调用模型**，只做确定性聚合。
+    """
+    entries = list(results)
+    if not entries:
+        return None
+    total_weight = sum(type_weight(item.question_type) for item in entries)
+    if total_weight <= 0:
+        return None
+    weighted = sum(
+        item.score * type_weight(item.question_type) for item in entries
+    )
+    return weighted / total_weight
 
 
 # ---------------------------------------------------------------- 统一入口
@@ -332,17 +365,22 @@ __all__ = [
     "GradeResult",
     "HIT",
     "MISSING",
+    "OBJECTIVE_TYPES",
+    "OBJECTIVE_WEIGHT",
     "PARTIAL",
     "POINT_VERDICTS",
     "PointScore",
     "PointSpec",
     "QUESTION_TYPES",
+    "SUBJECTIVE_WEIGHT",
     "WRONG",
     "grade_choice",
     "grade_fill",
     "grade_question",
     "load_points",
     "normalize_text",
+    "overall_score",
     "record_attempt_score",
     "score_points",
+    "type_weight",
 ]
