@@ -48,3 +48,15 @@
 已在 change 的 tasks.md 中注明。
 
 验证：`uv run pytest -q tests/test_grading_service.py` → 14 passed。
+
+## 补记二（2026-10-15，阶段 3 与 2.5 收口）
+
+- **阶段 3**：出题 schema/prompt 新增 `question_type` / `options` / `points`；
+  新增 `question_service`（出题校验 + 要点落库），选择题干扰项若在资料原文中找不到依据即拒绝落库。
+- **2.5 收口**：`QUIZ_GRADE_PROMPT` 升到 v1.1.0，模型改为**逐条输出要点四态判定**；
+  `grade_with_llm` 把逐条判定交给 `grading_service` 算分与达标（阈值 0.8 + 必答否决），
+  写入 `assessment_items.verdict` 的即新口径；"连续 2 次"沿用既有管线。
+  为兼容历史题（无要点清单），`QUIZ_GRADE_SCHEMA` 同时保留旧的 `verdict` 字段，代码在该情况下走旧口径且不伪造分数。
+- 修正整场评分权重为客观题 0.4 / 主观题 0.6。
+
+验证：判分 + 出题 + 测验 + 作答 + 达标 + 计划六个测试文件 → 66 passed。

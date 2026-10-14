@@ -357,9 +357,25 @@ QUIZ_GRADE_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "item_key": {"type": "string"},
                     "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                    "point_verdicts": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "point_id": {"type": "string"},
+                                "verdict": {
+                                    "type": "string",
+                                    "enum": ["hit", "partial", "wrong", "missing"],
+                                },
+                            },
+                            "required": ["point_id", "verdict"],
+                            "additionalProperties": False,
+                        },
+                    },
                     "reason": {"type": "string"},
                 },
-                "required": ["item_key", "verdict", "reason"],
+                "required": ["item_key", "reason"],
                 "additionalProperties": False,
             },
         }

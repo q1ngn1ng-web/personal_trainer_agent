@@ -25,8 +25,13 @@
   - 验收：判分后能直接读到"缺哪条、错哪条"
   - 注（2026-10-15）：`record_attempt_score` 已把分数与要点级明细写回 `practice_attempts`；
     **测验链路（quiz_service）尚未接线**，留在 2.5 之后一并处理
-- [ ] 2.5 达标判定改造：必答项全中 + 总分 ≥ 阈值，且保留"连续 2 次"
+- [x] 2.5 达标判定改造：必答项全中 + 总分 ≥ 阈值，且保留"连续 2 次"
   - 验收：阈值可配置；未达阈值不写入 passed
+  - 完成（2026-10-15）：`QUIZ_GRADE_PROMPT` 升级为 v1.1.0、`QUIZ_GRADE_SCHEMA` 改为逐条要点四态判定；
+    `quiz_service.grade_with_llm` 现在只把模型的逐条语义判定交给 `grading_service`
+    算分与达标（阈值 0.8 + 必答否决），写入的 verdict 即新口径。
+    "连续 2 次"沿用既有 `mastery.evaluate` 管线，未改动。
+    历史题（无要点清单）自动退回旧的二元口径，不伪造分数。
   - 注（2026-10-15）：判定规则已在 `grade_question` 内实现（`passed = 无必答缺失 and score ≥ 阈值`），
     但**尚未接入** `core/mastery.evaluate` 与 `attempt_service` 的通过/连续管线。
   - 依赖发现（2026-10-15）：接线**依赖阶段 3**——`quiz_service` 现在拿的是 LLM 直接给的 pass/fail，
