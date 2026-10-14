@@ -219,6 +219,42 @@ _PLAN_ITEM_QUESTION_COLUMNS: dict[str, str] = {
 }
 
 
+#: 判分相关列（change learner-memory-and-grading 任务 1.1 / 1.3 / 1.4）
+_GRADING_COLUMNS: dict[str, dict[str, str]] = {
+    "question_bank": {"question_type": "TEXT DEFAULT 'qa'", "options": "TEXT"},
+    "practice_attempts": {"score": "REAL", "point_results": "TEXT"},
+    "assessment_items": {"question_type": "TEXT DEFAULT 'qa'"},
+}
+
+_QUESTION_POINTS_DDL = """
+CREATE TABLE IF NOT EXISTS question_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    point_id TEXT NOT NULL,
+    point_text TEXT NOT NULL,
+    weight REAL DEFAULT 1,
+    is_required INTEGER DEFAULT 0,
+    ordinal INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (training_id, item_key, point_id),
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+"""
+
+
+def _ensure_question_points(conn: sqlite3.Connection) -> bool:
+    """建 ``question_points``（题目要点清单）表。返回是否新建。"""
+    if _column_names(conn, "question_points"):
+        return False
+    conn.execute(_QUESTION_POINTS_DDL)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_question_points_item "
+        "ON question_points(training_id, item_key, ordinal)"
+    )
+    return True
+
+
 def _rebuild_training_items(conn: sqlite3.Connection) -> None:
     """给训练项补上稳定题目键 ``item_key`` 与 ``practiced`` 状态。
 
@@ -300,8 +336,20 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     plan_columns = _column_names(conn, "plan_items")
     needs_plan_questions = bool(plan_columns) and "question" not in plan_columns
 
+    grading_columns = {
+        table: cols for table, cols in _GRADING_COLUMNS.items() if _column_names(conn, table)
+    }
+    needs_grading = any(
+        set(cols) - _column_names(conn, table) for table, cols in grading_columns.items()
+    ) or not _column_names(conn, "question_points")
+
     if not (
-        needs_trainings or needs_llm_calls or needs_sources or needs_items or needs_plan_questions
+        needs_trainings
+        or needs_llm_calls
+        or needs_sources
+        or needs_items
+        or needs_plan_questions
+        or needs_grading
     ):
         return applied
 
@@ -335,6 +383,13 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
                 added = _add_missing_columns(conn, "plan_items", _PLAN_ITEM_QUESTION_COLUMNS)
                 if added:
                     applied.append("plan_items:question_columns")
+            if needs_grading:
+                for table, cols in grading_columns.items():
+                    added = _add_missing_columns(conn, table, cols)
+                    if added:
+                        applied.append(f"{table}:grading_columns")
+                if _ensure_question_points(conn):
+                    applied.append("question_points:new_table")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

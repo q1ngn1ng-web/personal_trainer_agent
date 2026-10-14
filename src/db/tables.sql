@@ -256,6 +256,8 @@ CREATE TABLE IF NOT EXISTS question_bank (
     source_chunk_ids TEXT,
     knowledge_point TEXT,
     item_type TEXT,
+    question_type TEXT DEFAULT 'qa',
+    options TEXT,
     difficulty_tier INTEGER,
     question_text TEXT,
     answer_text TEXT,
@@ -270,6 +272,25 @@ CREATE TABLE IF NOT EXISTS question_bank (
 
 CREATE INDEX IF NOT EXISTS idx_question_bank_drawable ON question_bank(training_id, cooldown_until);
 
+-- 题目要点清单：判分的锚点，随题固化（change learner-memory-and-grading 任务 1.2）
+-- 判分时只读取这份清单，MUST NOT 临时让模型生成要点，否则分数会漂。
+CREATE TABLE IF NOT EXISTS question_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    point_id TEXT NOT NULL,
+    point_text TEXT NOT NULL,
+    weight REAL DEFAULT 1,
+    is_required INTEGER DEFAULT 0,
+    ordinal INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (training_id, item_key, point_id),
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_question_points_item
+    ON question_points(training_id, item_key, ordinal);
+
 -- 逐次作答记录：客观表现的唯一数据源（准确率 / 连续达标都以它为准）
 -- item_key 是稳定题目键，与 plan_items / question_bank 一致
 CREATE TABLE IF NOT EXISTS practice_attempts (
@@ -279,6 +300,8 @@ CREATE TABLE IF NOT EXISTS practice_attempts (
     plan_id INTEGER,
     round_index INTEGER,
     result TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
+    score REAL,
+    point_results TEXT,
     source TEXT DEFAULT 'self' CHECK (source IN ('self', 'quiz', 'llm')),
     note TEXT,
     created_at DATETIME NOT NULL,
@@ -310,6 +333,7 @@ CREATE TABLE IF NOT EXISTS assessment_items (
     ordinal INTEGER NOT NULL,
     item_key TEXT NOT NULL,
     knowledge_point TEXT,
+    question_type TEXT DEFAULT 'qa',
     question TEXT NOT NULL,
     reference_answer TEXT,
     is_variant INTEGER DEFAULT 1,
