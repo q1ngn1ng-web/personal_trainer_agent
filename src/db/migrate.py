@@ -222,7 +222,11 @@ _PLAN_ITEM_QUESTION_COLUMNS: dict[str, str] = {
 #: 判分相关列（change learner-memory-and-grading 任务 1.1 / 1.3 / 1.4）
 _GRADING_COLUMNS: dict[str, dict[str, str]] = {
     "question_bank": {"question_type": "TEXT DEFAULT 'qa'", "options": "TEXT"},
-    "practice_attempts": {"score": "REAL", "point_results": "TEXT"},
+    "practice_attempts": {
+        "score": "REAL",
+        "point_results": "TEXT",
+        "mistake_reasons": "TEXT",
+    },
     "assessment_items": {"question_type": "TEXT DEFAULT 'qa'"},
 }
 
@@ -253,6 +257,47 @@ def _ensure_question_points(conn: sqlite3.Connection) -> bool:
         "ON question_points(training_id, item_key, ordinal)"
     )
     return True
+
+
+_MEMORY_DDL: dict[str, str] = {
+    "mistake_analysis": """
+CREATE TABLE IF NOT EXISTS mistake_analysis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    attempt_id INTEGER,
+    analysis_text TEXT NOT NULL,
+    prompt_name TEXT,
+    prompt_version TEXT,
+    model TEXT,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+""",
+    "app_settings": """
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME
+)
+""",
+}
+
+
+def _ensure_memory_tables(conn: sqlite3.Connection) -> list[str]:
+    """建记忆模块的两张表（mistake_analysis / app_settings）。返回新建的表名。"""
+    created: list[str] = []
+    for table, ddl in _MEMORY_DDL.items():
+        if _column_names(conn, table):
+            continue
+        conn.execute(ddl)
+        created.append(table)
+    if "mistake_analysis" in created:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mistake_analysis_item "
+            "ON mistake_analysis(training_id, item_key, id)"
+        )
+    return created
 
 
 def _rebuild_training_items(conn: sqlite3.Connection) -> None:
@@ -343,6 +388,10 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         set(cols) - _column_names(conn, table) for table, cols in grading_columns.items()
     ) or not _column_names(conn, "question_points")
 
+    needs_memory = not _column_names(conn, "mistake_analysis") or not _column_names(
+        conn, "app_settings"
+    )
+
     if not (
         needs_trainings
         or needs_llm_calls
@@ -350,6 +399,7 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_items
         or needs_plan_questions
         or needs_grading
+        or needs_memory
     ):
         return applied
 
@@ -390,6 +440,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
                         applied.append(f"{table}:grading_columns")
                 if _ensure_question_points(conn):
                     applied.append("question_points:new_table")
+            if needs_memory:
+                for table in _ensure_memory_tables(conn):
+                    applied.append(f"{table}:new_table")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

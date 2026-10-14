@@ -302,6 +302,7 @@ CREATE TABLE IF NOT EXISTS practice_attempts (
     result TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
     score REAL,
     point_results TEXT,
+    mistake_reasons TEXT,
     source TEXT DEFAULT 'self' CHECK (source IN ('self', 'quiz', 'llm')),
     note TEXT,
     created_at DATETIME NOT NULL,
@@ -310,6 +311,31 @@ CREATE TABLE IF NOT EXISTS practice_attempts (
 
 CREATE INDEX IF NOT EXISTS idx_practice_attempts_item
     ON practice_attempts(training_id, item_key, id);
+
+-- 错题分析（可选功能，由用户开关控制；见 change learner-memory-and-grading 任务 4.6）
+-- 分析文本单独存储，MUST NOT 覆盖规则推导出的错因
+CREATE TABLE IF NOT EXISTS mistake_analysis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    attempt_id INTEGER,
+    analysis_text TEXT NOT NULL,
+    prompt_name TEXT,
+    prompt_version TEXT,
+    model TEXT,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mistake_analysis_item
+    ON mistake_analysis(training_id, item_key, id);
+
+-- 应用级开关（键值）。当前用于"是否开启错题分析"，避免为零散设置再开一套体系
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME
+);
 
 -- 测验批次：每两周一次 / 用户手动触发 / 阶段末触发
 CREATE TABLE IF NOT EXISTS assessments (
