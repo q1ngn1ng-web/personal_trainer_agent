@@ -336,6 +336,31 @@ def render_context(
 # ---------------------------------------------------------------- 开关与分析（4.6）
 
 
+def recommended_type_mix(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> dict[str, float]:
+    """下一场测验的题型配比：失误越多、均分越低的题型，占比越高。
+
+    **纯 SQL + 规则，不调用大模型**；返回 ``{题型: 占比}``，和为 1；无数据时返回空字典。
+    """
+    profile = knowledge_profile(training_id, conn=conn)
+    if not profile:
+        return {}
+    pressure: dict[str, float] = {}
+    for stat in profile:
+        score = stat.avg_score if stat.avg_score is not None else 0.0
+        gap = max(0.0, WEAK_SCORE_THRESHOLD - score)
+        pressure[stat.question_type] = pressure.get(stat.question_type, 0.0) + gap * stat.attempts
+    pressure = {key: value for key, value in pressure.items() if value > 0}
+    total = sum(pressure.values())
+    if total <= 0:
+        return {}
+    return {
+        question_type: round(value / total, 3)
+        for question_type, value in sorted(pressure.items(), key=lambda kv: -kv[1])
+    }
+
+
 def is_mistake_analysis_enabled(*, conn: sqlite3.Connection | None = None) -> bool:
     """错题分析开关，**默认关闭**（成本与隐私考虑）。"""
     active = conn or _connect()
@@ -441,6 +466,7 @@ __all__ = [
     "mistake_reason_counts",
     "recent_mistake_notes",
     "record_mistake_reasons",
+    "recommended_type_mix",
     "render_context",
     "save_mistake_analysis",
     "set_mistake_analysis_enabled",

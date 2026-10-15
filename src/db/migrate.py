@@ -227,7 +227,7 @@ _GRADING_COLUMNS: dict[str, dict[str, str]] = {
         "point_results": "TEXT",
         "mistake_reasons": "TEXT",
     },
-    "assessment_items": {"question_type": "TEXT DEFAULT 'qa'"},
+    "assessment_items": {"question_type": "TEXT DEFAULT 'qa'", "score": "REAL"},
 }
 
 _QUESTION_POINTS_DDL = """
@@ -281,6 +281,20 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at DATETIME
 )
 """,
+    "explanations": """
+CREATE TABLE IF NOT EXISTS explanations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    explanation_text TEXT NOT NULL,
+    source_refs TEXT,
+    prompt_name TEXT,
+    prompt_version TEXT,
+    model TEXT,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+""",
 }
 
 
@@ -296,6 +310,11 @@ def _ensure_memory_tables(conn: sqlite3.Connection) -> list[str]:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mistake_analysis_item "
             "ON mistake_analysis(training_id, item_key, id)"
+        )
+    if "explanations" in created:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_explanations_item "
+            "ON explanations(training_id, item_key, id)"
         )
     return created
 
@@ -388,9 +407,7 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         set(cols) - _column_names(conn, table) for table, cols in grading_columns.items()
     ) or not _column_names(conn, "question_points")
 
-    needs_memory = not _column_names(conn, "mistake_analysis") or not _column_names(
-        conn, "app_settings"
-    )
+    needs_memory = any(not _column_names(conn, table) for table in _MEMORY_DDL)
 
     if not (
         needs_trainings

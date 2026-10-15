@@ -252,6 +252,24 @@ QUIZ_GRADE_PROMPT: str = """你是测验评分员。请依据参考答案，判�
 
 QUIZ_GRADE_PROMPT_VERSION: str = "v1.1.0"
 
+EXPLANATION_PROMPT: str = """你是题目解析助手。用户做错了这道题，请给出解析。
+
+要求：
+1. 解析必须**依据下面的资料片段**，不得使用片段之外的知识；片段不足以解释时，明确说明"依据不足"，不要编造；
+2. 结构固定三段：① 正确答案是什么 ② 用户漏了什么或说错了什么 ③ 一个便于记住的提示；
+3. 语言简洁，不超过 200 字；
+4. 只输出 JSON，字段见 schema。
+
+题目：{question}
+参考答案要点：{points}
+用户作答：{answer}
+资料片段：
+{source_text}
+"""
+
+EXPLANATION_PROMPT_VERSION: str = "v1.0.0"
+
+
 TRAIN_QUESTION_PROMPT: str = """你是训练出题助手。请针对给定知识点出一道**训练题**，并给出参考答案。
 
 主题：{topic}
@@ -287,5 +305,6 @@ PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
     "path_skeleton": (PATH_SKELETON_PROMPT, PATH_SKELETON_PROMPT_VERSION),
     "quiz_variant": (QUIZ_VARIANT_PROMPT, QUIZ_VARIANT_PROMPT_VERSION),
     "quiz_grade": (QUIZ_GRADE_PROMPT, QUIZ_GRADE_PROMPT_VERSION),
+    "explanation": (EXPLANATION_PROMPT, EXPLANATION_PROMPT_VERSION),
     "train_question": (TRAIN_QUESTION_PROMPT, TRAIN_QUESTION_PROMPT_VERSION),
 }

@@ -72,3 +72,15 @@
 - 任务 4.3（整场评分与解析改用 memory_service）依赖阶段 5/6，暂未接线，已在 tasks.md 注明。
 
 验证：记忆 + 判分 + 出题 + 作答 + 测验 + 计划 + 达标七个测试文件 → 75 passed。
+
+## 补记四（2026-10-15，阶段 5—8）
+
+- **5.1/5.2 整场评分**：`assessment_items` 增 `score` 列并由判分写入；
+  `finish_assessment` 改为按题型加权（客观 0.4 / 主观 0.6）算整场分，历史题无分数时退回通过比例。
+  综合反馈的素材由 `memory_service.render_context` 提供（薄弱知识点 / 错因分布 / 最近错因）。
+- **6.1/6.2 按需解析**：新增 `explanation_service` 与 `explanations` 表；
+  解析基于题目关联的资料切片，片段不足时提示依据不足；prompt `explanation` v1.0.0、schema 同步登记。
+- **7.1 自适应配比**：`memory_service.recommended_type_mix` 按"均分缺口 × 作答次数"归一化出题型配比，零模型调用。
+- **8 收尾**：全量 `uv run pytest -q` → **253 passed, 1 skipped, 30 subtests passed**（基线 216）；
+  证据回填 `workspace/evidence/20261015-判分分流与要点评分.md`。
+- **明确未做**：判分一致性（需人工标注 20—30 题）与重复判分稳定性——**在完成前不得对外声称这两项数据**。

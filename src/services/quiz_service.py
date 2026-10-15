@@ -381,13 +381,15 @@ def grade_with_llm(
                 )
                 verdict = "pass" if grade.passed else "fail"
                 reason = grade.reason
+                item_score = grade.score
             else:
                 # 没有要点清单的历史题：退回旧的二元口径，不伪造分数
                 verdict = "pass" if entry.get("verdict") == "pass" else "fail"
                 reason = str(entry.get("reason") or "")
+                item_score = None
             active.execute(
-                "UPDATE assessment_items SET verdict = ?, reason = ? WHERE id = ?",
-                (verdict, reason, item.id),
+                "UPDATE assessment_items SET verdict = ?, reason = ?, score = ? WHERE id = ?",
+                (verdict, reason, item_score, item.id),
             )
         if own:
             active.commit()
@@ -453,6 +455,21 @@ def _extra_round(
     return cursor.rowcount > 0
 
 
+def _overall_quiz_score(
+    conn: sqlite3.Connection, assessment_id: int
+) -> float | None:
+    """整场评分：按题型权重聚合各题得分；没有分数时返回 None。"""
+    from src.services.grading_service import pair_weighted_score
+
+    rows = conn.execute(
+        "SELECT question_type, score FROM assessment_items WHERE assessment_id = ?",
+        (int(assessment_id),),
+    ).fetchall()
+    return pair_weighted_score(
+        [(str(row["question_type"] or "qa"), row["score"]) for row in rows]
+    )
+
+
 def finish_assessment(
     assessment_id: int,
     *,
@@ -476,7 +493,14 @@ def finish_assessment(
         total = len(items)
         passed_items = [item for item in items if item.verdict == "pass"]
         failed_items = [item for item in items if item.verdict != "pass"]
-        score = (len(passed_items) / total) if total else 0.0
+        # 整场评分：按题型加权（客观 0.4 / 主观 0.6）聚合单题得分；
+        # 历史题没有分数时退回"通过比例"，不伪造分数
+        weighted = _overall_quiz_score(active, assessment_id)
+        score = (
+            weighted
+            if weighted is not None
+            else ((len(passed_items) / total) if total else 0.0)
+        )
         passed = bool(total) and score >= pass_ratio
 
         active.execute(

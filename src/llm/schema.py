@@ -320,7 +320,10 @@ TRAIN_QUESTION_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["question", "reference_answer", "difficulty", "question_type", "points"],
+    # question_type / points 由 prompt 强制要求，但在 schema 层保持可选：
+    # 模型偶尔不吐这两个字段时不应整条判为失败，落库前由
+    # question_service.validate_generated_question 兜底校验。
+    "required": ["question", "reference_answer", "difficulty"],
     "additionalProperties": False,
 }
 
@@ -345,6 +348,17 @@ QUIZ_VARIANT_SCHEMA: dict[str, Any] = {
     "required": ["questions"],
     "additionalProperties": False,
 }
+
+EXPLANATION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "explanation": {"type": "string"},
+        "source_refs": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["explanation"],
+    "additionalProperties": False,
+}
+
 
 QUIZ_GRADE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -399,5 +413,6 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "path_skeleton": PATH_SKELETON_SCHEMA,
     "quiz_variant": QUIZ_VARIANT_SCHEMA,
     "quiz_grade": QUIZ_GRADE_SCHEMA,
+    "explanation": EXPLANATION_SCHEMA,
     "train_question": TRAIN_QUESTION_SCHEMA,
 }

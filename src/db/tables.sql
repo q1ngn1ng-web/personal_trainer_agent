@@ -337,6 +337,23 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at DATETIME
 );
 
+-- 按需解析：用户请求时才生成，必须引用资料来源（change learner-memory-and-grading 任务 6.1—6.2）
+CREATE TABLE IF NOT EXISTS explanations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    explanation_text TEXT NOT NULL,
+    source_refs TEXT,
+    prompt_name TEXT,
+    prompt_version TEXT,
+    model TEXT,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_explanations_item
+    ON explanations(training_id, item_key, id);
+
 -- 测验批次：每两周一次 / 用户手动触发 / 阶段末触发
 CREATE TABLE IF NOT EXISTS assessments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

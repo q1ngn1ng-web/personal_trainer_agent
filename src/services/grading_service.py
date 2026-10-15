@@ -196,16 +196,25 @@ def overall_score(results: Sequence["GradeResult"]) -> float | None:
     权重和不为 1 时按实际权重归一化；没有任何成绩时返回 ``None``
     （不要用 0 冒充"考了零分"）。整场评分**不重新调用模型**，只做确定性聚合。
     """
-    entries = list(results)
+    return pair_weighted_score([(item.question_type, item.score) for item in results])
+
+
+def pair_weighted_score(pairs: Sequence[tuple[str, float | None]]) -> float | None:
+    """按题型权重聚合 ``(题型, 得分)``；全部没有分数时返回 None（不伪造分数）。"""
+    entries = [
+        (str(question_type), float(score))
+        for question_type, score in pairs
+        if score is not None
+    ]
     if not entries:
         return None
-    total_weight = sum(type_weight(item.question_type) for item in entries)
+    total_weight = sum(type_weight(question_type) for question_type, _ in entries)
     if total_weight <= 0:
         return None
-    weighted = sum(
-        item.score * type_weight(item.question_type) for item in entries
+    return (
+        sum(score * type_weight(question_type) for question_type, score in entries)
+        / total_weight
     )
-    return weighted / total_weight
 
 
 # ---------------------------------------------------------------- 统一入口
