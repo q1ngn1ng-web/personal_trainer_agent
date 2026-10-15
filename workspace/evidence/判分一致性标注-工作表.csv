@@ -1,0 +1,8 @@
+question_id,question_type,question,point_id,point_text,weight,is_required,user_answer,human_verdict,human_note,system_verdict,system_repeat_verdict
+q01,qa,Redis 为什么没有锁竞争？,p1,"单线程处理命令",2,1,"Redis 是单线程的，一条条执行命令",hit,答到核心,hit,hit
+q01,qa,Redis 为什么没有锁竞争？,p2,"单线程避免锁竞争",1,0,"所以不会有多线程抢锁的问题",hit,明确说了锁竞争,,,
+q01,qa,Redis 为什么没有锁竞争？,p3,"6.0 起引入多线程 IO",1,0,"（未提及）",missing,没提多线程 IO,missing,missing
+q02,qa,RDB 和 AOF 的区别是什么？,p1,"RDB 是快照持久化",2,1,"RDB 是快照，AOF 是日志",hit,正确,,,
+q02,qa,RDB 和 AOF 的区别是什么？,p2,"AOF 记录写命令日志",1,0,"AOF 记录每条写命令",hit,正确,,,
+q02,qa,RDB 和 AOF 的区别是什么？,p3,"AOF 恢复更完整",1,0,"AOF 用的是锁",wrong,说反了：把 AOF 说成锁,,,
+q03,choice,Redis 6.0 引入了什么？,p1,"多线程 IO 处理网络读写",1,0,"A",hit,选项正确,,,
