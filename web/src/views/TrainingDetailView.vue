@@ -133,10 +133,10 @@ const typeLabel: Record<string, string> = {
 <template>
   <div>
     <div class="page-head">
-      <h1 class="page-title">{{ training ? training.topic : "训练详情" }}</h1>
+      <h1 class="page-title">{{ training ? training.topic : '训练详情' }}</h1>
       <p class="page-sub" v-if="pathData && pathData.path">
-        路径 v{{ pathData.path.version }} · {{ pathData.path.horizon_weeks || "-" }} 周 ·
-        每周 {{ pathData.path.weekly_frequency || "-" }} 次 · 每次 {{ pathData.path.daily_budget_minutes || "-" }} 分钟
+        路径 v{{ pathData.path.version }} · {{ pathData.path.horizon_weeks || '-' }} 周 ·
+        每周 {{ pathData.path.weekly_frequency || '-' }} 次 · 每次 {{ pathData.path.daily_budget_minutes || '-' }} 分钟
       </p>
     </div>
 
@@ -162,7 +162,7 @@ const typeLabel: Record<string, string> = {
           <div style="display: flex; gap: 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap;">
             <span>要点通过 {{ pathData.progress.passed_items }}/{{ pathData.progress.total_items }}</span>
             <span>已练 {{ pathData.progress.practiced_items }}</span>
-            <span>覆盖 {{ pathData.progress.coverage_done ? "完成" : "未完成" }}</span>
+            <span>覆盖 {{ pathData.progress.coverage_done ? '完成' : '未完成' }}</span>
           </div>
           <p v-if="pathData.progress.reason" style="font-size: 13px; color: var(--faint); margin-top: 8px;">
             {{ pathData.progress.reason }}
@@ -178,7 +178,7 @@ const typeLabel: Record<string, string> = {
                 <div v-if="st.goal" style="font-size: 12.5px; color: var(--muted);">{{ st.goal }}</div>
               </div>
               <span style="color: var(--faint); font-size: 12.5px;">{{ st.estimated_minutes }}′ · {{ st.items.length }} 项</span>
-              <span style="color: var(--faint);">{{ openStages.has(st.id) ? "▾" : "▸" }}</span>
+              <span style="color: var(--faint);">{{ openStages.has(st.id) ? '▾' : '▸' }}</span>
             </div>
             <div v-if="openStages.has(st.id)" style="padding: 0 8px 8px;">
               <div v-for="it in st.items" :key="it.id" class="list-item">
@@ -204,9 +204,9 @@ const typeLabel: Record<string, string> = {
         <div v-for="s in sources" :key="s.id" class="card">
           <div class="card-head" style="margin-bottom: 6px;">
             <div class="card-title" style="min-width: 0;">
-              {{ s.type === "url" ? "🔗" : s.type === "file" ? "📄" : "📝" }} {{ s.title }}
+              {{ s.type === 'url' ? '🔗' : s.type === 'file' ? '📄' : '📝' }} {{ s.title }}
             </div>
-            <span class="badge" :class="s.enabled ? 'ok' : 'gray'">{{ s.enabled ? "启用" : "停用" }}</span>
+            <span class="badge" :class="s.enabled ? 'ok' : 'gray'">{{ s.enabled ? '启用' : '停用' }}</span>
           </div>
           <div style="display: flex; gap: 12px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap;">
             <span>类型 {{ s.type }}</span>
@@ -225,7 +225,7 @@ const typeLabel: Record<string, string> = {
           <div class="card-head">
             <div class="card-title">测验结果</div>
             <span class="badge" :class="outcome.passed ? 'ok' : 'warn'">
-              {{ outcome.passed ? "达标" : "未达标" }}
+              {{ outcome.passed ? '达标' : '未达标' }}
             </span>
           </div>
           <div class="stat-row">
@@ -233,7 +233,7 @@ const typeLabel: Record<string, string> = {
             <div class="stat"><div class="num">{{ outcome.question_count }}</div><div class="lbl">题目数</div></div>
             <div class="stat"><div class="num">{{ outcome.extra_rounds }}</div><div class="lbl">追加轮次</div></div>
           </div>
-          <p style="font-size: 13px; color: var(--muted);">判分方式：{{ outcome.graded_by === "llm" ? "AI 要点判分" : "自评" }}</p>
+          <p style="font-size: 13px; color: var(--muted);">判分方式：{{ outcome.graded_by === 'llm' ? 'AI 要点判分' : '自评' }}</p>
           <button class="btn ghost sm" @click="outcome = null; assessment = null">再来一次</button>
         </div>
 
@@ -252,7 +252,7 @@ const typeLabel: Record<string, string> = {
             <textarea v-model="answers[q.item_id]" class="textarea" placeholder="作答…"></textarea>
           </div>
           <button class="btn primary block" :disabled="submitting" @click="submitQuiz">
-            {{ submitting ? "AI 判分中…" : "提交测验" }}
+            {{ submitting ? 'AI 判分中…' : '提交测验' }}
           </button>
         </div>
 
@@ -263,13 +263,13 @@ const typeLabel: Record<string, string> = {
           </div>
           <div v-for="it in manualItems.items" :key="it.item_id" style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px dashed var(--line);">
             <div style="font-weight: 600; margin-bottom: 4px;">{{ it.ordinal }}. {{ it.question }}</div>
-            <div style="font-size: 13.5px; color: var(--muted);">你的作答：{{ it.user_answer || "（未作答）" }}</div>
+            <div style="font-size: 13.5px; color: var(--muted);">你的作答：{{ it.user_answer || '（未作答）' }}</div>
             <div class="ref-answer"><b>参考答案</b>：{{ it.reference_answer }}</div>
             <div style="display: flex; gap: 8px; margin-top: 8px;">
               <button class="btn sm ghost" @click="manualVerdicts[it.item_id] = 'pass'">✓ 我答对了</button>
               <button class="btn sm ghost" @click="manualVerdicts[it.item_id] = 'fail'">✗ 没答好</button>
               <span v-if="manualVerdicts[it.item_id]" class="badge" :class="manualVerdicts[it.item_id] === 'pass' ? 'ok' : 'warn'">
-                已选：{{ manualVerdicts[it.item_id] === "pass" ? "对" : "错" }}
+                已选：{{ manualVerdicts[it.item_id] === 'pass' ? '对' : '错' }}
               </span>
             </div>
           </div>
@@ -281,7 +281,7 @@ const typeLabel: Record<string, string> = {
           <div class="card-head">
             <div class="card-title">测验达标</div>
             <span v-if="quiz.latest" class="badge" :class="quiz.latest.passed ? 'ok' : 'warn'">
-              上次 {{ (quiz.latest.score != null ? (quiz.latest.score * 100).toFixed(0) + " 分 · " : "") + (quiz.latest.passed ? "达标" : "未达标") }}
+              上次 {{ (quiz.latest.score != null ? (quiz.latest.score * 100).toFixed(0) + ' 分 · ' : '') + (quiz.latest.passed ? '达标' : '未达标') }}
             </span>
           </div>
           <p style="color: var(--muted); font-size: 14px; margin-bottom: 14px;">
@@ -289,7 +289,7 @@ const typeLabel: Record<string, string> = {
             得分 ≥ 80 且无必答要点缺失即达标。当前可用题库 {{ quiz.pool_size }} 题。
           </p>
           <button class="btn primary" :disabled="starting || quiz.pool_size === 0" @click="startQuiz">
-            {{ starting ? "组卷中…" : quiz.pool_size === 0 ? "题库不足（先完成训练）" : "开始测验" }}
+            {{ starting ? '组卷中…' : quiz.pool_size === 0 ? '题库不足（先完成训练）' : '开始测验' }}
           </button>
         </div>
       </template>

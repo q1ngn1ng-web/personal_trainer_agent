@@ -35,3 +35,16 @@ export async function logout() {
     authState.viewer = null;
   }
 }
+
+// 个人版：邮箱+密码注册/登录（2026-10-26）
+import { wizardApi } from "./api_wizard";
+
+export async function registerAccount(email: string, password: string, displayName: string) {
+  const result = await wizardApi.register(email, password, displayName);
+  authState.viewer = result.viewer;
+}
+
+export async function loginPassword(email: string, password: string) {
+  const result = await wizardApi.login(email, password);
+  authState.viewer = result.viewer;
+}

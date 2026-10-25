@@ -236,3 +236,87 @@ a { color: var(--brand); text-decoration: none; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-center { display: flex; justify-content: center; padding: 60px 0; }
+
+/* ---- 桌面顶栏 + 头像 + 侧栏收缩（2026-10-26 v2） ---- */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 28px; height: 56px; background: var(--surface);
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20;
+}
+.topbar-title { font-weight: 650; font-size: 15px; color: var(--text); }
+
+.sidebar { transition: width 0.2s ease; width: 232px; }
+.sidebar.collapsed { width: 64px; }
+.sidebar.collapsed .brand { justify-content: center; padding-left: 0; }
+.sidebar.collapsed .nav-item { justify-content: center; padding: 10px 0; }
+.collapse-btn {
+  align-self: flex-end; margin: -6px 10px 8px 0; width: 26px; height: 26px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.collapse-btn:hover { background: var(--surface-2); color: var(--text); }
+.sidebar.collapsed .collapse-btn { align-self: center; margin-right: 0; }
+.foot-hint { font-size: 11.5px; color: var(--faint); }
+
+.avatar-wrap { position: relative; }
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: linear-gradient(135deg, #0e7c6b, #14a38b); color: #fff;
+  border: none; font-weight: 650; font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.avatar-menu {
+  position: absolute; right: 0; top: 44px; width: 180px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow-lift); overflow: hidden; z-index: 50;
+}
+.menu-header { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.menu-name { font-weight: 650; font-size: 14px; }
+.menu-sub { font-size: 12px; color: var(--faint); margin-top: 1px; }
+.menu-item {
+  display: block; width: 100%; text-align: left; padding: 10px 14px;
+  background: none; border: none; font-family: inherit; font-size: 13.5px;
+  color: var(--text); cursor: pointer; text-decoration: none;
+}
+.menu-item:hover { background: var(--surface-2); }
+
+@media (max-width: 768px) {
+  .topbar { display: none; }
+  .main { padding-top: 20px; }
+}
+
+/* ---- 向导 ---- */
+.wizard-steps { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+.wstep {
+  flex: 1; min-width: 120px; display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface); font-size: 13px; color: var(--muted);
+}
+.wstep.active { border-color: var(--brand); background: var(--brand-weak); color: var(--brand-strong); font-weight: 600; }
+.wstep.done { color: var(--ok); border-color: #b6e0c4; background: var(--ok-weak); }
+.wstep .n {
+  width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 700; flex-shrink: 0;
+}
+.wstep.active .n { background: var(--brand); color: #fff; }
+.wstep.done .n { background: var(--ok); color: #fff; }
+
+.chat-box {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2);
+  padding: 14px; max-height: 300px; overflow-y: auto; margin-bottom: 14px;
+}
+.chat-line { margin-bottom: 10px; font-size: 14px; }
+.chat-line .who { font-size: 11.5px; color: var(--faint); margin-bottom: 2px; }
+.chat-line.user .bubble {
+  background: var(--brand-weak); border-radius: 12px 12px 2px 12px; padding: 8px 12px;
+  display: inline-block; max-width: 92%;
+}
+.chat-line.ai .bubble {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px 12px 12px 2px; padding: 8px 12px; display: inline-block; max-width: 92%;
+}
+.draft-box { border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px; }
+.draft-box .row { display: flex; gap: 10px; font-size: 13.5px; margin-bottom: 6px; }
+.draft-box .k { color: var(--muted); flex-shrink: 0; width: 84px; }
+.tag-row { display: flex; gap: 8px; flex-wrap: wrap; }

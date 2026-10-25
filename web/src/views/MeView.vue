@@ -54,9 +54,9 @@ const roleLabel: Record<string, string> = {
     <div class="card">
       <div class="card-head">
         <div>
-          <div class="card-title">{{ authState.viewer ? (authState.viewer.email || "成员") : "本地个人版" }}</div>
+          <div class="card-title">{{ authState.viewer ? (authState.viewer.email || '成员') : '本地个人版' }}</div>
           <div style="color: var(--muted); font-size: 13px; margin-top: 2px;">
-            {{ authState.viewer ? roleLabel[authState.viewer.role] || authState.viewer.role : "单用户模式，无需登录" }}
+            {{ authState.viewer ? roleLabel[authState.viewer.role] || authState.viewer.role : '单用户模式，无需登录' }}
           </div>
         </div>
       </div>
@@ -70,7 +70,7 @@ const roleLabel: Record<string, string> = {
       <div v-for="a in assignments" :key="a.id" class="list-item" style="cursor: default;">
         <div style="flex: 1; min-width: 0;">
           <div style="font-weight: 600;">{{ a.title }}</div>
-          <div style="font-size: 12.5px; color: var(--muted);">截止 {{ a.due_date || "不限" }}</div>
+          <div style="font-size: 12.5px; color: var(--muted);">截止 {{ a.due_date || '不限' }}</div>
         </div>
         <button class="btn primary sm" @click="accept(a.id)">接收</button>
       </div>

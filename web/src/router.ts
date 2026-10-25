@@ -9,6 +9,7 @@ export const router = createRouter({
     { path: "/trainings", name: "trainings", component: () => import("./views/TrainingsView.vue") },
     { path: "/trainings/:id", name: "training-detail", component: () => import("./views/TrainingDetailView.vue") },
     { path: "/me", name: "me", component: () => import("./views/MeView.vue") },
+    { path: "/wizard", name: "wizard", component: () => import("./views/WizardView.vue") },
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
 });
