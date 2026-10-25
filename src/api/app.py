@@ -1,0 +1,966 @@
+"""FastAPI 后端：鉴权注入 + 只读接口（P0/P1，ADR-0024）。
+
+设计原则（与 ADR-0024 一致）：**只做鉴权、参数校验与序列化**，
+业务规则一律调用 `src/services/` ——因此 Streamlit 与 Vue 两个界面行为必然一致。
+
+个人版（没有登录）时 `viewer is None`，权限判定放行（ADR-0020 的 profile 语义）。
+"""
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from src.core.permissions import (
+    Action,
+    Role,
+    Viewer,
+    can_view_training,
+    visible_sources,
+    visible_trainings,
+)
+from src.db import queries
+from src.db.connection import IntegrityError
+from src.services import (
+    answer_service,
+    assignment_service,
+    attempt_service,
+    auth_service,
+    mastery_service,
+    path_service,
+    plan_service,
+    quiz_service,
+    signal_service,
+    source_service,
+)
+
+logger = logging.getLogger("src.api.app")
+
+#: 会话 Cookie 名
+SESSION_COOKIE = "tc_session"
+
+#: 是否强制 HTTPS Cookie（生产环境应开；本地 http 调试默认关）
+COOKIE_SECURE = os.environ.get("TRAINER_COOKIE_SECURE", "0") == "1"
+
+app = FastAPI(title="训练教练 API", version="0.1.0")
+
+
+def auth_enabled() -> bool:
+    """当前 profile 是否启用鉴权（默认企业版：需要登录）。"""
+    return os.environ.get("TRAINER_AUTH", "1") == "1"
+
+
+#: 不要求登录的接口（登录流程本身 + 健康检查）
+_AUTH_EXEMPT_PATHS: frozenset[str] = frozenset(
+    {
+        "/api/health",
+        "/api/auth/mode",
+        "/api/auth/request-code",
+        "/api/auth/verify",
+        "/api/auth/logout",
+    }
+)
+
+
+def _has_valid_session(cookie_value: str | None) -> bool:
+    return bool(cookie_value) and auth_service.viewer_from_session(cookie_value) is not None
+
+
+@app.middleware("http")
+async def enforce_auth(request: Request, call_next: Any) -> Any:
+    """企业版 profile 下，未登录一律 401——**服务端强制**，不依赖前端守卫。
+
+    个人版 profile（`TRAINER_AUTH=0`）不做拦截，`viewer` 恒为 None 且权限判定放行（ADR-0020）。
+    """
+    path = request.url.path
+    if auth_enabled() and path.startswith("/api") and path not in _AUTH_EXEMPT_PATHS:
+        if not _has_valid_session(request.cookies.get(SESSION_COOKIE)):
+            return JSONResponse({"detail": "请先登录"}, status_code=status.HTTP_401_UNAUTHORIZED)
+    return await call_next(request)
+
+
+class RequestCodeBody(BaseModel):
+    """登录码申请。邮箱格式由 `org_service` 统一校验（不自带 email-validator 依赖）。"""
+
+    email: str
+
+
+class VerifyBody(BaseModel):
+    token: str
+
+
+class AnswerBody(BaseModel):
+    answer: str
+
+
+class SkipBody(BaseModel):
+    reason: str
+
+
+class SignalBody(BaseModel):
+    training_id: int
+    signal_type: str
+    item_id: int | None = None
+    item_key: str | None = None
+    raw_text: str = ""
+
+
+class StartAssessmentBody(BaseModel):
+    training_id: int
+    trigger: str = "manual"
+
+
+class SubmitAssessmentBody(BaseModel):
+    answers: dict[int, str] = {}
+
+
+class ManualVerdictsBody(BaseModel):
+    verdicts: dict[int, str] = {}
+
+
+class DepartmentBody(BaseModel):
+    name: str
+
+
+class RosterBody(BaseModel):
+    email: str
+    department_id: int | None = None
+    role: str = "employee"
+    status: str = "invited"
+
+
+class AssignmentBody(BaseModel):
+    title: str
+    description: str = ""
+    source_ids: list[int] = []
+    acceptance: dict[str, Any] = {}
+    target_type: str = ""
+    target_value: Any = None
+    due_date: str = ""
+
+
+def current_viewer(tc_session: str | None = Cookie(default=None)) -> Viewer | None:
+    """从 Cookie 解析身份；没有会话就是 `None`（个人版 profile 照常放行）。"""
+    if not tc_session:
+        return None
+    return auth_service.viewer_from_session(tc_session)
+
+
+def require_viewer(viewer: Viewer | None = Depends(current_viewer)) -> Viewer:
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+    return viewer
+
+
+def _viewer_payload(viewer: Viewer) -> dict[str, Any]:
+    return {
+        "user_id": viewer.user_id,
+        "org_id": viewer.org_id,
+        "role": viewer.role.value,
+        "department_ids": sorted(viewer.department_ids),
+    }
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/auth/mode")
+def auth_mode() -> dict[str, bool]:
+    """前端据此决定要不要显示登录页。
+
+    **默认启用鉴权（企业版 profile）**：没登录就不能访问受保护接口，前端会先跳登录页。
+    个人版（自用、没有账号体系）用 `TRAINER_AUTH=0` 或 `serve-api --personal` 关闭，
+    此时 `viewer` 恒为 `None`，权限判定放行（ADR-0020 的 profile 语义）。
+    """
+    return {"auth_enabled": auth_enabled()}
+
+
+@app.post("/api/auth/request-code", status_code=status.HTTP_202_ACCEPTED)
+def request_code(body: RequestCodeBody) -> dict[str, str]:
+    """申请登录码。
+
+    **不在这里返回明文登录码**：那等于"知道邮箱就能登录"。
+    第一版由管理员用 CLI（`issue-login`）签发并转交；接入邮件服务后改为系统发信。
+    为避免枚举公司成员，无论邮箱是否在名单内都返回同一句话。
+    """
+    try:
+        auth_service.issue_login_code(body.email)
+    except PermissionError:
+        logger.info("request-code: 邮箱不在名单内（对外不区分）")
+    return {"message": "如果该邮箱在公司名单内，登录码已生成，请联系管理员获取"}
+
+
+@app.post("/api/auth/verify")
+def verify(body: VerifyBody, response: Response) -> dict[str, Any]:
+    """用一次性登录码换会话：设置 HttpOnly Cookie。"""
+    try:
+        result = auth_service.verify_login_code(body.token)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    response.set_cookie(
+        SESSION_COOKIE,
+        result["session"]["token"],
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        max_age=int(auth_service.SESSION_TTL_DAYS) * 24 * 3600,
+        path="/",
+    )
+    return {"viewer": _viewer_payload(result["viewer"]), "expires_at": result["session"]["expires_at"]}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response, tc_session: str | None = Cookie(default=None)) -> dict[str, bool]:
+    if tc_session:
+        auth_service.revoke_session(tc_session)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/me")
+def me(viewer: Viewer = Depends(require_viewer)) -> dict[str, Any]:
+    return _viewer_payload(viewer)
+
+
+@app.get("/api/today")
+def today(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    """今日训练（跨训练聚合）：汇总 + 任务明细（P1）。"""
+    summary = plan_service.today_summary()
+    visible_ids = _visible_training_ids(viewer)
+    tasks = [
+        _task_payload(task)
+        for task in summary["tasks"]
+        if visible_ids is None or task.training_id in visible_ids
+    ]
+    groups = [group for group in summary["groups"] if visible_ids is None or group["training_id"] in visible_ids]
+    return {
+        "viewer": _viewer_payload(viewer) if viewer else None,
+        "count": len(tasks),
+        "minutes": sum(task["planned_minutes"] for task in tasks),
+        "groups": groups,
+        "tasks": tasks,
+    }
+
+
+def _visible_training_ids(viewer: Viewer | None) -> set[int] | None:
+    """个人版（无 identity）返回 None 表示不限制；企业版按组织/归属过滤。"""
+    if viewer is None:
+        return None
+    rows = [row.to_dict() for row in queries.list_trainings()]
+    return {int(row["id"]) for row in visible_trainings(viewer, rows)}
+
+
+def _task_payload(task: Any) -> dict[str, Any]:
+    """任务明细。**参考答案只在已判分后返回**，避免把答案提前送给用户。"""
+    graded = bool(task.verdict)
+    return {
+        "plan_id": task.plan_id,
+        "training_id": task.training_id,
+        "training_topic": task.training_topic,
+        "item_key": task.item_key,
+        "title": task.title,
+        "knowledge_point": task.knowledge_point,
+        "item_type": task.item_type,
+        "round_index": task.round_index,
+        "planned_minutes": task.planned_minutes,
+        "due_date": task.due_date.isoformat(),
+        "original_date": task.original_date.isoformat(),
+        "is_overdue": task.is_overdue(plan_service.local_today()),
+        "question": task.question,
+        "reference_answer": task.reference_answer if graded else "",
+        "answer_text": task.answer_text,
+        "verdict": task.verdict,
+        "status": task.status,
+    }
+
+
+def _training_payload(training: Any) -> dict[str, Any]:
+    data = training.to_dict()
+    return {
+        "id": data["id"],
+        "topic": data.get("topic") or "",
+        "status": data.get("status") or "draft",
+        "org_id": data.get("org_id") or 1,
+        "owner_user_id": data.get("owner_user_id"),
+        "baseline_score": data.get("baseline_score") or 0,
+        "created_at": data.get("created_at"),
+        "last_active_at": data.get("last_active_at"),
+    }
+
+
+def _load_training_for(viewer: Viewer | None, training_id: int) -> Any:
+    training = queries.get_training(int(training_id))
+    if training is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练不存在")
+    if not can_view_training(viewer, training.to_dict()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该训练")
+    return training
+
+
+@app.get("/api/trainings")
+def list_trainings_endpoint(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    rows = [_training_payload(training) for training in queries.list_trainings()]
+    if viewer is not None:
+        rows = visible_trainings(viewer, rows)
+    return {"trainings": rows}
+
+
+@app.get("/api/trainings/{training_id}/path")
+def training_path(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    _load_training_for(viewer, training_id)
+    path = path_service.load_path(int(training_id))
+    if path is None:
+        return {"path": None, "stages": [], "progress": None}
+    stages = []
+    for stage in path_service.load_stages(path.id):
+        items = [
+            {
+                "id": item.id,
+                "ordinal": item.ordinal,
+                "title": item.title,
+                "item_type": item.item_type,
+                "difficulty_tier": item.difficulty_tier,
+                "knowledge_point": item.knowledge_point,
+                "status": item.status,
+            }
+            for item in path_service.load_items(stage.id)
+        ]
+        stages.append(
+            {
+                "id": stage.id,
+                "ordinal": stage.ordinal,
+                "title": stage.title,
+                "goal": stage.goal,
+                "status": stage.status,
+                "estimated_minutes": stage.estimated_minutes,
+                "items": items,
+            }
+        )
+    report = mastery_service.evaluate(int(training_id))
+    return {
+        "path": {
+            "id": path.id,
+            "version": path.version,
+            "status": path.status,
+            "mode": path.mode,
+            "horizon_weeks": path.horizon_weeks,
+            "weekly_frequency": path.weekly_frequency,
+            "daily_budget_minutes": path.daily_budget_minutes,
+            "budget_minutes": path.budget_minutes,
+            "planned_minutes": path.planned_minutes,
+        },
+        "stages": stages,
+        "progress": {
+            "total_items": report.total_items,
+            "passed_items": report.passed_items,
+            "practiced_items": report.practiced_items,
+            "coverage_done": report.coverage_done,
+            "quiz_passed": report.quiz_passed,
+            "mastered": report.mastered,
+            "reason": report.reason,
+        },
+    }
+
+
+@app.get("/api/trainings/{training_id}/sources")
+def training_sources(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    _load_training_for(viewer, training_id)
+    rows = [source.to_dict() for source in source_service.list_sources(int(training_id))]
+    if viewer is not None:
+        rows = visible_sources(viewer, rows)
+    return {
+        "sources": [
+            {
+                "id": row["id"],
+                "type": row.get("type"),
+                "title": row.get("title"),
+                "scope": row.get("scope"),
+                "department_id": row.get("department_id"),
+                "enabled": row.get("enabled"),
+                "parse_status": row.get("parse_status"),
+                "origin_url": row.get("origin_url"),
+                "imported_at": row.get("imported_at"),
+            }
+            for row in rows
+        ]
+    }
+
+
+# ---------------------------------------------------------------- P2 写操作
+
+
+def _find_task(plan_id: int) -> Any:
+    for task in plan_service.today_tasks():
+        if task.plan_id == int(plan_id):
+            return task
+    for training in queries.list_trainings():
+        for task in plan_service.today_tasks(training_id=int(training.id)):
+            if task.plan_id == int(plan_id):
+                return task
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到该训练项")
+
+
+def _guard_task(viewer: Viewer | None, plan_id: int) -> Any:
+    """写操作前的可见性校验：先找到任务，再确认它属于可见训练。"""
+    task = _find_task(plan_id)
+    visible_ids = _visible_training_ids(viewer)
+    if visible_ids is not None and task.training_id not in visible_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作该训练")
+    return task
+
+
+def _guard_training(viewer: Viewer | None, training_id: int) -> None:
+    visible_ids = _visible_training_ids(viewer)
+    if visible_ids is not None and int(training_id) not in visible_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该训练")
+
+
+@app.post("/api/plan-items/{plan_id}/question")
+def plan_item_question(
+    plan_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """按需生成这道题的题干与参考答案（懒生成，避免打开页面就批量烧 token）。"""
+    _guard_task(viewer, plan_id)
+    try:
+        question = answer_service.ensure_question(int(plan_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return {"question": question["question"], "source": question.get("source")}
+
+
+@app.post("/api/plan-items/{plan_id}/answer")
+def submit_answer(
+    plan_id: int, body: AnswerBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """提交作答 → **系统判分**；判分不可用时如实返回 graded=false，不伪造对错。"""
+    _guard_task(viewer, plan_id)
+    try:
+        return answer_service.submit_answer(int(plan_id), body.answer)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/api/plan-items/{plan_id}/practice-only")
+def practice_only(
+    plan_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, bool]:
+    """只标记"练过"（不计入客观表现）。"""
+    _guard_task(viewer, plan_id)
+    answer_service.mark_practiced_only(int(plan_id))
+    return {"ok": True}
+
+
+@app.post("/api/plan-items/{plan_id}/skip")
+def skip_plan_item(
+    plan_id: int, body: SkipBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, bool]:
+    """跳过一项（必须给原因，且不计入完成）。"""
+    _guard_task(viewer, plan_id)
+    try:
+        plan_service.skip_task(int(plan_id), body.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@app.post("/api/signals")
+def submit_signal(
+    body: SignalBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """四失反馈：客观口径来自逐次作答（<3 次作答算数据不足，只做轻微调整）。"""
+    _guard_training(viewer, body.training_id)
+    objective = attempt_service.objective_for_training(body.training_id)
+    try:
+        decision = signal_service.process_signal(
+            body.training_id,
+            body.signal_type,
+            item_id=body.item_id,
+            item_key=body.item_key,
+            objective=objective,
+            raw_text=body.raw_text,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "signal_type": decision.signal_type,
+        "action": decision.action,
+        "applied": decision.applied,
+        "blocked_reason": decision.blocked_reason,
+        "message": decision.message,
+        "objective": objective,
+    }
+
+
+@app.get("/api/trainings/{training_id}/quiz")
+def quiz_state(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """测验状态：是否到期、可抽多少题、最近一次结果。"""
+    _guard_training(viewer, training_id)
+    pending = quiz_service.pending_quiz_plan(int(training_id))
+    pool = quiz_service.question_pool(int(training_id))
+    latest = quiz_service.latest_assessment(int(training_id))
+    return {
+        "pending": bool(pending),
+        "plan_id": int(pending["id"]) if pending else None,
+        "pool_size": len(pool),
+        "latest": (
+            {
+                "id": latest.id,
+                "status": latest.status,
+                "score": latest.score,
+                "passed": bool(latest.passed) if latest.passed is not None else None,
+            }
+            if latest is not None
+            else None
+        ),
+    }
+
+
+@app.post("/api/assessments")
+def start_assessment(
+    body: StartAssessmentBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """开始测验：题目只从**冷却期已过**的题库里抽（ADR-0016）。"""
+    _guard_training(viewer, body.training_id)
+    pending = quiz_service.pending_quiz_plan(body.training_id)
+    try:
+        assessment = quiz_service.start_assessment(
+            body.training_id,
+            trigger=body.trigger,
+            plan_id=int(pending["id"]) if pending else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "assessment_id": assessment.id,
+        "question_count": assessment.question_count,
+        "items": [
+            {
+                "item_id": item.id,
+                "ordinal": item.ordinal,
+                "question": item.question,
+                "is_variant": bool(item.is_variant),
+            }
+            for item in quiz_service.load_items(assessment.id)
+        ],
+    }
+
+
+@app.post("/api/assessments/{assessment_id}/submit")
+def submit_assessment(
+    assessment_id: int,
+    body: SubmitAssessmentBody,
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """提交答卷：优先 AI 判分；不可用时返回需自评的题目。"""
+    assessment = quiz_service.load_assessment(int(assessment_id))
+    if assessment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="测验不存在")
+    _guard_training(viewer, assessment.training_id)
+    quiz_service.save_answers(int(assessment_id), body.answers)
+    if quiz_service.grade_with_llm(int(assessment_id)):
+        result = quiz_service.finish_assessment(int(assessment_id), graded_by="llm")
+        return {"graded_by": "llm", "needs_manual": False, **_quiz_result_payload(result)}
+    return {
+        "graded_by": "unavailable",
+        "needs_manual": True,
+        "items": [
+            {
+                "item_id": item.id,
+                "ordinal": item.ordinal,
+                "question": item.question,
+                "reference_answer": item.reference_answer,
+                "user_answer": item.user_answer,
+            }
+            for item in quiz_service.load_items(int(assessment_id))
+        ],
+    }
+
+
+@app.post("/api/assessments/{assessment_id}/manual")
+def grade_assessment_manually(
+    assessment_id: int,
+    body: ManualVerdictsBody,
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """AI 判分不可用时的自评兜底（结果标注 `graded_by=self`）。"""
+    assessment = quiz_service.load_assessment(int(assessment_id))
+    if assessment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="测验不存在")
+    _guard_training(viewer, assessment.training_id)
+    quiz_service.save_manual_verdicts(int(assessment_id), body.verdicts)
+    result = quiz_service.finish_assessment(int(assessment_id), graded_by="self")
+    return {"graded_by": "self", "needs_manual": False, **_quiz_result_payload(result)}
+
+
+def _quiz_result_payload(result: quiz_service.QuizResult) -> dict[str, Any]:
+    return {
+        "assessment_id": result.assessment_id,
+        "question_count": result.question_count,
+        "score": result.score,
+        "passed": result.passed,
+        "extra_rounds": result.extra_rounds,
+        "failed_items": result.failed_items,
+    }
+
+
+#: 前端构建产物目录（`cd web && npm run build`）
+WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
+
+
+# ---------------------------------------------------------------- P3 管理端
+
+
+def _require_admin_viewer(viewer: Viewer | None) -> Viewer:
+    """管理端必须登录（个人版没有身份时不允许操作组织数据）。"""
+    if viewer is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="管理功能需要登录"
+        )
+    return viewer
+
+
+def _assert_action(viewer: Viewer, action: Any) -> None:
+    from src.core.permissions import assert_can
+
+    try:
+        assert_can(viewer, action)
+    except Exception as exc:  # PermissionDenied
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.get("/api/org/departments")
+def list_departments(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    from src.core.permissions import Action
+    from src.services import org_service
+
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    rows = org_service.list_departments(current.org_id)
+    return {"departments": rows}
+
+
+@app.post("/api/org/departments")
+def create_department(
+    body: DepartmentBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    from src.core.permissions import Action
+    from src.services import org_service
+
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    try:
+        return org_service.create_department(body.name.strip(), org_id=current.org_id)
+    except (ValueError, IntegrityError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/api/org/roster")
+def list_roster(
+    department_id: int | None = None, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    from src.core.permissions import Action, can_manage_department
+    from src.services import org_service
+
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    rows = org_service.list_roster(current.org_id)
+    # 部门主管只看自己部门的名单（ADR-0022 配套硬规则）
+    rows = [
+        row
+        for row in rows
+        if row.get("department_id") is None
+        or can_manage_department(current, int(row["department_id"]))
+    ]
+    if department_id is not None:
+        rows = [row for row in rows if int(row.get("department_id") or 0) == int(department_id)]
+    return {"roster": rows}
+
+
+@app.post("/api/org/roster")
+def upsert_roster(
+    body: RosterBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    from src.core.permissions import Action, Role, can_manage_department
+    from src.services import org_service
+
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    # 部门主管只能往自己部门加人，且只能给员工角色（不能自己造管理员）
+    if current.role is Role.DEPT_MANAGER:
+        if body.department_id is None or not can_manage_department(current, body.department_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能管理本部门")
+        if body.role != Role.EMPLOYEE.value:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="部门主管只能添加员工"
+            )
+    try:
+        return org_service.upsert_roster_entry(
+            body.email,
+            org_id=current.org_id,
+            department_id=body.department_id,
+            role=body.role,
+            status=body.status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/api/org/roster/{email}/issue-login")
+def issue_login_for(
+    email: str, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """签发一次性登录码。
+
+    这是**唯一返回明文登录码**的地方：只有管理者能调，且部门主管只能给自己部门的人签发。
+    """
+    from src.core.permissions import Action, can_manage_department
+    from src.services import org_service
+
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    entry = org_service.match_roster(email, org_id=current.org_id)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该邮箱不在名单里")
+    department_id = entry.get("department_id")
+    if department_id is not None and not can_manage_department(current, int(department_id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能管理本部门")
+    issued = auth_service.issue_login_code(email, org_id=current.org_id)
+    return {"email": issued["email"], "token": issued["token"], "expires_at": issued["expires_at"]}
+
+
+@app.get("/api/org/members")
+def list_org_members(
+    department_id: int | None = None, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    from src.core.permissions import Action, Role
+    from src.services import org_service
+
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    if current.role is Role.DEPT_MANAGER:
+        # 主管只能看本部门成员；未指定部门时取他第一个部门
+        target = department_id or next(iter(sorted(current.department_ids)), None)
+        if target is None:
+            return {"members": []}
+        if int(target) not in current.department_ids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能查看本部门")
+        return {"members": org_service.list_members(current.org_id, department_id=int(target))}
+    return {"members": org_service.list_members(current.org_id, department_id=department_id)}
+
+
+@app.get("/api/org/summary")
+def org_summary(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    """组织概览：人数、部门数、训练数与达标数（企业版最常用的四个数）。"""
+    from src.core.permissions import Action
+    from src.services import org_service
+
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    members = org_service.list_members(current.org_id)
+    departments = org_service.list_departments(current.org_id)
+    rows = [row.to_dict() for row in queries.list_trainings()]
+    visible = visible_trainings(current, rows)
+    mastered = 0
+    for row in visible:
+        report = mastery_service.training_progress(int(row["id"]))
+        if report.mastered:
+            mastered += 1
+    return {
+        "members": len(members),
+        "departments": len(departments),
+        "trainings": len(visible),
+        "mastered_trainings": mastered,
+    }
+
+
+@app.get("/api/org/sources")
+def org_sources(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    """组织公共资料（发任务时选「资料范围」用；只列 `org_shared` 且解析成功的）。"""
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    rows = [row.to_dict() for row in queries.list_trainings()]
+    options: list[dict[str, Any]] = []
+    for training in visible_trainings(current, rows):
+        for source in source_service.list_sources(int(training["id"])):
+            data = source.to_dict()
+            if data.get("scope") != "org_shared" or data.get("parse_status") != "ok":
+                continue
+            options.append(
+                {
+                    "id": data["id"],
+                    "title": data.get("title"),
+                    "training_id": training["id"],
+                    "training_topic": training.get("topic"),
+                }
+            )
+    return {"sources": options}
+
+
+# ---------------------------------------------------------------- 培训任务分发（5.x）
+
+
+def _manager_scope(viewer: Viewer) -> set[int]:
+    """主管能管哪些部门（组织管理员用不到：空集合表示"全部"）。"""
+    if viewer.role is Role.ORG_ADMIN:
+        return set()
+    return set(viewer.department_ids)
+
+
+@app.get("/api/assignments")
+def list_assignments(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    """管理端：本组织任务列表（部门主管只看与自己部门相关的）。"""
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    rows = assignment_service.list_assignments(current.org_id)
+    if current.role is not Role.ORG_ADMIN:
+        scope = {str(value) for value in _manager_scope(current)}
+        rows = [
+            row
+            for row in rows
+            if str(row.get("target_value")) in scope or row.get("created_by") == current.user_id
+        ]
+    return {"assignments": rows}
+
+
+@app.post("/api/assignments")
+def create_assignment(
+    body: AssignmentBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """创建任务草案：四要素缺一不可；部门主管只能发给自己部门。"""
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    if current.role is Role.DEPT_MANAGER:
+        if body.target_type != "department" or body.target_value in (None, ""):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="主管只能按本部门发布任务"
+            )
+        if int(body.target_value) not in current.department_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="只能发布给本部门"
+            )
+    try:
+        return assignment_service.create_assignment(
+            current.org_id,
+            title=body.title,
+            source_ids=body.source_ids,
+            acceptance=body.acceptance,
+            target_type=body.target_type,
+            target_value=body.target_value,
+            due_date=body.due_date,
+            description=body.description,
+            created_by=current.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def _load_assignment_for(viewer: Viewer, assignment_id: int) -> dict[str, Any]:
+    rows = assignment_service.list_assignments(viewer.org_id)
+    match = next((row for row in rows if int(row["id"]) == int(assignment_id)), None)
+    if match is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    if viewer.role is not Role.ORG_ADMIN:
+        scope = {str(value) for value in viewer.department_ids}
+        if str(match.get("target_value")) not in scope and match.get("created_by") != viewer.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作该任务")
+    return match
+
+
+@app.post("/api/assignments/{assignment_id}/publish")
+def publish_assignment(
+    assignment_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    _load_assignment_for(current, assignment_id)
+    try:
+        return assignment_service.publish_assignment(int(assignment_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/api/assignments/{assignment_id}/targets")
+def assignment_targets(
+    assignment_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """目标人群与接收情况（管理端看进度）。"""
+    current = _require_admin_viewer(viewer)
+    _assert_action(current, Action.MANAGE_DEPARTMENT)
+    _load_assignment_for(current, assignment_id)
+    return {"targets": assignment_service.list_targets(int(assignment_id))}
+
+
+@app.get("/api/assignments/mine")
+def my_assignments(viewer: Viewer = Depends(require_viewer)) -> dict[str, Any]:
+    """员工端：待接收任务。"""
+    rows = assignment_service.pending_for_user(viewer.user_id)
+    return {
+        "pending": [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "description": row.get("description"),
+                "due_date": row.get("due_date"),
+                "acceptance": row.get("acceptance"),
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.post("/api/assignments/{assignment_id}/accept")
+def accept_assignment(
+    assignment_id: int, viewer: Viewer = Depends(require_viewer)
+) -> dict[str, Any]:
+    """员工接收任务 → 自动生成个人训练（复制资料 + 排 5 轮计划）。"""
+    try:
+        receipt = assignment_service.accept_assignment(int(assignment_id), viewer.user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "assignment_id": receipt["assignment_id"],
+        "training_id": receipt["training_id"],
+        "received_at": receipt["received_at"],
+    }
+
+
+# ---------------------------------------------------------------- 前端静态资源（同域）
+#
+# 【必须放在文件最后】FastAPI 按注册顺序匹配路由：SPA 回退用的是 `/{full_path:path}` 通配，
+# 一旦注册在 API 之前，就会把后面注册的接口全部吞掉（第一次部署时 `/api/org/*` 就是这样 404 的）。
+
+if WEB_DIST.is_dir():
+    _assets = WEB_DIST / "assets"
+    if _assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str) -> Any:
+        """SPA 路由回退：`/`、`/login`、`/path` 等前端路由都返回 index.html。
+
+        同一个进程既提供 API 又提供界面 → 天然同域、Cookie 直接可用，**不需要 Nginx**。
+        `/api/*` 未命中的路径返回 404，而不是把 index.html 当接口结果返回。
+        """
+        if full_path.startswith("api"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="接口不存在")
+        candidate = (WEB_DIST / full_path).resolve()
+        if full_path and candidate.is_file() and WEB_DIST in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(WEB_DIST / "index.html")
+
+
+__all__ = ["app", "current_viewer", "require_viewer"]
