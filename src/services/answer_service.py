@@ -46,7 +46,7 @@ def _task_context(active: sqlite3.Connection, plan_id: int) -> dict[str, Any] | 
     row = active.execute(
         """
         SELECT p.id AS plan_id, p.training_id, p.item_key, p.round_index, p.kind,
-               p.question, p.reference_answer, p.answer_text, p.verdict, p.status,
+               p.question, p.reference_answer, p.points, p.answer_text, p.verdict, p.status,
                t.topic AS training_topic,
                i.title, i.knowledge_point, i.item_type, i.difficulty_tier, i.source_chunk_ids
         FROM plan_items p
@@ -101,6 +101,67 @@ def _probe_question(
     return str(row["question"] or ""), str(row["reference_answer"] or "")
 
 
+def _normalize_points(raw: Any) -> list[dict[str, Any]] | None:
+    """把模型输出的要点清单整理成可落库的规范形态。
+
+    宽进严出：缺 point_id / 重复 id / 权重非法的条目逐条修正或丢弃；
+    最终少于 1 条有效要点时返回 ``None``（判分自动退回整体二元判定）。
+    """
+    if not isinstance(raw, list):
+        return None
+    points: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            weight = float(item.get("weight"))
+            if weight <= 0:
+                weight = 1.0
+        except (TypeError, ValueError):
+            weight = 1.0
+        points.append(
+            {
+                "point_id": str(item.get("point_id") or "").strip(),
+                "text": text,
+                "weight": weight,
+                "is_required": bool(item.get("is_required")),
+            }
+        )
+    if not points:
+        return None
+    # 补齐 / 去重 point_id：以 p1、p2… 重排，保证键唯一且稳定
+    seen: set[str] = set()
+    for index, point in enumerate(points, start=1):
+        pid = point["point_id"]
+        if not pid or pid in seen:
+            pid = f"p{index}"
+            counter = index
+            while pid in seen:
+                counter += 1
+                pid = f"p{counter}"
+            point["point_id"] = pid
+        seen.add(pid)
+    return points
+
+
+def _parse_points_json(raw: Any) -> list[dict[str, Any]]:
+    """读取 plan_items.points 列（JSON），坏数据一律当没有要点处理。"""
+    if isinstance(raw, list):
+        normalized = _normalize_points(raw)
+        return normalized or []
+    if not isinstance(raw, str) or not raw.strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    normalized = _normalize_points(data)
+    return normalized or []
+
+
 def ensure_question(
     plan_id: int, *, conn: sqlite3.Connection | None = None
 ) -> dict[str, Any]:
@@ -119,11 +180,13 @@ def ensure_question(
                 "question": str(context["question"]),
                 "reference_answer": str(context.get("reference_answer") or ""),
                 "source": "stored",
+                "points": _parse_points_json(context.get("points")),
             }
 
         knowledge_point = str(context.get("knowledge_point") or context.get("title") or "")
         sample = _sample_text(active, context.get("source_chunk_ids"))
         question, answer, source = "", "", "fallback"
+        points_json: str | None = None
 
         variables = {
             "topic": str(context.get("training_topic") or ""),
@@ -141,6 +204,10 @@ def ensure_question(
             answer = str(output.get("reference_answer") or "").strip()
             if question:
                 source = "llm"
+                # 出题时固化要点清单：判分只引用不再生成（与测验同约束）
+                normalized = _normalize_points(output.get("points"))
+                if normalized:
+                    points_json = json.dumps(normalized, ensure_ascii=False)
         except Exception as exc:  # 模型不可用不该让用户没题可做
             logger.warning("ensure_question: LLM unavailable (%s), using fallback", exc)
             log_llm_failure("train_question", json.dumps(variables, ensure_ascii=False), exc)
@@ -157,27 +224,68 @@ def ensure_question(
             answer = sample[:200] or "（资料里没有可用片段，先按你的理解回答）"
 
         active.execute(
-            "UPDATE plan_items SET question = ?, reference_answer = ? WHERE id = ?",
-            (question, answer or None, int(plan_id)),
+            "UPDATE plan_items SET question = ?, reference_answer = ?, points = ? WHERE id = ?",
+            (question, answer or None, points_json, int(plan_id)),
         )
         if own:
             active.commit()
-        return {"question": question, "reference_answer": answer, "source": source}
+        return {
+            "question": question,
+            "reference_answer": answer,
+            "source": source,
+            "points": json.loads(points_json) if points_json else [],
+        }
     finally:
         if own:
             active.close()
 
 
-def _grade_answer(context: dict[str, Any], answer: str) -> tuple[bool, str, str]:
-    """用与测验相同的口径判分。返回 ``(是否判分成功, verdict, 理由)``。"""
+def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
+    """用与测验相同的口径判分：有要点清单走「逐条判定 → 规则算分」，否则退回整体二元判定。
+
+    返回 ``{"graded", "verdict", "reason", "score", "point_results"}``；
+    ``score`` / ``point_results`` 仅在要点判分路径下有值（客观表现可解释的来源）。
+    """
+    from src.services.grading_service import (
+        MISSING,
+        POINT_VERDICTS,
+        PointSpec,
+        grade_question,
+    )
+
+    specs = [
+        PointSpec(
+            point_id=str(point["point_id"]),
+            text=str(point["text"]),
+            weight=float(point["weight"]),
+            required=bool(point["is_required"]),
+        )
+        for point in _parse_points_json(context.get("points"))
+    ]
     payload = [
         {
             "item_key": str(context.get("item_key") or ""),
             "question": str(context.get("question") or ""),
             "reference_answer": str(context.get("reference_answer") or ""),
             "answer": answer,
+            "points": [
+                {
+                    "point_id": spec.point_id,
+                    "text": spec.text,
+                    "weight": spec.weight,
+                    "is_required": spec.required,
+                }
+                for spec in specs
+            ],
         }
     ]
+    outcome = {
+        "graded": False,
+        "verdict": "",
+        "reason": "",
+        "score": None,
+        "point_results": None,
+    }
     variables = {"items": json.dumps(payload, ensure_ascii=False, indent=2)}
     try:
         result = complete("quiz_grade", variables, schema=SCHEMA_REGISTRY["quiz_grade"])
@@ -185,13 +293,56 @@ def _grade_answer(context: dict[str, Any], answer: str) -> tuple[bool, str, str]
     except Exception as exc:
         logger.warning("grade_answer: LLM unavailable (%s)", exc)
         log_llm_failure("quiz_grade", json.dumps(variables, ensure_ascii=False), exc)
-        return False, "", ""
+        return outcome
     results = output.get("results") or []
     if not results:
-        return False, "", ""
+        return outcome
     entry = results[0]
-    verdict = "pass" if entry.get("verdict") == "pass" else "fail"
-    return True, verdict, str(entry.get("reason") or "")
+    reason = str(entry.get("reason") or "")
+
+    # 要点判分路径：模型逐条判定，规则层算分与达标（模型不得直接决定 pass/fail）
+    verdicts: dict[str, str] = {}
+    for point in entry.get("point_verdicts") or []:
+        if not isinstance(point, dict):
+            continue
+        pid = str(point.get("point_id") or "")
+        verdict = str(point.get("verdict") or "")
+        if pid and verdict in POINT_VERDICTS:
+            verdicts[pid] = verdict
+    if specs and verdicts:
+        graded = grade_question(
+            "qa",
+            answer=answer,
+            points=specs,
+            point_verdicts=verdicts,
+        )
+        point_results = json.dumps(
+            [
+                {
+                    "point_id": spec.point_id,
+                    "verdict": verdicts.get(spec.point_id, MISSING),
+                    "text": spec.text,
+                }
+                for spec in specs
+            ],
+            ensure_ascii=False,
+        )
+        outcome.update(
+            graded=True,
+            verdict="pass" if graded.passed else "fail",
+            reason=graded.reason or reason,
+            score=round(float(graded.score), 4),
+            point_results=point_results,
+        )
+        return outcome
+
+    # 无要点（或模型未按要点返回）：退回整体二元判定
+    outcome.update(
+        graded=True,
+        verdict="pass" if entry.get("verdict") == "pass" else "fail",
+        reason=reason,
+    )
+    return outcome
 
 
 def submit_answer(
@@ -218,6 +369,8 @@ def submit_answer(
             raise ValueError(f"plan item not found: {plan_id}")
         context["question"] = question["question"]
         context["reference_answer"] = question["reference_answer"]
+        # ensure_question 可能刚固化了要点清单，这里以最新落库值为准
+        context["points"] = question.get("points") or context.get("points")
 
         active.execute(
             "UPDATE plan_items SET answer_text = ? WHERE id = ?", (text, int(plan_id))
@@ -225,7 +378,10 @@ def submit_answer(
         if own:
             active.commit()
 
-        graded, verdict, reason = _grade_answer(context, text)
+        graded_result = _grade_answer(context, text)
+        graded = graded_result["graded"]
+        verdict = graded_result["verdict"]
+        reason = graded_result["reason"]
         training_id = int(context["training_id"])
         item_key = str(context["item_key"])
         mastered = False
@@ -245,6 +401,8 @@ def submit_answer(
                 round_index=int(context.get("round_index") or 0) or None,
                 # 判分来源：模型判的日常作答（枚举里 self=自评 / quiz=测验 / llm=模型判分）
                 source="llm",
+                score=graded_result["score"],
+                point_results=graded_result["point_results"],
                 conn=active,
             )
             mastered = attempt_service.mark_mastered_if_ready(training_id, item_key, conn=active)
@@ -267,6 +425,8 @@ def submit_answer(
         "graded": graded,
         "verdict": verdict if graded else None,
         "reason": reason,
+        "score": graded_result["score"],
+        "point_results": graded_result["point_results"],
         "reference_answer": question["reference_answer"],
         "question_source": question.get("source"),
         "mastered": mastered,

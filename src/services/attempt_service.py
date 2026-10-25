@@ -41,9 +41,15 @@ def record_attempt(
     round_index: int | None = None,
     source: str = "self",
     note: str = "",
+    score: float | None = None,
+    point_results: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> PracticeAttempt:
-    """记录一次作答。``result`` 只接受 ``pass`` / ``fail``（对 / 错）。"""
+    """记录一次作答。``result`` 只接受 ``pass`` / ``fail``（对 / 错）。
+
+    ``score`` / ``point_results`` 仅要点判分路径提供（可解释客观表现的来源），
+    二元判定（自评 / 整体判定）不传，保持 NULL。
+    """
     if result not in VALID_RESULTS:
         raise ValueError(f"invalid attempt result: {result!r}")
     if not str(item_key or "").strip():
@@ -52,8 +58,9 @@ def record_attempt(
     own = conn is None
     try:
         cursor = active.execute(
-            "INSERT INTO practice_attempts (training_id, item_key, plan_id, round_index, result, "
-            "source, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO practice_attempts "
+            "(training_id, item_key, plan_id, round_index, result, source, note, score, "
+            "point_results, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 int(training_id),
                 str(item_key),
@@ -62,6 +69,8 @@ def record_attempt(
                 result,
                 source,
                 note or None,
+                float(score) if score is not None else None,
+                point_results or None,
                 _now(),
             ),
         )

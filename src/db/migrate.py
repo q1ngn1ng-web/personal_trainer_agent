@@ -219,7 +219,8 @@ _PLAN_ITEM_QUESTION_COLUMNS: dict[str, str] = {
 }
 
 
-#: 判分相关列（change learner-memory-and-grading 任务 1.1 / 1.3 / 1.4）
+#: 判分相关列（change learner-memory-and-grading 任务 1.1 / 1.3 / 1.4；
+#: plan_items.points 见 2026-10-26 日常训练要点接线）
 _GRADING_COLUMNS: dict[str, dict[str, str]] = {
     "question_bank": {"question_type": "TEXT DEFAULT 'qa'", "options": "TEXT"},
     "practice_attempts": {
@@ -228,6 +229,7 @@ _GRADING_COLUMNS: dict[str, dict[str, str]] = {
         "mistake_reasons": "TEXT",
     },
     "assessment_items": {"question_type": "TEXT DEFAULT 'qa'", "score": "REAL"},
+    "plan_items": {"points": "TEXT"},
 }
 
 _QUESTION_POINTS_DDL = """

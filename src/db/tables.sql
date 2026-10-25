@@ -236,6 +236,10 @@ CREATE TABLE IF NOT EXISTS plan_items (
     -- 题目与作答（系统出题、用户作答、系统判分）
     question TEXT,
     reference_answer TEXT,
+    -- 出题时固化的要点清单（JSON 数组：point_id/text/weight/is_required），
+    -- 判分时只引用不再生成（与 question_points 同一约束，但按计划项内联，
+    -- 避免与 question_bank 的 item_key 键空间冲突：同一知识点每轮题目不同）
+    points TEXT,
     answer_text TEXT,
     verdict TEXT,
     graded_by TEXT,
