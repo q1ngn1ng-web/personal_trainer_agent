@@ -1,0 +1,298 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
+import {
+  api, type AssessmentStart, type AssessmentSubmit, type PathResponse,
+  type QuizOutcome, type QuizState, type SourceSummary, type TrainingSummary,
+} from "../api";
+
+const route = useRoute();
+const trainingId = Number(route.params.id);
+
+const section = ref<"path" | "sources" | "quiz">("path");
+const training = ref<TrainingSummary | null>(null);
+const pathData = ref<PathResponse | null>(null);
+const sources = ref<SourceSummary[]>([]);
+const quiz = ref<QuizState | null>(null);
+const loading = ref(true);
+
+// 测验流程状态
+const assessment = ref<AssessmentStart | null>(null);
+const answers = ref<Record<number, string>>({});
+const submitting = ref(false);
+const starting = ref(false);
+const manualItems = ref<AssessmentSubmit | null>(null);
+const manualVerdicts = ref<Record<number, string>>({});
+const outcome = ref<QuizOutcome | null>(null);
+const openStages = ref<Set<number>>(new Set());
+
+function toast(msg: string) {
+  (window as any).__toast?.(msg);
+}
+
+async function load() {
+  loading.value = true;
+  try {
+    const [ts, pd, ss, qs] = await Promise.all([
+      api.trainings(),
+      api.path(trainingId),
+      api.sources(trainingId),
+      api.quizState(trainingId),
+    ]);
+    training.value = ts.trainings.find((t) => t.id === trainingId) || null;
+    pathData.value = pd;
+    sources.value = ss.sources;
+    quiz.value = qs;
+    if (pd.stages.length) openStages.value = new Set([pd.stages[0].id]);
+  } catch (e: any) {
+    toast(e.message || "加载失败");
+  } finally {
+    loading.value = false;
+  }
+}
+onMounted(load);
+
+const progressPct = computed(() => {
+  const p = pathData.value?.progress;
+  if (!p || !p.total_items) return 0;
+  return Math.round((p.passed_items / p.total_items) * 100);
+});
+
+function toggleStage(id: number) {
+  const next = new Set(openStages.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  openStages.value = next;
+}
+
+async function startQuiz() {
+  starting.value = true;
+  outcome.value = null;
+  manualItems.value = null;
+  try {
+    assessment.value = await api.startAssessment(trainingId);
+    answers.value = {};
+  } catch (e: any) {
+    toast(e.message || "生成测验失败");
+  } finally {
+    starting.value = false;
+  }
+}
+
+async function submitQuiz() {
+  if (!assessment.value) return;
+  const filled = Object.values(answers.value).filter((v) => v && v.trim()).length;
+  if (filled < assessment.value.question_count) {
+    toast("还有 " + (assessment.value.question_count - filled) + " 题未作答");
+    return;
+  }
+  submitting.value = true;
+  try {
+    const res = await api.submitAssessment(assessment.value.assessment_id, answers.value);
+    if (res.needs_manual) {
+      manualItems.value = res;
+      toast("AI 判分暂不可用，请自评");
+    } else {
+      outcome.value = res as QuizOutcome;
+      await load();
+    }
+  } catch (e: any) {
+    toast(e.message || "提交失败");
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function submitManual() {
+  if (!manualItems.value) return;
+  try {
+    outcome.value = await api.manualVerdicts(
+      manualItems.value.assessment_id,
+      manualVerdicts.value
+    );
+    manualItems.value = null;
+    assessment.value = null;
+    await load();
+  } catch (e: any) {
+    toast(e.message || "提交失败");
+  }
+}
+
+const itemStatus: Record<string, { ico: string; cls: string }> = {
+  planned: { ico: "○", cls: "gray" },
+  practiced: { ico: "◔", cls: "info" },
+  passed: { ico: "✓", cls: "ok" },
+  skipped: { ico: "–", cls: "gray" },
+};
+const typeLabel: Record<string, string> = {
+  memory: "记忆", comprehension: "理解", application: "应用", analysis: "分析",
+};
+</script>
+
+
+<template>
+  <div>
+    <div class="page-head">
+      <h1 class="page-title">{{ training ? training.topic : "训练详情" }}</h1>
+      <p class="page-sub" v-if="pathData && pathData.path">
+        路径 v{{ pathData.path.version }} · {{ pathData.path.horizon_weeks || "-" }} 周 ·
+        每周 {{ pathData.path.weekly_frequency || "-" }} 次 · 每次 {{ pathData.path.daily_budget_minutes || "-" }} 分钟
+      </p>
+    </div>
+
+    <div v-if="loading" class="loading-center"><span class="spinner"></span></div>
+
+    <template v-else>
+      <div class="section-switch">
+        <button :class="{ active: section === 'path' }" @click="section = 'path'">训练路径</button>
+        <button :class="{ active: section === 'sources' }" @click="section = 'sources'">资料来源</button>
+        <button :class="{ active: section === 'quiz' }" @click="section = 'quiz'">测验达标</button>
+      </div>
+
+      <!-- ============ 路径 ============ -->
+      <template v-if="section === 'path'">
+        <div v-if="pathData && pathData.progress" class="card">
+          <div class="card-head">
+            <div class="card-title">整体进度</div>
+            <span v-if="pathData.progress.mastered" class="badge ok">🏆 已达标</span>
+            <span v-else-if="pathData.progress.quiz_passed" class="badge brand">测验已过 · 补齐剩余项</span>
+            <span v-else class="badge gray">进行中</span>
+          </div>
+          <div class="progress" style="margin: 10px 0 8px;"><i :style="{ width: progressPct + '%' }"></i></div>
+          <div style="display: flex; gap: 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap;">
+            <span>要点通过 {{ pathData.progress.passed_items }}/{{ pathData.progress.total_items }}</span>
+            <span>已练 {{ pathData.progress.practiced_items }}</span>
+            <span>覆盖 {{ pathData.progress.coverage_done ? "完成" : "未完成" }}</span>
+          </div>
+          <p v-if="pathData.progress.reason" style="font-size: 13px; color: var(--faint); margin-top: 8px;">
+            {{ pathData.progress.reason }}
+          </p>
+        </div>
+
+        <div v-if="pathData && pathData.stages.length">
+          <div v-for="st in pathData.stages" :key="st.id" class="card stage" style="padding: 0; overflow: hidden;">
+            <div class="stage-head" @click="toggleStage(st.id)">
+              <span class="badge gray">阶段 {{ st.ordinal }}</span>
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 600;">{{ st.title }}</div>
+                <div v-if="st.goal" style="font-size: 12.5px; color: var(--muted);">{{ st.goal }}</div>
+              </div>
+              <span style="color: var(--faint); font-size: 12.5px;">{{ st.estimated_minutes }}′ · {{ st.items.length }} 项</span>
+              <span style="color: var(--faint);">{{ openStages.has(st.id) ? "▾" : "▸" }}</span>
+            </div>
+            <div v-if="openStages.has(st.id)" style="padding: 0 8px 8px;">
+              <div v-for="it in st.items" :key="it.id" class="list-item">
+                <span :style="{ color: 'var(--' + ((itemStatus[it.status] || itemStatus.planned).cls === 'ok' ? 'ok' : (itemStatus[it.status] || itemStatus.planned).cls === 'info' ? 'info' : 'faint') + ')' }">
+                  {{ (itemStatus[it.status] || itemStatus.planned).ico }}
+                </span>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 14px;">{{ it.title }}</div>
+                  <div v-if="it.knowledge_point" style="font-size: 12px; color: var(--faint);">{{ it.knowledge_point }}</div>
+                </div>
+                <span v-if="it.item_type" class="badge gray">{{ typeLabel[it.item_type] || it.item_type }}</span>
+                <span v-if="it.difficulty_tier" class="badge gray">难度 {{ it.difficulty_tier }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="card empty"><span class="ico">🧭</span>路径尚未生成</div>
+      </template>
+
+      <!-- ============ 资料 ============ -->
+      <template v-else-if="section === 'sources'">
+        <div v-if="!sources.length" class="card empty"><span class="ico">📚</span>暂无资料来源</div>
+        <div v-for="s in sources" :key="s.id" class="card">
+          <div class="card-head" style="margin-bottom: 6px;">
+            <div class="card-title" style="min-width: 0;">
+              {{ s.type === "url" ? "🔗" : s.type === "file" ? "📄" : "📝" }} {{ s.title }}
+            </div>
+            <span class="badge" :class="s.enabled ? 'ok' : 'gray'">{{ s.enabled ? "启用" : "停用" }}</span>
+          </div>
+          <div style="display: flex; gap: 12px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap;">
+            <span>类型 {{ s.type }}</span>
+            <span>解析 {{ s.parse_status }}</span>
+            <span v-if="s.origin_url" style="max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              {{ s.origin_url }}
+            </span>
+          </div>
+        </div>
+      </template>
+
+      <!-- ============ 测验 ============ -->
+      <template v-else>
+        <!-- 结果页 -->
+        <div v-if="outcome" class="card">
+          <div class="card-head">
+            <div class="card-title">测验结果</div>
+            <span class="badge" :class="outcome.passed ? 'ok' : 'warn'">
+              {{ outcome.passed ? "达标" : "未达标" }}
+            </span>
+          </div>
+          <div class="stat-row">
+            <div class="stat"><div class="num">{{ (outcome.score * 100).toFixed(0) }}</div><div class="lbl">得分</div></div>
+            <div class="stat"><div class="num">{{ outcome.question_count }}</div><div class="lbl">题目数</div></div>
+            <div class="stat"><div class="num">{{ outcome.extra_rounds }}</div><div class="lbl">追加轮次</div></div>
+          </div>
+          <p style="font-size: 13px; color: var(--muted);">判分方式：{{ outcome.graded_by === "llm" ? "AI 要点判分" : "自评" }}</p>
+          <button class="btn ghost sm" @click="outcome = null; assessment = null">再来一次</button>
+        </div>
+
+        <!-- 答题中 -->
+        <div v-else-if="assessment" class="card">
+          <div class="card-head">
+            <div class="card-title">测验 · 共 {{ assessment.question_count }} 题</div>
+            <span class="badge brand">AI 判分</span>
+          </div>
+          <div v-for="q in assessment.items" :key="q.item_id" style="margin-bottom: 16px;">
+            <div class="question-box" style="margin-bottom: 8px;">
+              <span style="color: var(--faint); font-size: 12.5px;">第 {{ q.ordinal }} 题</span>
+              <span v-if="q.is_variant" class="badge info" style="margin-left: 6px;">变式题</span>
+              <div style="margin-top: 4px;">{{ q.question }}</div>
+            </div>
+            <textarea v-model="answers[q.item_id]" class="textarea" placeholder="作答…"></textarea>
+          </div>
+          <button class="btn primary block" :disabled="submitting" @click="submitQuiz">
+            {{ submitting ? "AI 判分中…" : "提交测验" }}
+          </button>
+        </div>
+
+                <!-- 自评兜底 -->
+        <div v-else-if="manualItems && manualItems.needs_manual" class="card">
+          <div class="card-head">
+            <div class="card-title">AI 判分暂不可用 · 请自评</div>
+          </div>
+          <div v-for="it in manualItems.items" :key="it.item_id" style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px dashed var(--line);">
+            <div style="font-weight: 600; margin-bottom: 4px;">{{ it.ordinal }}. {{ it.question }}</div>
+            <div style="font-size: 13.5px; color: var(--muted);">你的作答：{{ it.user_answer || "（未作答）" }}</div>
+            <div class="ref-answer"><b>参考答案</b>：{{ it.reference_answer }}</div>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+              <button class="btn sm ghost" @click="manualVerdicts[it.item_id] = 'pass'">✓ 我答对了</button>
+              <button class="btn sm ghost" @click="manualVerdicts[it.item_id] = 'fail'">✗ 没答好</button>
+              <span v-if="manualVerdicts[it.item_id]" class="badge" :class="manualVerdicts[it.item_id] === 'pass' ? 'ok' : 'warn'">
+                已选：{{ manualVerdicts[it.item_id] === "pass" ? "对" : "错" }}
+              </span>
+            </div>
+          </div>
+          <button class="btn primary block" @click="submitManual">提交自评结果</button>
+        </div>
+
+        <!-- 状态页 -->
+        <div v-else-if="quiz" class="card">
+          <div class="card-head">
+            <div class="card-title">测验达标</div>
+            <span v-if="quiz.latest" class="badge" :class="quiz.latest.passed ? 'ok' : 'warn'">
+              上次 {{ (quiz.latest.score != null ? (quiz.latest.score * 100).toFixed(0) + " 分 · " : "") + (quiz.latest.passed ? "达标" : "未达标") }}
+            </span>
+          </div>
+          <p style="color: var(--muted); font-size: 14px; margin-bottom: 14px;">
+            从题库（冷却期外）抽题组卷，AI 按要点逐条判分，规则层算总分；
+            得分 ≥ 80 且无必答要点缺失即达标。当前可用题库 {{ quiz.pool_size }} 题。
+          </p>
+          <button class="btn primary" :disabled="starting || quiz.pool_size === 0" @click="startQuiz">
+            {{ starting ? "组卷中…" : quiz.pool_size === 0 ? "题库不足（先完成训练）" : "开始测验" }}
+          </button>
+        </div>
+      </template>
+    </template>
+  </div>
+</template>
