@@ -162,26 +162,34 @@ class TestPlanPages(unittest.TestCase):
 
     def test_task_shows_question_and_accepts_answer(self) -> None:
         """任务卡必须给出**具体题目**与作答框；提交后系统判分（LLM 不可用时不伪造对错）。"""
+        from unittest.mock import patch
+
         from streamlit.testing.v1 import AppTest
 
         from src.db import queries
         from src.services import plan_service
 
-        training_id = self._training_with_plan()
-        plan_service.generate_plan(training_id)
-        task = plan_service.today_tasks(training_id=training_id)[0]
+        # 显式模拟「LLM 不可用」：不依赖运行环境里是否配了 API key，
+        # 出题走 fallback 链（探测题/通用问法），判分走「如实标记未判分」。
+        with patch(
+            "src.services.answer_service.complete",
+            side_effect=RuntimeError("LLM unavailable (simulated in test)"),
+        ):
+            training_id = self._training_with_plan()
+            plan_service.generate_plan(training_id)
+            task = plan_service.today_tasks(training_id=training_id)[0]
 
-        app = AppTest.from_file(self._daily_wrapper, default_timeout=60)
-        app.query_params["page"] = "daily"
-        app.query_params["training_id"] = str(training_id)
-        app.run()
-        self.assertFalse(app.exception)
+            app = AppTest.from_file(self._daily_wrapper, default_timeout=60)
+            app.query_params["page"] = "daily"
+            app.query_params["training_id"] = str(training_id)
+            app.run()
+            self.assertFalse(app.exception)
 
-        rendered = [item.value for item in app.markdown if isinstance(item.value, str)]
-        self.assertTrue(any("题目" in text for text in rendered), "界面必须给出具体题目")
-        app.text_area(key=f"dl_answer_{task.plan_id}").set_value("子进程写快照")
-        app.button(key=f"dl_submit_{task.plan_id}").click().run()
-        self.assertFalse(app.exception)
+            rendered = [item.value for item in app.markdown if isinstance(item.value, str)]
+            self.assertTrue(any("题目" in text for text in rendered), "界面必须给出具体题目")
+            app.text_area(key=f"dl_answer_{task.plan_id}").set_value("子进程写快照")
+            app.button(key=f"dl_submit_{task.plan_id}").click().run()
+            self.assertFalse(app.exception)
 
         conn = queries.get_connection()
         try:
