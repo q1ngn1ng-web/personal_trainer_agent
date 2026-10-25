@@ -248,9 +248,109 @@ def purge_expired(*, conn: Connection | None = None) -> dict[str, int]:
         return {"login_tokens": int(tokens or 0), "sessions": int(sessions or 0)}
 
 
+# ------------------ 个人版：邮箱 + 密码账户（2026-10-26 用户决策） ------------------
+# ADR-0023 的登录码机制保留给企业版；个人版按用户要求提供注册/登录。
+# 只存 PBKDF2 哈希（sha256、24 万轮、16 字节盐），格式：pbkdf2$<iters>$<salt>$<hash>。
+
+_PBKDF2_ITERATIONS = 240_000
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS
+    )
+    return "$".join(["pbkdf2", str(_PBKDF2_ITERATIONS), salt.hex(), digest.hex()])
+
+
+def _verify_password(password: str, stored: str | None) -> bool:
+    if not stored:
+        return False
+    try:
+        scheme, iters, salt_hex, hash_hex = str(stored).split("$")
+        if scheme != "pbkdf2":
+            return False
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iters)
+        )
+        return secrets.compare_digest(digest.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def register_account(
+    email: str,
+    password: str,
+    display_name: str = "",
+    *,
+    user_agent: str | None = None,
+) -> dict[str, Any]:
+    """个人版注册：users 行（含密码哈希）+ 名单激活 + 开号 + 建会话。"""
+    address = str(email or "").strip().lower()
+    if "@" not in address or len(str(password or "")) < 8:
+        raise ValueError("邮箱格式不正确，或密码少于 8 位")
+    with transaction() as active:
+        row = active.execute(
+            "SELECT id FROM users WHERE email = ?", (address,)
+        ).fetchone()
+        if row is not None:
+            raise ValueError("该邮箱已注册")
+        roster = org_service.upsert_roster_entry(
+            address, status="active", conn=active
+        )
+        provisioned = org_service.provision_user_from_roster(address, conn=active)
+        active.execute(
+            "UPDATE users SET password_hash = ?, display_name = ?, last_login_at = ? WHERE id = ?",
+            (
+                _hash_password(password),
+                str(display_name).strip() or address.split("@")[0],
+                _iso(_now()),
+                int(provisioned["user"]["id"]),
+            ),
+        )
+        viewer = org_service.resolve_viewer(
+            int(provisioned["user"]["id"]), conn=active
+        )
+        session = create_session(viewer.user_id, viewer.org_id, user_agent=user_agent, conn=active)
+    logger.info("register_account: %s 注册成功（会话 #%s）", address, session["session_id"])
+    return {"session": session, "viewer": viewer, "user": provisioned["user"]}
+
+
+def login_password(
+    email: str, password: str, *, user_agent: str | None = None
+) -> dict[str, Any]:
+    """个人版登录：校验密码 → 建会话。账号未激活或密码错统一报错（不区分暴露原因）。"""
+    address = str(email or "").strip().lower()
+    with transaction() as active:
+        row = active.execute(
+            "SELECT id, status FROM users WHERE email = ?", (address,)
+        ).fetchone()
+        stored = (
+            active.execute(
+                "SELECT password_hash FROM users WHERE id = ?", (int(row["id"]),)
+            ).fetchone()
+            if row is not None
+            else None
+        )
+        ok = row is not None and row["status"] == "active" and _verify_password(
+            str(password or ""), stored["password_hash"] if stored else None
+        )
+        if not ok:
+            raise PermissionError("邮箱或密码不正确")
+        active.execute(
+            "UPDATE users SET last_login_at = ? WHERE id = ?", (_iso(_now()), int(row["id"]))
+        )
+        viewer = org_service.resolve_viewer(int(row["id"]), conn=active)
+        session = create_session(viewer.user_id, viewer.org_id, user_agent=user_agent, conn=active)
+    logger.info("login_password: %s 登录成功（会话 #%s）", address, session["session_id"])
+    return {"session": session, "viewer": viewer}
+
+
 __all__ = [
     "LOGIN_CODE_TTL_MINUTES",
     "SESSION_TTL_DAYS",
+    "register_account",
+    "login_password",
     "create_session",
     "issue_login_code",
     "list_sessions",

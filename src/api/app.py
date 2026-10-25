@@ -64,6 +64,9 @@ _AUTH_EXEMPT_PATHS: frozenset[str] = frozenset(
         "/api/auth/request-code",
         "/api/auth/verify",
         "/api/auth/logout",
+        # 个人版（2026-10-26）：注册与密码登录也是公开入口
+        "/api/auth/register",
+        "/api/auth/login",
     }
 )
 
@@ -940,6 +943,347 @@ def accept_assignment(
 
 # ---------------------------------------------------------------- 前端静态资源（同域）
 #
+
+# ======================================================================
+# 个人版（2026-10-26 用户决策）：邮箱+密码账户 + 创建训练全链路向导
+# 企业版登录码机制保留在上方原端点（前端个人版不再使用）。
+# ======================================================================
+
+
+class RegisterBody(BaseModel):
+    email: str
+    password: str
+    display_name: str = ""
+
+
+class PasswordLoginBody(BaseModel):
+    email: str
+    password: str
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        max_age=int(auth_service.SESSION_TTL_DAYS) * 24 * 3600,
+        path="/",
+    )
+
+
+@app.post("/api/auth/register")
+def register_account_endpoint(body: RegisterBody, response: Response) -> dict[str, Any]:
+    try:
+        result = auth_service.register_account(
+            body.email, body.password, body.display_name
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    _set_session_cookie(response, result["session"]["token"])
+    return {
+        "viewer": _viewer_payload(result["viewer"]),
+        "expires_at": result["session"]["expires_at"],
+    }
+
+
+@app.post("/api/auth/login")
+def login_password_endpoint(body: PasswordLoginBody, response: Response) -> dict[str, Any]:
+    try:
+        result = auth_service.login_password(body.email, body.password)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码不正确"
+        ) from exc
+    _set_session_cookie(response, result["session"]["token"])
+    return {
+        "viewer": _viewer_payload(result["viewer"]),
+        "expires_at": result["session"]["expires_at"],
+    }
+
+
+# ------------------------------ 创建向导 ------------------------------
+
+
+def _require_user(viewer: Viewer | None) -> Viewer:
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+    return viewer
+
+
+def _clarify_payload(session: Any) -> dict[str, Any]:
+    draft = session.draft
+    return {
+        "training_id": session.training_id,
+        "topic": session.topic,
+        "question": session.question,
+        "action": session.action,
+        "rounds": session.rounds,
+        "can_confirm": session.can_confirm,
+        "draft": {
+            "content": draft.content,
+            "level": draft.level,
+            "acceptance": draft.acceptance,
+            "field_sources": draft.field_sources,
+        },
+        "missing_fields": list(session.missing_fields),
+        "history": session.history,
+        "notes": session.notes,
+    }
+
+
+class WizardStartBody(BaseModel):
+    topic: str
+
+
+class WizardAnswerBody(BaseModel):
+    answer: str
+
+
+class SourceAddBody(BaseModel):
+    type: str  # text | url
+    title: str = ""
+    content: str = ""
+    url: str = ""
+
+
+class ProbeGradeBody(BaseModel):
+    answers: list[str]
+    items: list[dict[str, Any]] = []
+
+
+@app.post("/api/wizard/start")
+def wizard_start(body: WizardStartBody, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    _require_user(viewer)
+    topic = body.topic.strip()
+    if len(topic) < 4:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="多用一句话描述你想学什么")
+    from src.db.connection import transaction as _tx
+    from src.services import goal_clarification_service
+
+    session = goal_clarification_service.start_session(topic)
+    with _tx() as active:  # 个人版：训练归属当前账号
+        active.execute(
+            "UPDATE trainings SET owner_user_id = ? WHERE id = ?",
+            (int(viewer.user_id), int(session.training_id)),
+        )
+    return _clarify_payload(session)
+
+
+@app.get("/api/wizard/{training_id}/clarify")
+def wizard_clarify_state(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import goal_clarification_service
+
+    session = goal_clarification_service.load_session(int(training_id))
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="没有进行中的澄清会话")
+    return _clarify_payload(session)
+
+
+@app.post("/api/wizard/{training_id}/answer")
+def wizard_clarify_answer(
+    training_id: int, body: WizardAnswerBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import goal_clarification_service
+
+    try:
+        session = goal_clarification_service.continue_session(int(training_id), body.answer)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _clarify_payload(session)
+
+
+@app.post("/api/wizard/{training_id}/confirm")
+def wizard_clarify_confirm(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import goal_clarification_service
+
+    try:
+        training = goal_clarification_service.confirm(int(training_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"training_id": int(training_id), "status": training.status}
+
+
+@app.post("/api/wizard/{training_id}/sources")
+def wizard_add_source(
+    training_id: int, body: SourceAddBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import source_service
+
+    try:
+        if body.type == "text":
+            source = source_service.create_source(
+                int(training_id), type="user_paste", title=body.title, content=body.content
+            )
+        elif body.type == "url":
+            # fetch_web_source 负责抓取 + 快照 + 登记一步完成
+            source = source_service.fetch_web_source(int(training_id), body.url)
+        else:
+            raise ValueError("暂不支持该来源类型（支持 text / url / 文件上传）")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    source = source_service.parse_source(source.id)  # 切片入索引，供出题/探测回指
+    return {"id": source.id, "title": source.title, "type": source.type, "parse_status": source.parse_status}
+
+
+@app.post("/api/wizard/{training_id}/sources/file")
+async def wizard_upload_source(
+    training_id: int, request: Request, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import source_service
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少文件")
+    data = await upload.read()
+    try:
+        source = source_service.create_source_from_file(
+            int(training_id), filename=str(upload.filename or "upload"), data=data
+        )
+        source = source_service.parse_source(source.id)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"解析失败：{exc}") from exc
+    return {"id": source.id, "title": source.title, "type": source.type, "parse_status": source.parse_status}
+
+
+@app.post("/api/wizard/{training_id}/probe")
+def wizard_generate_probe(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import edge_service
+
+    training = queries.get_training(int(training_id))
+    if training is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练不存在")
+    goal = _training_goal(training)
+    try:
+        probe = edge_service.generate_probe_items(
+            int(training_id), topic=training.topic, goal=goal
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    items = [
+        {
+            "index": i,
+            "knowledge_point": item.knowledge_point,
+            "heading_path": item.heading_path,
+            "difficulty": item.difficulty,
+            "question": item.question,
+            "reference_answer": item.reference_answer,
+        }
+        for i, item in enumerate(probe.items)
+    ]
+    return {
+        "training_id": int(training_id),
+        "items": items,
+        "total_points": getattr(probe, "total_points", len(items)),
+        "selected_points": getattr(probe, "selected_points", len(items)),
+        "fallback_used": getattr(probe, "fallback_used", False),
+        "truncated": getattr(probe, "truncated", False),
+    }
+
+
+def _training_goal(training: Any) -> Any:
+    import json as _json
+
+    raw = getattr(training, "goal_json", None)
+    if not raw:
+        return None
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return None
+
+
+@app.post("/api/wizard/{training_id}/probe/grade")
+def wizard_grade_probe(
+    training_id: int, body: ProbeGradeBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import edge_service
+
+    training = queries.get_training(int(training_id))
+    if training is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练不存在")
+    items = [
+        edge_service.ProbeItem(
+            knowledge_point=str(raw.get("knowledge_point") or ""),
+            heading_path=str(raw.get("heading_path") or ""),
+            difficulty=int(raw.get("difficulty") or 1),
+            question=str(raw.get("question") or ""),
+            reference_answer=str(raw.get("reference_answer") or ""),
+            answer=str(raw.get("answer") or ""),
+        )
+        for raw in body.items
+    ]
+    if not items:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="没有可判定的作答")
+    try:
+        graded = edge_service.grade_probe(int(training_id), items, topic=training.topic)
+        edge_service.save_probe(graded)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "training_id": int(training_id),
+        "counts": graded.state_counts(),
+        "items": [
+            {
+                "knowledge_point": item.knowledge_point,
+                "question": item.question,
+                "answer": item.answer,
+                "state": item.state,
+                "verdict": item.verdict,
+                "reason": item.reason,
+            }
+            for item in graded.items
+        ],
+    }
+
+
+@app.post("/api/wizard/{training_id}/activate")
+def wizard_activate(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.core.goal import assert_transition
+
+    training = queries.get_training(int(training_id))
+    if training is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练不存在")
+    try:
+        assert_transition(training.status, "active")
+        queries.set_training_status(int(training_id), "active")
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"training_id": int(training_id), "status": "active"}
+
+
+@app.post("/api/wizard/{training_id}/path")
+def wizard_generate_path(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    _require_user(viewer)
+    from src.services import path_service, plan_service
+
+    training = queries.get_training(int(training_id))
+    if training is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练不存在")
+    try:
+        skeleton, _report = path_service.generate_skeleton(
+            int(training_id), topic=training.topic, goal=_training_goal(training)
+        )
+        path_service.save_skeleton(skeleton)
+        plan_service.generate_plan(int(training_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"路径生成失败：{exc}") from exc
+    return {
+        "training_id": int(training_id),
+        "stages": len(skeleton.stages),
+        "items": sum(len(stage.items) for stage in skeleton.stages),
+    }
+
 # 【必须放在文件最后】FastAPI 按注册顺序匹配路由：SPA 回退用的是 `/{full_path:path}` 通配，
 # 一旦注册在 API 之前，就会把后面注册的接口全部吞掉（第一次部署时 `/api/org/*` 就是这样 404 的）。
 
