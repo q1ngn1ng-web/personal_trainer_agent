@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
-import { wizardApi, type ClarifySession, type ProbePaper, type ProbeGrade, type SourceSummary } from "../api_wizard";
+import { wizardApi, type ClarifySession, type ProbePaper, type ProbeGrade } from "../api_wizard";
+import type { SourceSummary } from "../api";
 import { api } from "../api";
 
 const router = useRouter();

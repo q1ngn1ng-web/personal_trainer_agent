@@ -64,7 +64,7 @@ const who = computed(() => {
 const initial = computed(() => who.value.slice(0, 1).toUpperCase());
 
 function shortLabel(label: string) {
-  return label.replace(/今日训练/, /今日/).replace(/我的训练/, /训练/).replace(/新建训练/, /新建/);
+  return label.replace(/今日训练/, "今日").replace(/我的训练/, "训练").replace(/新建训练/, "新建");
 }
 
 async function doLogout() {
