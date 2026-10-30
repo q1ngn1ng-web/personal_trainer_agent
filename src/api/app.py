@@ -463,6 +463,36 @@ def practice_only(
     return {"ok": True}
 
 
+@app.post("/api/plan-items/{plan_id}/explanation")
+def plan_item_explanation(
+    plan_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """题目级深度解析：对比该题历史作答，指出重复错误与改进动作。
+
+    与出题/作答不同，解析对已判分与未判分的任务都可用（未判分时按"本次作答"解析）。
+    """
+    from src.db.connection import transaction
+    from src.services import explanation_service
+
+    with transaction() as active:
+        row = active.execute(
+            "SELECT training_id FROM plan_items WHERE id = ?", (int(plan_id),)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到该训练项")
+    _guard_training(viewer, int(row["training_id"]))
+    try:
+        result = explanation_service.generate_item_explanation(int(row["training_id"]), int(plan_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(result.get("error") or "解析生成失败"),
+        )
+    return result
+
+
 @app.post("/api/plan-items/{plan_id}/skip")
 def skip_plan_item(
     plan_id: int, body: SkipBody, viewer: Viewer | None = Depends(current_viewer)

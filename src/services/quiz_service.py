@@ -535,6 +535,7 @@ def finish_assessment(
                 "pass" if item.verdict == "pass" else "fail",
                 source="quiz",
                 note=f"测验 #{assessment_id}",
+                answer_text=item.user_answer or None,
                 conn=active,
             )
             if item.verdict == "pass":

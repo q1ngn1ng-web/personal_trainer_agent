@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from dataclasses import dataclass
@@ -41,12 +42,14 @@ def record_attempt(
     round_index: int | None = None,
     source: str = "self",
     note: str = "",
+    answer_text: str | None = None,
     score: float | None = None,
     point_results: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> PracticeAttempt:
     """记录一次作答。``result`` 只接受 ``pass`` / ``fail``（对 / 错）。
 
+    ``answer_text`` 是本次作答原文（尝试级留档：plan_items.answer_text 会被下次覆盖）；
     ``score`` / ``point_results`` 仅要点判分路径提供（可解释客观表现的来源），
     二元判定（自评 / 整体判定）不传，保持 NULL。
     """
@@ -57,10 +60,26 @@ def record_attempt(
     active = _connect(conn)
     own = conn is None
     try:
+        # 错因推导（纯规则）随作答一并落库：深度解析与记忆聚合的原料。
+        # 局部导入避免 attempt_service ↔ memory_service 的模块级循环。
+        from src.services.memory_service import derive_mistake_reasons
+
+        reasons_json: str | None = None
+        if point_results:
+            try:
+                parsed = json.loads(point_results)
+                if isinstance(parsed, dict):
+                    reasons = derive_mistake_reasons(parsed)
+                    if reasons:
+                        reasons_json = json.dumps(reasons, ensure_ascii=False)
+            except (ValueError, TypeError):
+                reasons_json = None
+
         cursor = active.execute(
             "INSERT INTO practice_attempts "
-            "(training_id, item_key, plan_id, round_index, result, source, note, score, "
-            "point_results, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(training_id, item_key, plan_id, round_index, result, source, note, answer_text, "
+            "score, point_results, mistake_reasons, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 int(training_id),
                 str(item_key),
@@ -69,8 +88,10 @@ def record_attempt(
                 result,
                 source,
                 note or None,
+                answer_text or None,
                 float(score) if score is not None else None,
                 point_results or None,
+                reasons_json,
                 _now(),
             ),
         )
@@ -83,6 +104,45 @@ def record_attempt(
         if own:
             active.close()
     return PracticeAttempt.from_row(row)
+
+
+def item_history(
+    training_id: int,
+    item_key: str,
+    *,
+    limit: int = 5,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, object]]:
+    """某题目的最近作答历史（时间正序，含作答原文/结果/分数/错因）。
+
+    深度解析（explanation）按此对比「每次怎么错的」；不带作答原文的调用方用 recent_results。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        rows = active.execute(
+            "SELECT created_at, round_index, result, score, answer_text, mistake_reasons, source "
+            "FROM practice_attempts WHERE training_id = ? AND item_key = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (int(training_id), str(item_key), int(limit)),
+        ).fetchall()
+    finally:
+        if own:
+            active.close()
+    history: list[dict[str, object]] = []
+    for row in reversed(rows):
+        history.append(
+            {
+                "created_at": str(row["created_at"] or ""),
+                "round_index": row["round_index"],
+                "result": str(row["result"] or ""),
+                "score": row["score"],
+                "answer_text": str(row["answer_text"] or ""),
+                "mistake_reasons": str(row["mistake_reasons"] or ""),
+                "source": str(row["source"] or ""),
+            }
+        )
+    return history
 
 
 def recent_results(

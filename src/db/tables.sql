@@ -304,6 +304,9 @@ CREATE TABLE IF NOT EXISTS practice_attempts (
     plan_id INTEGER,
     round_index INTEGER,
     result TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
+    -- 作答原文随尝试留档：plan_items.answer_text 会被下一次作答覆盖，
+    -- 深度解析要对比「每次怎么错的」，必须在尝试级保存原文（item-history-deep-explanation）
+    answer_text TEXT,
     score REAL,
     point_results TEXT,
     mistake_reasons TEXT,

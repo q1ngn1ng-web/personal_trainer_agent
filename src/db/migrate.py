@@ -227,6 +227,7 @@ _GRADING_COLUMNS: dict[str, dict[str, str]] = {
         "score": "REAL",
         "point_results": "TEXT",
         "mistake_reasons": "TEXT",
+        "answer_text": "TEXT",
     },
     "assessment_items": {"question_type": "TEXT DEFAULT 'qa'", "score": "REAL"},
     "plan_items": {"points": "TEXT"},

@@ -414,6 +414,7 @@ def submit_answer(
                 round_index=int(context.get("round_index") or 0) or None,
                 # 判分来源：模型判的日常作答（枚举里 self=自评 / quiz=测验 / llm=模型判分）
                 source="llm",
+                answer_text=answer,
                 score=graded_result["score"],
                 point_results=graded_result["point_results"],
                 conn=active,
