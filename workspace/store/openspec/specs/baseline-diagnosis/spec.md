@@ -1,7 +1,7 @@
 # baseline-diagnosis Specification
 
 ## Purpose
-TBD - created by archiving change trainer-mvp-v1. Update Purpose after archive.
+训练开始前用带关键词约束的诊断题测定基线档位（高/中/低），为路径起点提供依据。
 ## Requirements
 ### Requirement: 系统为新训练生成 3 道基线诊断题
 系统 SHALL 在训练创建流程中，使用 LLM 生成 3 道前提性诊断题，题型覆盖概念理解 / 读代码 / 写代码三种内容维度。

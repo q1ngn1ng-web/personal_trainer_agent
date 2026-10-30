@@ -1,7 +1,7 @@
 # progress-dashboard Specification
 
 ## Purpose
-TBD - created by archiving change trainer-mvp-v1. Update Purpose after archive.
+分层展示训练进度：基线评分、坚持天数、今日完成度、回忆正确率与阶段目标进度。
 ## Requirements
 ### Requirement: 首页展示训练列表与项目说明
 系统 SHALL 在首页（Streamlit 首页）展示：

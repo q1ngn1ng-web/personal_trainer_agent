@@ -1,7 +1,7 @@
 # daily-execution Specification
 
 ## Purpose
-TBD - created by archiving change trainer-mvp-v1. Update Purpose after archive.
+把每日训练变成可执行的任务卡：到期任务抽取、主动回忆题、三省打卡与完成度记录。
 ## Requirements
 ### Requirement: 系统呈现今日任务卡
 系统 SHALL 根据「复习日历」（05_主动回忆题 + 04_复习日历）抽取当前日期的待办任务，以单一页面（今日任务卡）呈现。

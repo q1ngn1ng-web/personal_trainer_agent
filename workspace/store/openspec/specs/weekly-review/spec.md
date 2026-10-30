@@ -1,7 +1,7 @@
 # weekly-review Specification
 
 ## Purpose
-TBD - created by archiving change trainer-mvp-v1. Update Purpose after archive.
+按周聚合机械指标（完成率/回忆正确率/坚持天数），由 LLM 校准基线与计划并留档归档。
 ## Requirements
 ### Requirement: 系统每周日自动触发周复盘
 系统 SHALL 在每周日首次进入训练主页时检测是否需要周复盘（距离上次复盘 ≥ 7 天）。

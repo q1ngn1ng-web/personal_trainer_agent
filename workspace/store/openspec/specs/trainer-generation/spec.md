@@ -1,7 +1,7 @@
 # trainer-generation Specification
 
 ## Purpose
-TBD - created by archiving change trainer-mvp-v1. Update Purpose after archive.
+把确认后的训练目标落成可执行的训练包：十份模板文件生成与落盘、关键词白名单与预训练清单。
 ## Requirements
 ### Requirement: 用户能创建新训练主题
 系统 SHALL 提供「新建训练」入口（Streamlit 页面或按钮），用户输入训练主题后能跑通完整创建流程。主题创建 MUST 先经过目标澄清与确认（见 `goal-clarification`），目标未确认的训练 MUST NOT 进入关键词生成与训练文件生成。
