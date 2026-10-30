@@ -43,6 +43,8 @@ class Training(RowModel):
     id: int
     topic: str
     status: str = "draft"
+    org_id: int | None = None
+    owner_user_id: int | None = None
     goal_json: Any = None
     goal_confirmed_at: str | None = None
     clarification_rounds: int = 0
@@ -164,6 +166,7 @@ class Source(RowModel):
     fetched_at: str | None = None
     snapshot_text: str | None = None
     org_id: int | None = None
+    department_id: int | None = None
     scope: str = "personal"
     enabled: int = 1
     checksum: str | None = None

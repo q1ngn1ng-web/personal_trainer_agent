@@ -11,6 +11,8 @@ const loadingQ = ref(false);
 const answer = ref(props.task.answer_text || "");
 const submitting = ref(false);
 const result = ref<AnswerResult | null>(null);
+const explaining = ref(false);
+const explanation = ref<{ text: string; source_refs: string[]; attempts_used: number } | null>(null);
 
 const done = computed(() => props.task.status !== "planned");
 const verdictBadge = computed(() => {
@@ -77,6 +79,19 @@ async function practiceOnly() {
   }
 }
 
+async function loadExplanation() {
+  if (explaining.value) return;
+  explaining.value = true;
+  try {
+    const res = await api.explanation(props.task.plan_id);
+    explanation.value = { text: res.text, source_refs: res.source_refs || [], attempts_used: res.attempts_used };
+  } catch (e: any) {
+    toast(e.message || "解析失败");
+  } finally {
+    explaining.value = false;
+  }
+}
+
 async function skip() {
   try {
     await api.skip(props.task.plan_id);
@@ -131,6 +146,19 @@ async function skip() {
           </template>
         </div>
         <div v-else-if="done" class="verdict-panel none">已记录练习，未系统判分</div>
+
+        <div style="margin-top: 10px;">
+          <button class="btn text" :disabled="explaining" @click="loadExplanation">
+            {{ explaining ? '解析生成中…' : '🔍 深度解析（对比我的历史作答）' }}
+          </button>
+        </div>
+        <div v-if="explanation" class="verdict-panel none" style="text-align: left;">
+          <b>深度解析<span v-if="explanation.attempts_used > 0">（基于最近 {{ explanation.attempts_used }} 次作答）</span></b>
+          <p style="margin-top: 6px; white-space: pre-wrap;">{{ explanation.text }}</p>
+          <p v-if="explanation.source_refs.length" style="margin-top: 4px; color: var(--faint); font-size: 12px;">
+            依据资料：{{ explanation.source_refs.join('；') }}
+          </p>
+        </div>
       </template>
     </div>
   </div>

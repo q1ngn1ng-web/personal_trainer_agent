@@ -233,6 +233,13 @@ _GRADING_COLUMNS: dict[str, dict[str, str]] = {
     "plan_items": {"points": "TEXT"},
 }
 
+#: 账户/组织列（change personal-auth-tests 随附 schema 对齐；
+#: trainings.org_id/owner_user_id 由个人账户功能引入，sources.department_id 由部门资料引入）
+_ACCOUNT_COLUMNS: dict[str, dict[str, str]] = {
+    "trainings": {"org_id": "INTEGER", "owner_user_id": "INTEGER"},
+    "sources": {"department_id": "INTEGER"},
+}
+
 _QUESTION_POINTS_DDL = """
 CREATE TABLE IF NOT EXISTS question_points (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -412,6 +419,13 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
 
     needs_memory = any(not _column_names(conn, table) for table in _MEMORY_DDL)
 
+    account_columns = {
+        table: cols for table, cols in _ACCOUNT_COLUMNS.items() if _column_names(conn, table)
+    }
+    needs_account = any(
+        set(cols) - _column_names(conn, table) for table, cols in account_columns.items()
+    )
+
     if not (
         needs_trainings
         or needs_llm_calls
@@ -420,6 +434,7 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_plan_questions
         or needs_grading
         or needs_memory
+        or needs_account
     ):
         return applied
 
@@ -463,6 +478,11 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_memory:
                 for table in _ensure_memory_tables(conn):
                     applied.append(f"{table}:new_table")
+            if needs_account:
+                for table, cols in account_columns.items():
+                    added = _add_missing_columns(conn, table, cols)
+                    if added:
+                        applied.append(f"{table}:account_columns")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

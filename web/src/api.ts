@@ -229,6 +229,14 @@ export const api = {
     }),
   skip: (planId: number) =>
     request<{ ok: boolean }>("/api/plan-items/" + planId + "/skip", { method: "POST" }),
+  explanation: (planId: number) =>
+    request<{
+      ok: boolean;
+      text: string;
+      source_refs: string[];
+      attempts_used: number;
+      prompt_version?: string;
+    }>("/api/plan-items/" + planId + "/explanation", { method: "POST" }),
   signal: (trainingId: number, signalType: string) =>
     request<SignalResult>("/api/signals", {
       method: "POST",

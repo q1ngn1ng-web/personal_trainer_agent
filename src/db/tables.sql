@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS trainings (
     materials TEXT,
     current_week INTEGER DEFAULT 1,
     last_review_at DATETIME,
+    -- 账户归属（personal-auth-tests 随 schema 对齐补入；与生产库一致）
+    org_id INTEGER,
+    owner_user_id INTEGER,
     created_at DATETIME NOT NULL,
     last_active_at DATETIME
 );
@@ -100,6 +103,7 @@ CREATE TABLE IF NOT EXISTS sources (
     fetched_at DATETIME,
     snapshot_text TEXT,
     org_id INTEGER,
+    department_id INTEGER,
     scope TEXT DEFAULT 'personal' CHECK (scope IN ('org_shared', 'personal')),
     enabled INTEGER DEFAULT 1,
     checksum TEXT,
