@@ -421,3 +421,134 @@ CREATE TABLE IF NOT EXISTS adjustment_log (
 
 CREATE INDEX IF NOT EXISTS idx_learning_signals_training ON learning_signals(training_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_adjustment_log_training ON adjustment_log(training_id, created_at);
+
+-- ============================================================
+-- 账户 / 组织 / 培训作业（2026-10 自生产库 sqlite_master 导出并规范化）
+-- 列定义与生产库逐列一致；仅补 IF NOT EXISTS、按外键依赖排序、去引号。
+-- 这 10 张表此前只在生产库存在，仓库缺 DDL 导致全新库 init-db 后注册登录不可用。
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS organizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    created_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    password_hash TEXT,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    created_at DATETIME NOT NULL,
+    last_login_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS departments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    parent_id INTEGER,
+    created_at DATETIME NOT NULL,
+    UNIQUE (org_id, name),
+    FOREIGN KEY (org_id) REFERENCES organizations(id)
+);
+
+CREATE TABLE IF NOT EXISTS memberships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    org_id INTEGER NOT NULL,
+    department_id INTEGER,
+    role TEXT NOT NULL CHECK (role IN ('org_admin', 'dept_manager', 'employee')),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'invited', 'disabled')),
+    created_at DATETIME NOT NULL,
+    UNIQUE (user_id, org_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (org_id) REFERENCES organizations(id),
+    FOREIGN KEY (department_id) REFERENCES departments(id)
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    org_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    last_seen_at DATETIME,
+    revoked_at DATETIME,
+    user_agent TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (org_id) REFERENCES organizations(id)
+);
+
+CREATE TABLE IF NOT EXISTS login_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id INTEGER NOT NULL,
+    email TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (org_id) REFERENCES organizations(id)
+);
+
+CREATE TABLE IF NOT EXISTS roster_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id INTEGER NOT NULL,
+    email TEXT NOT NULL,
+    department_id INTEGER,
+    role TEXT NOT NULL CHECK (role IN ('org_admin', 'dept_manager', 'employee')),
+    status TEXT DEFAULT 'invited' CHECK (status IN ('invited', 'active', 'revoked')),
+    created_at DATETIME NOT NULL,
+    accepted_at DATETIME,
+    UNIQUE (org_id, email),
+    FOREIGN KEY (org_id) REFERENCES organizations(id),
+    FOREIGN KEY (department_id) REFERENCES departments(id)
+);
+
+CREATE TABLE IF NOT EXISTS assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    source_ids TEXT,
+    acceptance TEXT,
+    target_type TEXT CHECK (target_type IN ('all', 'department', 'user')),
+    target_value TEXT,
+    due_date TEXT,
+    status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'closed')),
+    created_by INTEGER,
+    created_at DATETIME NOT NULL,
+    published_at DATETIME,
+    FOREIGN KEY (org_id) REFERENCES organizations(id)
+);
+
+CREATE TABLE IF NOT EXISTS assignment_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    assignment_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    UNIQUE (assignment_id, user_id),
+    FOREIGN KEY (assignment_id) REFERENCES assignments(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS assignment_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    assignment_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    training_id INTEGER,
+    received_at DATETIME NOT NULL,
+    UNIQUE (assignment_id, user_id),
+    FOREIGN KEY (assignment_id) REFERENCES assignments(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_login_tokens_email ON login_tokens(org_id, email);
+CREATE INDEX IF NOT EXISTS idx_departments_org ON departments(org_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_org ON memberships(org_id, role);
+CREATE INDEX IF NOT EXISTS idx_roster_org ON roster_entries(org_id, status);
+CREATE INDEX IF NOT EXISTS idx_assignments_org ON assignments(org_id, status);
+CREATE INDEX IF NOT EXISTS idx_assignment_targets_user ON assignment_targets(user_id);
