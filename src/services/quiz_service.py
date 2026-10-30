@@ -21,7 +21,7 @@ from src.db.models import Assessment, AssessmentItem
 from src.db.sqlite import get_connection
 from src.llm.client import complete, log_llm_failure
 from src.llm.schema import SCHEMA_REGISTRY
-from src.services import attempt_service, plan_service
+from src.services import attempt_service, memory_service, plan_service
 
 logger = logging.getLogger("src.services.quiz_service")
 
@@ -340,7 +340,15 @@ def grade_with_llm(
                 ],
             }
         )
-    variables = {"items": json.dumps(payload, ensure_ascii=False, indent=2)}
+    variables = {
+        "items": json.dumps(payload, ensure_ascii=False, indent=2),
+        # 整场测验按训练级注入记忆背景（多题无法锚定单个 item_key）
+        "memory_block": (
+            memory_service.grade_memory_block(int(assessment.training_id), conn=conn)
+            if assessment
+            else ""
+        ),
+    }
     output: dict[str, Any] = {}
     try:
         result = complete("quiz_grade", variables, schema=SCHEMA_REGISTRY["quiz_grade"])

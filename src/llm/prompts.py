@@ -244,13 +244,15 @@ QUIZ_GRADE_PROMPT: str = """你是测验评分员。请依据参考答案，判�
 2. 每道题会给出带 point_id 的要点清单，你要对**每条要点**给出四态判定：`hit`（答到且正确）/ `partial`（只答了一部分）/ `wrong`（说反了，比没提到更糟）/ `missing`（完全没提）；
 3. 没有要点清单的历史题才退回整体判断：完全没答、答非所问、只重复题干 → 全部 `missing`；
 4. 每道题另给一句简短理由（引用用户作答里的依据）；
-4. 只输出 JSON，字段见 schema。
+4. 只输出 JSON，字段见 schema；
+5. 若给出「学习者背景」（该用户的历史错因与薄弱点），仅用于理解作答语境，**不得改变上面的判定口径**。
 
 题目与作答：
 {items}
+{memory_block}
 """
 
-QUIZ_GRADE_PROMPT_VERSION: str = "v1.1.0"
+QUIZ_GRADE_PROMPT_VERSION: str = "v1.2.0"
 
 EXPLANATION_PROMPT: str = """你是题目解析助手。用户做错了这道题，请给出解析。
 

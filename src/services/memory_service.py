@@ -51,6 +51,9 @@ WEAK_SCORE_THRESHOLD: float = 0.8
 #: 错题分析开关的键名（app_settings）
 MISTAKE_ANALYSIS_KEY: str = "mistake_analysis_enabled"
 
+#: 判分记忆上下文注入开关的键名（app_settings），默认开启
+MEMORY_CONTEXT_KEY: str = "memory_context_enabled"
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -333,6 +336,31 @@ def render_context(
     )
 
 
+def grade_memory_block(
+    training_id: int | None,
+    item_key: str | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> str:
+    """判分 prompt 的学习者记忆块（change learner-memory-and-grading 任务 4.3 判分侧）。
+
+    缺 ``training_id``、开关关闭、无作答数据或渲染异常时返回**空串**——
+    判分链路不因记忆渲染失败而中断；块体由 ``render_context`` 四段式输出构成。
+    """
+    if training_id is None or not is_memory_context_enabled(conn=conn):
+        return ""
+    try:
+        ctx = render_context(int(training_id), current_item_key=item_key, conn=conn)
+    except Exception:
+        logger.warning(
+            "grade_memory_block: render_context failed; grading continues without memory context"
+        )
+        return ""
+    if not ctx.text.strip():
+        return ""
+    return f"\n\n【学习者背景】\n{ctx.text}"
+
+
 # ---------------------------------------------------------------- 开关与分析（4.6）
 
 
@@ -373,6 +401,40 @@ def is_mistake_analysis_enabled(*, conn: sqlite3.Connection | None = None) -> bo
         if own:
             active.close()
     return bool(row) and str(row["value"]).lower() in ("1", "true", "yes", "on")
+
+
+def is_memory_context_enabled(*, conn: sqlite3.Connection | None = None) -> bool:
+    """判分记忆上下文注入开关，**默认开启**；显式写 0/false/no/off 才关闭。"""
+    active = conn or _connect()
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (MEMORY_CONTEXT_KEY,)
+        ).fetchone()
+    finally:
+        if own:
+            active.close()
+    if row is None:
+        return True
+    return str(row["value"]).lower() not in ("0", "false", "no", "off")
+
+
+def set_memory_context_enabled(
+    enabled: bool, *, conn: sqlite3.Connection | None = None
+) -> None:
+    active = conn or _connect()
+    own = conn is None
+    try:
+        active.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (MEMORY_CONTEXT_KEY, "1" if enabled else "0", _now()),
+        )
+        if own:
+            active.commit()
+    finally:
+        if own:
+            active.close()
 
 
 def set_mistake_analysis_enabled(
@@ -453,6 +515,7 @@ __all__ = [
     "INCOMPLETE_EXPRESSION",
     "KEY_OMISSION",
     "KnowledgeStat",
+    "MEMORY_CONTEXT_KEY",
     "MEMORY_GAP",
     "MISTAKE_ANALYSIS_KEY",
     "MISTAKE_REASONS",
@@ -460,7 +523,9 @@ __all__ = [
     "MemoryContext",
     "WEAK_SCORE_THRESHOLD",
     "derive_mistake_reasons",
+    "grade_memory_block",
     "is_mistake_analysis_enabled",
+    "is_memory_context_enabled",
     "knowledge_profile",
     "list_mistake_analysis",
     "mistake_reason_counts",
@@ -469,5 +534,6 @@ __all__ = [
     "recommended_type_mix",
     "render_context",
     "save_mistake_analysis",
+    "set_memory_context_enabled",
     "set_mistake_analysis_enabled",
 ]

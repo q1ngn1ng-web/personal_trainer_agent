@@ -207,3 +207,61 @@ def test_mistake_analysis_is_stored_separately(tmp_path) -> None:
     assert texts == ["你把 RDB 和 AOF 记反了"]
     # 分析文本不覆盖规则错因
     assert json.loads(reasons["mistake_reasons"]) == {"p1": ms.MEMORY_GAP}
+
+
+# -------------------------------------------------- 判分记忆块（任务 4.3 判分侧）
+
+
+def test_grade_memory_block_defaults_on_and_renders(tmp_path) -> None:
+    conn = _db(tmp_path)
+    try:
+        _bank(conn, "k1", "持久化")
+        _attempt(conn, "k1", "fail", 0.5, {"p1": ms.MEMORY_GAP})
+
+        block = ms.grade_memory_block(1, "k1", conn=conn)
+    finally:
+        conn.close()
+
+    assert block.startswith("\n\n【学习者背景】\n")
+    assert "记忆缺失" in block
+    assert "当前题背景" in block
+
+
+def test_grade_memory_block_empty_without_attempts(tmp_path) -> None:
+    conn = _db(tmp_path)
+    try:
+        assert ms.grade_memory_block(1, None, conn=conn) == ""
+        assert ms.grade_memory_block(None, conn=conn) == ""
+    finally:
+        conn.close()
+
+
+def test_grade_memory_block_can_be_disabled(tmp_path) -> None:
+    conn = _db(tmp_path)
+    try:
+        _bank(conn, "k1", "持久化")
+        _attempt(conn, "k1", "fail", 0.5, {"p1": ms.MEMORY_GAP})
+
+        # 缺省（app_settings 无记录）= 开启
+        assert ms.is_memory_context_enabled(conn=conn) is True
+        ms.set_memory_context_enabled(False, conn=conn)
+        assert ms.is_memory_context_enabled(conn=conn) is False
+        assert ms.grade_memory_block(1, "k1", conn=conn) == ""
+        ms.set_memory_context_enabled(True, conn=conn)
+        assert "【学习者背景】" in ms.grade_memory_block(1, "k1", conn=conn)
+    finally:
+        conn.close()
+
+
+def test_grade_memory_block_survives_render_failure(tmp_path, monkeypatch) -> None:
+    conn = _db(tmp_path)
+    try:
+        _attempt(conn, "k1", "fail", 0.5, {"p1": ms.MEMORY_GAP})
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("render exploded")
+
+        monkeypatch.setattr(ms, "render_context", _boom)
+        assert ms.grade_memory_block(1, "k1", conn=conn) == ""
+    finally:
+        conn.close()

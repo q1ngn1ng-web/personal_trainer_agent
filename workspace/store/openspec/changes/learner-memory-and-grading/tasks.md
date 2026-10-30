@@ -62,6 +62,13 @@
 - [ ] 4.3 整场评分与解析改用 memory_service 组装上下文
   - 验收：不再把原始作答全集塞进 prompt
   - 注（2026-10-15）：**依赖阶段 5/6**（整场评分、按需解析尚未实现），待其落地后接线
+  - 进展（2026-10-29）：**判分侧已接线**——`answer_service._grade_answer` 与
+    `quiz_service.grade_with_llm` 的判分 prompt（`QUIZ_GRADE_PROMPT` 升至 v1.2.0）注入
+    `memory_service.grade_memory_block` 四段式上下文；开关 `memory_context_enabled`
+    默认开启，缺 training_id / 无数据 / 渲染异常时返回空串不阻断判分。
+    生产路径实测（阿里云免费端点 deepseek-v4.1-flash）：注入块 40 tokens、
+    tokens_in 增量 +37/次、判分结果带缺失要点理由，见 `workspace/evidence/20261029-时间成本基准.md`。
+    **解析侧（explanation_service）仍未接线**，复选框保持未勾。
 - [x] 4.4 记录并验证上下文规模
   - 验收：产出"渲染后 token vs 原始作答 token"的对比数据
   - 注（2026-10-15）：`render_context` 返回 `approx_tokens` / `naive_tokens` 与压缩比；

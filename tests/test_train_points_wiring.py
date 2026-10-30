@@ -105,6 +105,7 @@ class TestTrainPointsWiring(unittest.TestCase):
         self._client = client_module
         self._orig_call_api = client_module._call_api
         self._grade_payload: dict | None = None
+        self._last_grade_prompt: str | None = None
 
         training = queries.create_training(topic="Redis 持久化", status="active")
         anchor = ANCHOR - timedelta(days=1)
@@ -130,6 +131,7 @@ class TestTrainPointsWiring(unittest.TestCase):
             if "训练出题助手" in content:
                 return json.dumps(train_payload, ensure_ascii=False), 10, 20
             if "测验评分员" in content:
+                self._last_grade_prompt = content
                 payload = dict(grade_payload or {})
                 results = payload.get("results") or []
                 if results:
@@ -247,6 +249,101 @@ class TestTrainPointsWiring(unittest.TestCase):
         finally:
             conn.close()
         self.assertIn("points", cols, "新库建表必须带 points 列")
+
+
+class TestGradePromptMemoryContext(unittest.TestCase):
+    """任务 4.3 判分侧：判分 prompt 注入学习者记忆块（默认开、可关、无数据不注入）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old_db = os.environ.get("DB_PATH")
+        os.environ["DB_PATH"] = str(Path(self._tmp.name) / "points.db")
+        init_db()
+
+        from src.llm import client as client_module
+
+        self._client = client_module
+        self._orig_call_api = client_module._call_api
+        self._last_grade_prompt: str | None = None
+
+        training = queries.create_training(topic="Redis 持久化", status="active")
+        anchor = ANCHOR - timedelta(days=1)
+        queries.update_training(training.id, created_at=f"{anchor.isoformat()}T10:00:00+08:00")
+        path_service.save_skeleton(_skeleton(training.id))
+        plan_service.generate_plan(training.id)
+        self.training = training
+        self.task = plan_service.today_tasks(training_id=training.id)[0]
+
+    def tearDown(self) -> None:
+        self._client._call_api = self._orig_call_api
+        if self._old_db is None:
+            os.environ.pop("DB_PATH", None)
+        else:
+            os.environ["DB_PATH"] = self._old_db
+        self._tmp.cleanup()
+
+    def _install_stub(self, *, grade_payload: dict) -> None:
+        def fake_call_api(messages):  # noqa: ANN001
+            content = messages[1]["content"] if len(messages) > 1 else ""
+            if "训练出题助手" in content:
+                return json.dumps(TRAIN_PAYLOAD, ensure_ascii=False), 10, 20
+            if "测验评分员" in content:
+                self._last_grade_prompt = content
+                payload = dict(grade_payload)
+                payload["results"] = [
+                    dict(payload["results"][0], item_key=self.task.item_key)
+                ]
+                return json.dumps(payload, ensure_ascii=False), 10, 20
+            raise AssertionError(f"未预期的 LLM 调用：{content[:40]}")
+
+        self._client._call_api = fake_call_api
+
+    def _seed_history_attempt(self) -> None:
+        conn = queries.get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO practice_attempts "
+                "(training_id, item_key, result, score, mistake_reasons, created_at) "
+                "VALUES (?, ?, 'fail', 0.5, ?, '2026-09-21T10:00:00')",
+                (
+                    self.training.id,
+                    self.task.item_key,
+                    json.dumps({"p1": "memory_gap"}),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_grade_prompt_injects_memory_context(self) -> None:
+        self._seed_history_attempt()
+        self._install_stub(grade_payload=GRADE_ALL_HIT)
+
+        answer_service.submit_answer(self.task.plan_id, "默认 dump.rdb，fork 子进程写快照")
+
+        self.assertIsNotNone(self._last_grade_prompt)
+        self.assertIn("【学习者背景】", self._last_grade_prompt)
+        self.assertIn("记忆缺失", self._last_grade_prompt)
+
+    def test_grade_prompt_skips_memory_without_history(self) -> None:
+        self._install_stub(grade_payload=GRADE_ALL_HIT)
+
+        answer_service.submit_answer(self.task.plan_id, "默认 dump.rdb，fork 子进程写快照")
+
+        self.assertIsNotNone(self._last_grade_prompt)
+        self.assertNotIn("【学习者背景】", self._last_grade_prompt)
+
+    def test_grade_prompt_respects_disabled_switch(self) -> None:
+        from src.services import memory_service
+
+        self._seed_history_attempt()
+        memory_service.set_memory_context_enabled(False)
+        self._install_stub(grade_payload=GRADE_ALL_HIT)
+
+        answer_service.submit_answer(self.task.plan_id, "默认 dump.rdb，fork 子进程写快照")
+
+        self.assertIsNotNone(self._last_grade_prompt)
+        self.assertNotIn("【学习者背景】", self._last_grade_prompt)
 
 
 if __name__ == "__main__":  # pragma: no cover
