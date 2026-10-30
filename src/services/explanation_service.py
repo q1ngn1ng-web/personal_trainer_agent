@@ -102,8 +102,8 @@ def generate_explanation(
             "source_text": "\n---\n".join(snippets) or "（没有可用的资料片段）",
         }
         try:
-            result = complete("explanation", variables, schema=None)
-        except Exception as exc:  # 解析不可用不该影响主流程
+            result = complete("explanation", variables, training_id=int(training_id))
+        except Exception as exc:  # 解析不可用不该影响主流程（失败审计由客户端写入）
             logger.warning("generate_explanation: LLM 不可用（%s）", exc)
             return {"ok": False, "error": str(exc)}
 
@@ -121,9 +121,9 @@ def generate_explanation(
                 str(item_key),
                 text,
                 json.dumps(refs, ensure_ascii=False),
-                "explanation",
-                "v1.0.0",
-                None,
+                result.get("prompt_name", "explanation"),
+                result.get("prompt_version", "unknown"),
+                result.get("model"),
                 _now(),
             ),
         )

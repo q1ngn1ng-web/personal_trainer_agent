@@ -19,7 +19,7 @@ from typing import Any
 from src.core.plan import local_today
 from src.db.models import Assessment, AssessmentItem
 from src.db.sqlite import get_connection
-from src.llm.client import complete, log_llm_failure
+from src.llm.client import complete
 from src.llm.schema import SCHEMA_REGISTRY
 from src.services import attempt_service, memory_service, plan_service
 
@@ -96,7 +96,9 @@ def pick_blueprints(pool: list[dict[str, Any]], *, size: int = QUIZ_SIZE) -> lis
     return picked[:size]
 
 
-def build_questions(blueprints: list[dict[str, Any]]) -> tuple[list[QuizQuestion], bool]:
+def build_questions(
+    blueprints: list[dict[str, Any]], training_id: int | None = None
+) -> tuple[list[QuizQuestion], bool]:
     """把蓝本题变成测验题：优先 LLM 变式，失败则退回原题（标记 is_variant=False）。"""
     if not blueprints:
         return [], False
@@ -112,11 +114,12 @@ def build_questions(blueprints: list[dict[str, Any]]) -> tuple[list[QuizQuestion
     variables = {"blueprints": json.dumps(payload, ensure_ascii=False, indent=2)}
     output: dict[str, Any] = {}
     try:
-        result = complete("quiz_variant", variables, schema=SCHEMA_REGISTRY["quiz_variant"])
+        result = complete(
+            "quiz_variant", variables, schema=SCHEMA_REGISTRY["quiz_variant"], training_id=training_id
+        )
         output = result.get("output_json") or {}
-    except Exception as exc:  # LLM 不可用不该阻塞测验
+    except Exception as exc:  # LLM 不可用不该阻塞测验（失败审计由客户端写入）
         logger.warning("build_questions: LLM unavailable (%s), falling back to banked originals", exc)
-        log_llm_failure("quiz_variant", json.dumps(variables, ensure_ascii=False), exc)
 
     by_key = {str(row.get("item_key")): row for row in blueprints}
     questions: list[QuizQuestion] = []
@@ -175,7 +178,7 @@ def start_assessment(
             raise ValueError(
                 "题库里还没有可抽的题：练过的题要过 14 天冷却期才能进入测验（ADR-0016）"
             )
-        questions, _used_llm = build_questions(blueprints)
+        questions, _used_llm = build_questions(blueprints, training_id=training_id)
         cursor = active.execute(
             "INSERT INTO assessments (training_id, plan_id, trigger, status, question_count, "
             "created_at) VALUES (?, ?, ?, 'in_progress', ?, ?)",
@@ -351,11 +354,16 @@ def grade_with_llm(
     }
     output: dict[str, Any] = {}
     try:
-        result = complete("quiz_grade", variables, schema=SCHEMA_REGISTRY["quiz_grade"])
+        result = complete(
+            "quiz_grade",
+            variables,
+            schema=SCHEMA_REGISTRY["quiz_grade"],
+            training_id=int(assessment.training_id) if assessment else None,
+        )
         output = result.get("output_json") or {}
     except Exception as exc:
+        # 失败审计由客户端写入 llm_calls；判分不可用时走用户自评
         logger.warning("grade_with_llm: LLM unavailable (%s), 需要用户自评", exc)
-        log_llm_failure("quiz_grade", json.dumps(variables, ensure_ascii=False), exc)
         return False
 
     verdicts: dict[str, dict[str, Any]] = {}

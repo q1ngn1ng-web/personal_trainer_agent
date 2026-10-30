@@ -149,21 +149,99 @@ def _run_once(prompt_name: str, variables: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _audit_training_id(training_id: int | None) -> int | None:
+    """训练 id 守卫：0 或负数（老流程的占位值）不写 FK，记 NULL。"""
+    try:
+        value = int(training_id) if training_id is not None else None
+    except (TypeError, ValueError):
+        return None
+    return value if value and value > 0 else None
+
+
+def _record_audit(
+    *,
+    purpose: str,
+    prompt_name: str,
+    prompt_version: str,
+    training_id: int | None,
+    input_text: str,
+    result: dict[str, Any] | None,
+    fallback_used: int,
+    failure: Exception | None,
+) -> None:
+    """统一审计：每次 ``complete``（成功 / 降级 / 彻底失败）都写一行 ``llm_calls``。
+
+    记账下沉在客户端，业务层不再手写；审计本身失败只打日志，绝不阻塞主流程。
+    """
+    try:
+        from src.db.queries import record_llm_call
+
+        owner_id = _audit_training_id(training_id)
+        if result is not None:
+            record_llm_call(
+                call_purpose=purpose,
+                prompt_name=result["prompt_name"],
+                prompt_version=result["prompt_version"],
+                model=result["model"],
+                input_text=input_text[:4000],
+                latency_ms=result["latency_ms"],
+                tokens_in=result["tokens_in"],
+                tokens_out=result["tokens_out"],
+                output_text=result.get("output_text"),
+                output_json=result.get("output_json"),
+                retry_count=result["retry_count"],
+                fallback_used=fallback_used,
+                validation_result="pass" if result.get("output_json") is not None else "fail",
+                training_id=owner_id,
+                failure_reason=None,
+            )
+        else:
+            record_llm_call(
+                call_purpose=purpose,
+                prompt_name=prompt_name,
+                prompt_version=prompt_version,
+                model=DEEPSEEK_MODEL,
+                input_text=input_text[:4000],
+                latency_ms=0,
+                tokens_in=0,
+                tokens_out=0,
+                retry_count=3,
+                fallback_used=0,
+                validation_result="fail",
+                failure_reason=f"{type(failure).__name__}: {failure}"[:500] if failure else "unknown",
+                training_id=owner_id,
+            )
+    except Exception:  # pragma: no cover - 审计失败不能影响主流程
+        logger.exception("llm audit: could not persist record for %s", prompt_name)
+
+
 def complete(
     prompt_name: str,
     variables: dict[str, Any],
     schema: dict[str, Any] | None = None,
     max_attempts: int = 3,
+    training_id: int | None = None,
+    call_purpose: str | None = None,
 ) -> dict[str, Any]:
     """Call the LLM with retry-with-feedback; return dict with all observability fields.
 
     On exhaustion, if a fallback exists for ``prompt_name`` it is served and returned with
     retry_count reflecting actual attempts; otherwise the underlying exception is re-raised.
+
+    每次调用（成功 / fallback / 彻底失败）都会在客户端写一行 ``llm_calls``：
+    ``call_purpose`` 默认取 ``prompt_name``，``training_id`` 由调用方传入（可为空）。
     """
     if prompt_name not in PROMPT_REGISTRY:
         raise ValueError(f"unknown prompt_name: {prompt_name}")
     if schema is not None and "schema" not in variables:
         variables = {**variables, "schema": _schema_dump(schema)}
+
+    purpose = call_purpose or prompt_name
+    audit_input = json.dumps(
+        {k: v for k, v in variables.items() if k not in ("schema", "__feedback__")},
+        ensure_ascii=False,
+    )
+    _, fallback_version = PROMPT_REGISTRY[prompt_name]
 
     attempt_count = {"n": 0}
 
@@ -176,6 +254,16 @@ def complete(
             call_with_count, prompt_name, variables, max_attempts=max_attempts
         )
         result["retry_count"] = max(0, attempt_count["n"] - 1)
+        _record_audit(
+            purpose=purpose,
+            prompt_name=prompt_name,
+            prompt_version=result["prompt_version"],
+            training_id=training_id,
+            input_text=audit_input,
+            result=result,
+            fallback_used=0,
+            failure=None,
+        )
         return result
     except Exception as exc:
         logger.error(
@@ -186,8 +274,7 @@ def complete(
         )
         fb = fallback_for(prompt_name)
         if fb is not None:
-            _, version = PROMPT_REGISTRY[prompt_name]
-            return {
+            fb_result = {
                 "output_text": json.dumps(fb, ensure_ascii=False),
                 "output_json": fb,
                 "latency_ms": 0,
@@ -196,34 +283,27 @@ def complete(
                 "retry_count": attempt_count["n"],
                 "model": DEEPSEEK_MODEL,
                 "prompt_name": prompt_name,
-                "prompt_version": version,
+                "prompt_version": fallback_version,
             }
-        raise
-
-
-def log_llm_failure(prompt_name: str, input_text: str, exc: Exception) -> None:
-    """把一次彻底失败的 LLM 调用写进 ``llm_calls``。
-
-    ``complete`` 在失败且无 fallback 时会抛异常，调用方若直接捕获，
-    这次失败就**不会留下任何痕迹**，事后无法定位原因。诊断失败必须先有记录。
-    """
-    from src.db.queries import record_llm_call
-
-    _, version = PROMPT_REGISTRY.get(prompt_name, ("", "unknown"))
-    try:
-        record_llm_call(
-            call_purpose=prompt_name,
+            _record_audit(
+                purpose=purpose,
+                prompt_name=prompt_name,
+                prompt_version=fallback_version,
+                training_id=training_id,
+                input_text=audit_input,
+                result=fb_result,
+                fallback_used=1,
+                failure=None,
+            )
+            return fb_result
+        _record_audit(
+            purpose=purpose,
             prompt_name=prompt_name,
-            prompt_version=version,
-            model=DEEPSEEK_MODEL,
-            input_text=input_text[:4000],
-            latency_ms=0,
-            tokens_in=0,
-            tokens_out=0,
-            retry_count=3,
+            prompt_version=fallback_version,
+            training_id=training_id,
+            input_text=audit_input,
+            result=None,
             fallback_used=0,
-            validation_result="fail",
-            failure_reason=f"{type(exc).__name__}: {exc}"[:500],
+            failure=exc,
         )
-    except Exception:  # pragma: no cover - 审计失败不能影响主流程
-        logger.exception("log_llm_failure: could not persist failure for %s", prompt_name)
+        raise

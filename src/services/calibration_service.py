@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.db.models import Training
-from src.db.queries import record_llm_call
 from src.llm.client import LLMError, complete
 from src.llm.prompts import WEEKLY_CALIBRATION_PROMPT_VERSION
 from src.services.metrics_calculator import DEFAULT_TOPIC, WeeklyMetrics
@@ -48,55 +47,6 @@ def _build_prompt_variables(training: Training, metrics: WeeklyMetrics) -> dict[
         "materials": training.materials,
     }
 
-
-def _record_call(
-    training_id: int | None,
-    *,
-    success: bool,
-    result: dict[str, Any] | None,
-    failure_reason: str | None,
-    fallback_used: bool,
-) -> None:
-    persisted_training_id = training_id if training_id and training_id > 0 else None
-    if success and result is not None:
-        record_llm_call(
-            training_id=persisted_training_id,
-            call_purpose=_PROMPT_NAME,
-            prompt_name=result.get("prompt_name", _PROMPT_NAME),
-            prompt_version=result.get("prompt_version", WEEKLY_CALIBRATION_PROMPT_VERSION),
-            model=result.get("model", "unknown"),
-            input_text=json.dumps(
-                {"output_keys": sorted((result.get("output_json") or {}).keys())},
-                ensure_ascii=False,
-            ),
-            output_text=result.get("output_text") or "",
-            output_json=result.get("output_json"),
-            validation_result="pass",
-            retry_count=int(result.get("retry_count", 0) or 0),
-            latency_ms=int(result.get("latency_ms", 0) or 0),
-            tokens_in=int(result.get("tokens_in", 0) or 0),
-            tokens_out=int(result.get("tokens_out", 0) or 0),
-            failure_reason=None,
-            fallback_used=0,
-        )
-        return
-    record_llm_call(
-        training_id=persisted_training_id,
-        call_purpose=_PROMPT_NAME,
-        prompt_name=_PROMPT_NAME,
-        prompt_version=WEEKLY_CALIBRATION_PROMPT_VERSION,
-        model="n/a",
-        input_text=json.dumps({"phase": "fallback"}, ensure_ascii=False),
-        output_text=None,
-        output_json=None,
-        validation_result="fail",
-        retry_count=0,
-        latency_ms=0,
-        tokens_in=0,
-        tokens_out=0,
-        failure_reason=failure_reason,
-        fallback_used=1 if fallback_used else 0,
-    )
 
 
 def _clamp_delta(value: float) -> float:
@@ -188,7 +138,7 @@ def generate_calibration(
     variables = _build_prompt_variables(training, metrics)
     training_id = training.id if training.id is not None else 0
     try:
-        result = complete(_PROMPT_NAME, variables)
+        result = complete(_PROMPT_NAME, variables, training_id=training.id)
     except Exception as exc:
         logger.warning(
             "generate_calibration: LLM call failed for training=%s: %s",
@@ -199,13 +149,6 @@ def generate_calibration(
         raw = dict(suggestion.raw)
         raw["generated_at"] = datetime.now(timezone.utc).isoformat()
         suggestion.raw = raw
-        _record_call(
-            training_id,
-            success=False,
-            result=None,
-            failure_reason=str(exc),
-            fallback_used=True,
-        )
         return suggestion
 
     raw_output = result.get("output_json") or {}
@@ -221,13 +164,6 @@ def generate_calibration(
         raw = dict(suggestion.raw)
         raw["generated_at"] = datetime.now(timezone.utc).isoformat()
         suggestion.raw = raw
-        _record_call(
-            training_id,
-            success=False,
-            result=result,
-            failure_reason=str(exc),
-            fallback_used=True,
-        )
         return suggestion
 
     raw: dict[str, Any] = {
@@ -239,7 +175,6 @@ def generate_calibration(
         "model": result.get("model"),
         "prompt_version": result.get("prompt_version", WEEKLY_CALIBRATION_PROMPT_VERSION),
     }
-    _record_call(training_id, success=True, result=result, failure_reason=None, fallback_used=False)
     return CalibrationSuggestion(
         baseline_score_delta=normalized["baseline_score_delta"],
         schedule_adjustment=normalized["schedule_adjustment"],

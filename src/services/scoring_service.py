@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.db.queries import record_llm_call
 from src.llm.client import complete
 from src.llm.prompts import PROMPT_REGISTRY
 from src.llm.schema import SCHEMA_REGISTRY
@@ -40,16 +39,6 @@ class ScoringResult:
     partial_topics: list[str]
     raw: dict[str, Any] = field(default_factory=dict)
 
-
-def _build_input_text(topic: str, questions: list[dict[str, Any]], answers: list[str]) -> str:
-    template, _ = PROMPT_REGISTRY["baseline_scoring"]
-    schema = SCHEMA_REGISTRY["baseline_scoring"]
-    return template.format(
-        topic=topic,
-        questions=questions,
-        answers=answers,
-        schema=json.dumps(schema, ensure_ascii=False, indent=2),
-    )
 
 
 def _question_key_terms(question: BaselineQuestion) -> set[str]:
@@ -116,49 +105,6 @@ def _heuristic_score(
     )
 
 
-def _record(result: dict[str, Any], topic: str, questions: list[dict[str, Any]], answers: list[str]) -> None:
-    validation_result = "pass" if result.get("output_json") else "fail"
-    try:
-        record_llm_call(
-            call_purpose="baseline_scoring",
-            prompt_name=result.get("prompt_name", "baseline_scoring"),
-            prompt_version=result.get("prompt_version", "v0"),
-            model=result.get("model", "unknown"),
-            input_text=_build_input_text(topic, questions, answers),
-            latency_ms=result.get("latency_ms", 0),
-            tokens_in=result.get("tokens_in", 0),
-            tokens_out=result.get("tokens_out", 0),
-            output_text=result.get("output_text"),
-            output_json=result.get("output_json"),
-            retry_count=result.get("retry_count", 0),
-            fallback_used=0,
-            validation_result=validation_result,
-        )
-    except Exception:
-        logger.exception("score_baseline: failed to record LLM call")
-
-
-def _record_failure(topic: str, questions: list[dict[str, Any]], answers: list[str], exc: Exception) -> None:
-    _, version = PROMPT_REGISTRY["baseline_scoring"]
-    try:
-        record_llm_call(
-            call_purpose="baseline_scoring",
-            prompt_name="baseline_scoring",
-            prompt_version=version,
-            model="unknown",
-            input_text=_build_input_text(topic, questions, answers),
-            latency_ms=0,
-            tokens_in=0,
-            tokens_out=0,
-            output_text=None,
-            output_json=None,
-            retry_count=0,
-            fallback_used=0,
-            validation_result="fail",
-            failure_reason=str(exc),
-        )
-    except Exception:
-        logger.exception("score_baseline: failed to persist failure record")
 
 
 def score_baseline(
@@ -178,7 +124,6 @@ def score_baseline(
         result = complete(prompt_name="baseline_scoring", variables=variables)
     except Exception as exc:
         logger.warning("score_baseline: LLM unavailable, using heuristic: %s", exc)
-        _record_failure(topic, question_dicts, list(user_answers), exc)
         return _heuristic_score(questions, user_answers)
 
     output_json = result.get("output_json") or {}
@@ -207,8 +152,6 @@ def score_baseline(
     if overall not in {"high", "mid", "low"}:
         overall = "low"
     partial_topics = [str(t) for t in (output_json.get("partial_topics") or []) if str(t).strip()]
-
-    _record(result, topic, question_dicts, list(user_answers))
 
     return ScoringResult(
         scores=parsed_scores,

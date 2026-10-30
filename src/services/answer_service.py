@@ -20,7 +20,7 @@ from typing import Any
 
 from src.core.plan import local_today
 from src.db.sqlite import get_connection
-from src.llm.client import complete, log_llm_failure
+from src.llm.client import complete
 from src.llm.schema import SCHEMA_REGISTRY
 from src.services import attempt_service, memory_service, plan_service
 
@@ -197,7 +197,10 @@ def ensure_question(
         }
         try:
             result = complete(
-                "train_question", variables, schema=SCHEMA_REGISTRY["train_question"]
+                "train_question",
+                variables,
+                schema=SCHEMA_REGISTRY["train_question"],
+                training_id=int(context["training_id"]),
             )
             output = result.get("output_json") or {}
             question = str(output.get("question") or "").strip()
@@ -208,9 +211,8 @@ def ensure_question(
                 normalized = _normalize_points(output.get("points"))
                 if normalized:
                     points_json = json.dumps(normalized, ensure_ascii=False)
-        except Exception as exc:  # 模型不可用不该让用户没题可做
+        except Exception as exc:  # 模型不可用不该让用户没题可做（失败审计由客户端写入）
             logger.warning("ensure_question: LLM unavailable (%s), using fallback", exc)
-            log_llm_failure("train_question", json.dumps(variables, ensure_ascii=False), exc)
 
         if not question:
             question, answer = _probe_question(
@@ -293,11 +295,17 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
         ),
     }
     try:
-        result = complete("quiz_grade", variables, schema=SCHEMA_REGISTRY["quiz_grade"])
+        result = complete(
+            "quiz_grade",
+            variables,
+            schema=SCHEMA_REGISTRY["quiz_grade"],
+            training_id=context.get("training_id"),
+            call_purpose="daily_grade",
+        )
         output = result.get("output_json") or {}
     except Exception as exc:
+        # 失败审计由客户端写入 llm_calls；判分不可用时 graded=False，不伪造对错
         logger.warning("grade_answer: LLM unavailable (%s)", exc)
-        log_llm_failure("quiz_grade", json.dumps(variables, ensure_ascii=False), exc)
         return outcome
     results = output.get("results") or []
     if not results:

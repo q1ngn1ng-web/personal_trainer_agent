@@ -97,7 +97,7 @@ def test_generate_explanation_uses_sources_and_persists(tmp_path, monkeypatch) -
     conn = _db(tmp_path)
     calls: list[dict] = []
 
-    def _fake_complete(purpose, variables, schema=None):
+    def _fake_complete(purpose, variables, schema=None, **kwargs):
         calls.append({"purpose": purpose, "variables": variables})
         return {"output_json": {"explanation": "正确答案是 RDB", "source_refs": ["chunk-1"]}}
 

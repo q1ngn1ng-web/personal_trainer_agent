@@ -267,13 +267,13 @@ def generate_skeleton(
     skeleton: PathSkeleton | None = None
     for attempt in range(MAX_BUDGET_RETRIES + 1):
         try:
-            result = complete("path_skeleton", variables, schema=SCHEMA_REGISTRY["path_skeleton"])
+            result = complete(
+            "path_skeleton", variables, schema=SCHEMA_REGISTRY["path_skeleton"], training_id=training_id
+        )
             output = result.get("output_json") or {}
         except Exception as exc:
             logger.warning("generate_skeleton: LLM unavailable (%s), using fallback", exc)
-            from src.llm.client import log_llm_failure
 
-            log_llm_failure("path_skeleton", json.dumps(variables, ensure_ascii=False), exc)
             output = {}
 
         if not output:

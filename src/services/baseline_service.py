@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.db.queries import record_llm_call
 from src.llm.client import complete
 from src.llm.fallback import fallback_for
 from src.llm.prompts import PROMPT_REGISTRY
@@ -45,17 +44,6 @@ class BaselineQuestions:
     fallback_used: bool = False
 
 
-def _build_input_text(topic: str, keywords: list[str], forbidden: list[str]) -> str:
-    template, _ = PROMPT_REGISTRY["baseline_q"]
-    schema = SCHEMA_REGISTRY["baseline_q"]
-    return template.format(
-        topic=topic,
-        description="",
-        keywords=keywords,
-        forbidden=forbidden,
-        schema=json.dumps(schema, ensure_ascii=False, indent=2),
-    )
-
 
 def _parse_questions(payload: dict[str, Any]) -> list[BaselineQuestion]:
     parsed: list[BaselineQuestion] = []
@@ -91,27 +79,6 @@ def _fallback_result() -> dict[str, Any]:
         "prompt_version": version,
     }
 
-
-def _record(result: dict[str, Any], topic: str, keywords: list[str], forbidden: list[str], fallback_used: int) -> None:
-    validation_result = "pass" if result.get("output_json") else "fail"
-    try:
-        record_llm_call(
-            call_purpose="baseline_q",
-            prompt_name=result.get("prompt_name", "baseline_q"),
-            prompt_version=result.get("prompt_version", "v0"),
-            model=result.get("model", "unknown"),
-            input_text=_build_input_text(topic, keywords, forbidden),
-            latency_ms=result.get("latency_ms", 0),
-            tokens_in=result.get("tokens_in", 0),
-            tokens_out=result.get("tokens_out", 0),
-            output_text=result.get("output_text"),
-            output_json=result.get("output_json"),
-            retry_count=result.get("retry_count", 0),
-            fallback_used=fallback_used,
-            validation_result=validation_result,
-        )
-    except Exception:
-        logger.exception("baseline_service: failed to record LLM call")
 
 
 def generate_baseline_questions(
@@ -171,8 +138,6 @@ def generate_baseline_questions(
     if accepted is None:
         accepted = _fallback_result()
         fallback_used = 1
-
-    _record(accepted, topic, keywords, forbidden, fallback_used)
 
     payload = accepted.get("output_json") or {}
     questions = _parse_questions(payload)

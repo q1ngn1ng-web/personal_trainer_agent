@@ -92,27 +92,8 @@ def _call_llm(topic: str, known: dict[str, Any], history: list[dict[str, str]], 
         "history": _history_to_text(history),
         "rounds": rounds,
     }
-    result = complete(_PURPOSE, variables, schema=SCHEMA_REGISTRY[_PURPOSE])
-    output_json = result.get("output_json") or {}
-    try:
-        queries.record_llm_call(
-            call_purpose=_PURPOSE,
-            prompt_name=result["prompt_name"],
-            prompt_version=result["prompt_version"],
-            model=result["model"],
-            input_text=json.dumps(variables, ensure_ascii=False),
-            latency_ms=result["latency_ms"],
-            tokens_in=result["tokens_in"],
-            tokens_out=result["tokens_out"],
-            output_text=result.get("output_text"),
-            output_json=output_json,
-            retry_count=result["retry_count"],
-            fallback_used=1 if result["retry_count"] >= 3 else 0,
-            validation_result="pass" if output_json else "fail",
-        )
-    except Exception:  # pragma: no cover - 审计失败不阻塞主流程
-        logger.exception("goal_clarification: failed to record LLM call")
-    return result
+    # 调用审计（成功/降级/失败）由统一客户端写入 llm_calls
+    return complete(_PURPOSE, variables, schema=SCHEMA_REGISTRY[_PURPOSE])
 
 
 def _apply_suggestions(draft: GoalDraft, missing: tuple[str, ...]) -> list[str]:

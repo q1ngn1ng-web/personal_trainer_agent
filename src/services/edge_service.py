@@ -199,14 +199,13 @@ def generate_probe_items(
         "knowledge_points": _format_points(knowledge_points),
     }
     try:
-        result = complete("edge_probe", variables, schema=SCHEMA_REGISTRY["edge_probe"])
+        result = complete(
+            "edge_probe", variables, schema=SCHEMA_REGISTRY["edge_probe"], training_id=training_id
+        )
         output = result.get("output_json") or {}
     except Exception as exc:
-        # 模型不可用不应该让用户卡在向导里：退回按知识点生成的朴素问法
-        from src.llm.client import log_llm_failure
-
+        # 模型不可用不应该让用户卡在向导里：退回按知识点生成的朴素问法（失败审计由客户端写入）
         logger.warning("generate_probe_items: LLM unavailable (%s), using fallback", exc)
-        log_llm_failure("edge_probe", json.dumps(variables, ensure_ascii=False), exc)
         output = {}
     questions = output.get("questions") or []
 
@@ -262,13 +261,12 @@ def grade_probe(
             "edge_probe_grade",
             {"topic": topic, "items": json.dumps(payload, ensure_ascii=False, indent=2)},
             schema=SCHEMA_REGISTRY["edge_probe_grade"],
+            training_id=training_id,
         )
         output = result.get("output_json") or {}
     except Exception as exc:
-        from src.llm.client import log_llm_failure
-
+        # 失败审计由客户端写入 llm_calls；判分不可用时从严全部按未通过处理
         logger.warning("grade_probe: LLM unavailable (%s), treating all as fail", exc)
-        log_llm_failure("edge_probe_grade", json.dumps(payload, ensure_ascii=False), exc)
         output = {}
     verdicts = {str(v.get("knowledge_point", "")).strip(): v for v in (output.get("verdicts") or [])}
 

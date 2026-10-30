@@ -13,12 +13,9 @@ from src.core.training import Training as DomainTraining
 from src.db.queries import (
     add_baseline_history,
     create_training as create_training_row,
-    record_llm_call,
     update_training,
 )
 from src.llm.client import complete
-from src.llm.prompts import PROMPT_REGISTRY
-from src.llm.schema import SCHEMA_REGISTRY
 from src.services.baseline_service import (
     BaselineQuestion,
     BaselineQuestions,
@@ -167,37 +164,12 @@ def _generate_pretrain_checklist(
     weak_topics: list[str],
 ) -> list[dict[str, Any]]:
     variables = _build_pretrain_variables(topic, keywords, weak_topics)
-    template, _ = PROMPT_REGISTRY["pretrain_checklist"]
-    schema = SCHEMA_REGISTRY["pretrain_checklist"]
-    variables_with_schema = {**variables, "schema": json.dumps(schema, ensure_ascii=False, indent=2)}
-    input_text = template.format(**variables_with_schema)
-
-    fallback_used = 0
-    fallback_items: list[dict[str, Any]] = []
     try:
         result = complete(prompt_name="pretrain_checklist", variables=variables)
     except Exception as exc:
+        # 审计（失败）由统一客户端写入 llm_calls；这里只负责业务降级
         logger.warning("trainer_service: pretrain_checklist LLM failed: %s", exc)
-        try:
-            record_llm_call(
-                call_purpose="pretrain_checklist",
-                prompt_name="pretrain_checklist",
-                prompt_version=PROMPT_REGISTRY["pretrain_checklist"][1],
-                model="unknown",
-                input_text=input_text,
-                latency_ms=0,
-                tokens_in=0,
-                tokens_out=0,
-                output_text=None,
-                output_json=None,
-                retry_count=0,
-                fallback_used=0,
-                validation_result="fail",
-                failure_reason=str(exc),
-            )
-        except Exception:
-            logger.exception("trainer_service: failed to persist pretrain_checklist failure")
-        return fallback_items
+        return []
 
     output_json = result.get("output_json") or {}
     raw_items = output_json.get("items") or []
@@ -209,27 +181,6 @@ def _generate_pretrain_checklist(
         materials = [str(m) for m in (entry.get("materials") or []) if str(m).strip()]
         if concept:
             items.append({"concept": concept, "materials": materials})
-
-    validation_result = "pass" if result.get("output_json") else "fail"
-    try:
-        record_llm_call(
-            call_purpose="pretrain_checklist",
-            prompt_name=result["prompt_name"],
-            prompt_version=result["prompt_version"],
-            model=result["model"],
-            input_text=input_text,
-            latency_ms=result["latency_ms"],
-            tokens_in=result["tokens_in"],
-            tokens_out=result["tokens_out"],
-            output_text=result.get("output_text"),
-            output_json=output_json,
-            retry_count=result["retry_count"],
-            fallback_used=fallback_used,
-            validation_result=validation_result,
-        )
-    except Exception:
-        logger.exception("trainer_service: failed to record pretrain_checklist call")
-
     return items
 
 

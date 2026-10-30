@@ -32,6 +32,7 @@ from src.db.sqlite import get_connection  # noqa: E402
 logger = logging.getLogger("scripts.check_llm_logs")
 
 ALLOWED_PURPOSES = {
+    # 十要素一代链路
     "topic_validation",
     "keyword_generation",
     "baseline_q",
@@ -39,6 +40,16 @@ ALLOWED_PURPOSES = {
     "weekly_calibration",
     "md_generation",
     "pretrain_checklist",
+    # 学习闭环主链路（llm-audit-unified-client：审计下沉后全量覆盖）
+    "goal_clarification",
+    "edge_probe",
+    "edge_probe_grade",
+    "path_skeleton",
+    "train_question",
+    "quiz_variant",
+    "quiz_grade",
+    "daily_grade",
+    "explanation",
 }
 
 
