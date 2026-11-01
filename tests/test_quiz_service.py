@@ -129,7 +129,7 @@ class TestQuizService(unittest.TestCase):
         self._practice_round_one()
         first, second = self.item_keys
 
-        def fake_call(messages):  # noqa: ANN001
+        def fake_call(messages, *args, **kwargs):  # noqa: ANN001
             payload = {
                 "questions": [
                     {"item_key": first, "question": "变式：RDB 与 AOF 同时开启会发生什么？", "reference_answer": "混合持久化"},
@@ -145,7 +145,7 @@ class TestQuizService(unittest.TestCase):
         self.assertTrue(all("变式" in item.question for item in items))
 
         # 判分：LLM 可用时按返回结果写 verdict
-        def fake_grade(messages):  # noqa: ANN001
+        def fake_grade(messages, *args, **kwargs):  # noqa: ANN001
             payload = {
                 "results": [
                     {"item_key": first, "verdict": "pass", "reason": "答到关键点"},

@@ -30,6 +30,14 @@ DEFAULT_MAX_TOKENS: int = 4096
 REQUEST_TIMEOUT_S: int = 60
 KEYWORD_COVERAGE_PURPOSES: frozenset[str] = frozenset({"baseline_q"})
 
+#: 按用途覆盖温度（判分一致性治理，change grading-consistency）：
+#: 判分要求同输入同输出，温度降到 0 消除采样抖动；未列出的用途用 DEFAULT_TEMPERATURE。
+PURPOSE_TEMPERATURES: dict[str, float] = {"quiz_grade": 0.0}
+
+
+def temperature_for(prompt_name: str) -> float:
+    return PURPOSE_TEMPERATURES.get(str(prompt_name), DEFAULT_TEMPERATURE)
+
 
 class LLMError(Exception):
     """Raised when the underlying DeepSeek call fails or returns unusable output."""
@@ -56,7 +64,9 @@ def _render_prompt(template: str, variables: dict[str, Any]) -> str:
     return rendered
 
 
-def _call_api(messages: list[dict[str, str]]) -> tuple[str, int, int]:
+def _call_api(
+    messages: list[dict[str, str]], temperature: float | None = None
+) -> tuple[str, int, int]:
     if not DEEPSEEK_API_KEY:
         raise LLMError("DEEPSEEK_API_KEY is not set")
     url = f"{DEEPSEEK_BASE_URL}/chat/completions"
@@ -67,7 +77,7 @@ def _call_api(messages: list[dict[str, str]]) -> tuple[str, int, int]:
     body = {
         "model": DEEPSEEK_MODEL,
         "messages": messages,
-        "temperature": DEFAULT_TEMPERATURE,
+        "temperature": DEFAULT_TEMPERATURE if temperature is None else temperature,
         "max_tokens": DEFAULT_MAX_TOKENS,
     }
     try:
@@ -128,7 +138,7 @@ def _run_once(prompt_name: str, variables: dict[str, Any]) -> dict[str, Any]:
     ]
 
     start = time.monotonic()
-    output_text, tokens_in, tokens_out = _call_api(messages)
+    output_text, tokens_in, tokens_out = _call_api(messages, temperature_for(prompt_name))
     latency_ms = int((time.monotonic() - start) * 1000)
 
     output_json: dict[str, Any] | None = None

@@ -126,7 +126,7 @@ class TestTrainPointsWiring(unittest.TestCase):
     def _install_stub(self, *, train_payload: dict, grade_payload: dict | None = None) -> None:
         """按 prompt 标题分流：训练出题助手 → 出题载荷；测验评分员 → 判分载荷。"""
 
-        def fake_call_api(messages):  # noqa: ANN001
+        def fake_call_api(messages, *args, **kwargs):  # noqa: ANN001
             content = messages[1]["content"] if len(messages) > 1 else ""
             if "训练出题助手" in content:
                 return json.dumps(train_payload, ensure_ascii=False), 10, 20
@@ -283,7 +283,7 @@ class TestGradePromptMemoryContext(unittest.TestCase):
         self._tmp.cleanup()
 
     def _install_stub(self, *, grade_payload: dict) -> None:
-        def fake_call_api(messages):  # noqa: ANN001
+        def fake_call_api(messages, *args, **kwargs):  # noqa: ANN001
             content = messages[1]["content"] if len(messages) > 1 else ""
             if "训练出题助手" in content:
                 return json.dumps(TRAIN_PAYLOAD, ensure_ascii=False), 10, 20
@@ -344,6 +344,76 @@ class TestGradePromptMemoryContext(unittest.TestCase):
 
         self.assertIsNotNone(self._last_grade_prompt)
         self.assertNotIn("【学习者背景】", self._last_grade_prompt)
+
+
+class TestGradingCacheIntegration(unittest.TestCase):
+    """判分结果缓存（change grading-consistency）：同卷同答第二次判分零 LLM 调用、结果逐字一致。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old_db = os.environ.get("DB_PATH")
+        os.environ["DB_PATH"] = str(Path(self._tmp.name) / "gc.db")
+        init_db()
+
+        from src.llm import client as client_module
+
+        self._client = client_module
+        self._orig_call_api = client_module._call_api
+        self._quiz_calls = 0
+
+        training = queries.create_training(topic="Redis 持久化", status="active")
+        self.training = training
+        self._context = {
+            "training_id": training.id,
+            "item_key": "kp00-qa",
+            "question": TRAIN_PAYLOAD["question"],
+            "reference_answer": TRAIN_PAYLOAD["reference_answer"],
+            "points": json.dumps(TRAIN_PAYLOAD["points"], ensure_ascii=False),
+        }
+
+    def tearDown(self) -> None:
+        self._client._call_api = self._orig_call_api
+        if self._old_db is None:
+            os.environ.pop("DB_PATH", None)
+        else:
+            os.environ["DB_PATH"] = self._old_db
+        self._tmp.cleanup()
+
+    def _install_quiz_stub(self) -> None:
+        def fake_call_api(messages, *args, **kwargs):  # noqa: ANN001
+            content = messages[1]["content"] if len(messages) > 1 else ""
+            if "测验评分员" in content:
+                self._quiz_calls += 1
+                payload = dict(GRADE_ALL_HIT)
+                payload["results"] = [
+                    dict(payload["results"][0], item_key=self._context["item_key"])
+                ]
+                return json.dumps(payload, ensure_ascii=False), 10, 20
+            raise AssertionError(f"未预期的 LLM 调用：{content[:40]}")
+
+        self._client._call_api = fake_call_api
+
+    def test_second_identical_grading_hits_cache(self) -> None:
+        self._install_quiz_stub()
+        answer = "默认 dump.rdb，fork 出的子进程写快照"
+
+        first = answer_service._grade_answer(self._context, answer)
+        calls_after_first = self._quiz_calls
+        self.assertGreaterEqual(calls_after_first, 1)
+
+        second = answer_service._grade_answer(self._context, answer)
+
+        self.assertEqual(self._quiz_calls, calls_after_first, "同卷同答第二次不得再调模型")
+        self.assertEqual(first, second, "缓存命中必须给出逐字一致的判分结果")
+
+    def test_changed_answer_bypasses_cache(self) -> None:
+        self._install_quiz_stub()
+        answer_service._grade_answer(self._context, "默认 dump.rdb，fork 出的子进程写快照")
+        calls_after_first = self._quiz_calls
+
+        answer_service._grade_answer(self._context, "完全不同的另一种作答")
+
+        self.assertEqual(self._quiz_calls, calls_after_first + 1, "作答变了必须重新调模型")
 
 
 if __name__ == "__main__":  # pragma: no cover

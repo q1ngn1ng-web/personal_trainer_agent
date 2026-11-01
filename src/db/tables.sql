@@ -341,6 +341,22 @@ CREATE TABLE IF NOT EXISTS mistake_analysis (
 CREATE INDEX IF NOT EXISTS idx_mistake_analysis_item
     ON mistake_analysis(training_id, item_key, id);
 
+-- 主观题判分结果缓存（change grading-consistency）：同一（模型, prompt 版本, 题目,
+-- 参考答案, 要点清单, 作答）的模型逐条判定视为确定值，命中即复用——重判可复现、省 token。
+-- 只缓存模型语义意见，分数与达标仍由规则层实时计算。
+CREATE TABLE IF NOT EXISTS grading_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key TEXT NOT NULL UNIQUE,
+    prompt_name TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    model TEXT NOT NULL,
+    output_json TEXT NOT NULL,
+    tokens_in INTEGER NOT NULL DEFAULT 0,
+    tokens_out INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL
+);
+
 -- 应用级开关（键值）。当前用于"是否开启错题分析"，避免为零散设置再开一套体系
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,

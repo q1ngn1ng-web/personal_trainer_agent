@@ -34,7 +34,7 @@ class TestExplanationService(unittest.TestCase):
         self._client = client_module
         self._orig_call_api = client_module._call_api
 
-        def fake_call_api(messages):  # 模拟真实 API：返回符合 schema 的纯 JSON
+        def fake_call_api(messages, *args, **kwargs):  # 模拟真实 API：返回符合 schema 的纯 JSON
             payload = {
                 "explanation": "RDB 快照是某一时刻内存数据集的完整拷贝，由子进程写入，默认文件名 dump.rdb。",
                 "source_refs": ["手册第 2 章"],

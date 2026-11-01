@@ -23,7 +23,7 @@ EXPECTED_TABLES = {
     # 十要素一代
     "trainings", "daily_logs", "baseline_history", "review_archives", "daily_log_tasks",
     # 共享基建
-    "llm_calls", "app_settings",
+    "llm_calls", "app_settings", "grading_cache",
     # 创建链
     "sources", "source_chunks", "edge_assessments", "training_paths", "path_stages", "training_items",
     # 执行链

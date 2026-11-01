@@ -19,9 +19,9 @@ from typing import Any
 from src.core.plan import local_today
 from src.db.models import Assessment, AssessmentItem
 from src.db.sqlite import get_connection
-from src.llm.client import complete
+from src.llm.client import DEEPSEEK_MODEL, PROMPT_REGISTRY, complete
 from src.llm.schema import SCHEMA_REGISTRY
-from src.services import attempt_service, memory_service, plan_service
+from src.services import attempt_service, grading_cache, memory_service, plan_service
 
 logger = logging.getLogger("src.services.quiz_service")
 
@@ -352,19 +352,37 @@ def grade_with_llm(
             else ""
         ),
     }
+    # 判分一致性（change grading-consistency）：整场测验以完整 items 载荷为缓存键，
+    # 同卷同答复用模型判定；记忆背景不进键（口径约定它不改判定）。
+    prompt_version = PROMPT_REGISTRY["quiz_grade"][1]
+    key = grading_cache.cache_key(DEEPSEEK_MODEL, prompt_version, variables["items"], None, None, None)
     output: dict[str, Any] = {}
-    try:
-        result = complete(
-            "quiz_grade",
-            variables,
-            schema=SCHEMA_REGISTRY["quiz_grade"],
-            training_id=int(assessment.training_id) if assessment else None,
-        )
-        output = result.get("output_json") or {}
-    except Exception as exc:
-        # 失败审计由客户端写入 llm_calls；判分不可用时走用户自评
-        logger.warning("grade_with_llm: LLM unavailable (%s), 需要用户自评", exc)
-        return False
+    cached = grading_cache.lookup(key)
+    if cached is not None:
+        output = cached
+    else:
+        try:
+            result = complete(
+                "quiz_grade",
+                variables,
+                schema=SCHEMA_REGISTRY["quiz_grade"],
+                training_id=int(assessment.training_id) if assessment else None,
+            )
+            output = result.get("output_json") or {}
+        except Exception as exc:
+            # 失败审计由客户端写入 llm_calls；判分不可用时走用户自评
+            logger.warning("grade_with_llm: LLM unavailable (%s), 需要用户自评", exc)
+            return False
+        if output:
+            grading_cache.store(
+                key,
+                prompt_version,
+                DEEPSEEK_MODEL,
+                output,
+                tokens_in=result.get("tokens_in", 0),
+                tokens_out=result.get("tokens_out", 0),
+                latency_ms=result.get("latency_ms", 0),
+            )
 
     verdicts: dict[str, dict[str, Any]] = {}
     for raw in output.get("results") or []:

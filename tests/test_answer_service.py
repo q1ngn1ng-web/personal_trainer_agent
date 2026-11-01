@@ -131,7 +131,7 @@ class TestAnswerService(unittest.TestCase):
         self.assertEqual(second["question"], first["question"])
 
     def test_ensure_question_uses_model_when_available(self) -> None:
-        def fake_call(messages):  # noqa: ANN001
+        def fake_call(messages, *args, **kwargs):  # noqa: ANN001
             payload = {
                 "question": "RDB 为什么用子进程写盘？",
                 "reference_answer": "为了不阻塞主进程，fork 后由子进程写快照。",
@@ -162,7 +162,7 @@ class TestAnswerService(unittest.TestCase):
         self.assertEqual(self._attempt_count(), 0, "没判分就不能写进客观表现")
 
     def test_submit_answer_grades_and_masters_after_two_passes(self) -> None:
-        def fake_grade(messages):  # noqa: ANN001
+        def fake_grade(messages, *args, **kwargs):  # noqa: ANN001
             payload = {
                 "results": [
                     {"item_key": self.task.item_key, "verdict": "pass", "reason": "答到 fork 子进程这一关键点"}

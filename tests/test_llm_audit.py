@@ -71,12 +71,12 @@ class TestLlmAudit(unittest.TestCase):
 
     def _ok_api(self) -> None:
         llm_client.DEEPSEEK_API_KEY = "test-key"
-        llm_client._call_api = lambda messages: (_TRAIN_QUESTION_OK, 12, 34)  # type: ignore[assignment]
+        llm_client._call_api = lambda messages, *args, **kwargs: (_TRAIN_QUESTION_OK, 12, 34)  # type: ignore[assignment]
 
     def _broken_api(self) -> None:
         llm_client.DEEPSEEK_API_KEY = "test-key"
 
-        def _boom(messages):
+        def _boom(messages, *args, **kwargs):
             raise llm_client.LLMError("simulated outage")
 
         llm_client._call_api = _boom  # type: ignore[assignment]
@@ -166,7 +166,7 @@ class TestLlmAudit(unittest.TestCase):
             },
             ensure_ascii=False,
         )
-        llm_client._call_api = lambda messages: (quiz_grade_ok, 5, 6)  # type: ignore[assignment]
+        llm_client._call_api = lambda messages, *args, **kwargs: (quiz_grade_ok, 5, 6)  # type: ignore[assignment]
         llm_client.complete(
             "quiz_grade",
             {"items": "[]", "memory_block": ""},

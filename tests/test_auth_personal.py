@@ -198,7 +198,7 @@ class TestApiAccessControl(unittest.TestCase):
         self._client_module = client_module
         self._orig_call_api = client_module._call_api
 
-        def _boom(messages):
+        def _boom(messages, *args, **kwargs):
             raise client_module.LLMError("offline test")
 
         client_module._call_api = _boom  # type: ignore[assignment]

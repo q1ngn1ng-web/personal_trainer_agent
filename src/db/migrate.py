@@ -269,6 +269,30 @@ def _ensure_question_points(conn: sqlite3.Connection) -> bool:
     return True
 
 
+_GRADING_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS grading_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key TEXT NOT NULL UNIQUE,
+    prompt_name TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    model TEXT NOT NULL,
+    output_json TEXT NOT NULL,
+    tokens_in INTEGER NOT NULL DEFAULT 0,
+    tokens_out INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL
+)
+"""
+
+
+def _ensure_grading_cache_table(conn: sqlite3.Connection) -> bool:
+    """建 ``grading_cache``（主观判分结果缓存）表。返回是否新建。"""
+    if _column_names(conn, "grading_cache"):
+        return False
+    conn.execute(_GRADING_CACHE_DDL)
+    return True
+
+
 _MEMORY_DDL: dict[str, str] = {
     "mistake_analysis": """
 CREATE TABLE IF NOT EXISTS mistake_analysis (
@@ -419,6 +443,8 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
 
     needs_memory = any(not _column_names(conn, table) for table in _MEMORY_DDL)
 
+    needs_grading_cache = not _column_names(conn, "grading_cache")
+
     account_columns = {
         table: cols for table, cols in _ACCOUNT_COLUMNS.items() if _column_names(conn, table)
     }
@@ -435,6 +461,7 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_grading
         or needs_memory
         or needs_account
+        or needs_grading_cache
     ):
         return applied
 
@@ -478,6 +505,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_memory:
                 for table in _ensure_memory_tables(conn):
                     applied.append(f"{table}:new_table")
+            if needs_grading_cache:
+                if _ensure_grading_cache_table(conn):
+                    applied.append("grading_cache:new_table")
             if needs_account:
                 for table, cols in account_columns.items():
                     added = _add_missing_columns(conn, table, cols)

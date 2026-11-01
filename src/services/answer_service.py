@@ -20,9 +20,9 @@ from typing import Any
 
 from src.core.plan import local_today
 from src.db.sqlite import get_connection
-from src.llm.client import complete
+from src.llm.client import DEEPSEEK_MODEL, PROMPT_REGISTRY, complete
 from src.llm.schema import SCHEMA_REGISTRY
-from src.services import attempt_service, memory_service, plan_service
+from src.services import attempt_service, grading_cache, memory_service, plan_service
 
 logger = logging.getLogger("src.services.answer_service")
 
@@ -294,19 +294,45 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
             context.get("training_id"), context.get("item_key")
         ),
     }
-    try:
-        result = complete(
-            "quiz_grade",
-            variables,
-            schema=SCHEMA_REGISTRY["quiz_grade"],
-            training_id=context.get("training_id"),
-            call_purpose="daily_grade",
-        )
+    # 判分一致性（change grading-consistency）：同（模型, prompt 版本, 题, 参考答案,
+    # 要点清单, 作答）直接复用缓存的模型判定——重判可复现、不重复付费；
+    # 记忆背景不进键（口径约定它不改判定）。
+    prompt_version = PROMPT_REGISTRY["quiz_grade"][1]
+    key = grading_cache.cache_key(
+        DEEPSEEK_MODEL,
+        prompt_version,
+        context.get("question"),
+        context.get("reference_answer"),
+        json.dumps(payload[0]["points"], ensure_ascii=False),
+        answer,
+    )
+    cached = grading_cache.lookup(key)
+    if cached is not None:
+        output = cached
+    else:
+        try:
+            result = complete(
+                "quiz_grade",
+                variables,
+                schema=SCHEMA_REGISTRY["quiz_grade"],
+                training_id=context.get("training_id"),
+                call_purpose="daily_grade",
+            )
+        except Exception as exc:
+            # 失败审计由客户端写入 llm_calls；判分不可用时 graded=False，不伪造对错
+            logger.warning("grade_answer: LLM unavailable (%s)", exc)
+            return outcome
         output = result.get("output_json") or {}
-    except Exception as exc:
-        # 失败审计由客户端写入 llm_calls；判分不可用时 graded=False，不伪造对错
-        logger.warning("grade_answer: LLM unavailable (%s)", exc)
-        return outcome
+        if output:
+            grading_cache.store(
+                key,
+                prompt_version,
+                DEEPSEEK_MODEL,
+                output,
+                tokens_in=result.get("tokens_in", 0),
+                tokens_out=result.get("tokens_out", 0),
+                latency_ms=result.get("latency_ms", 0),
+            )
     results = output.get("results") or []
     if not results:
         return outcome
