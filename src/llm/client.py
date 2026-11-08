@@ -39,6 +39,22 @@ def temperature_for(prompt_name: str) -> float:
     return PURPOSE_TEMPERATURES.get(str(prompt_name), DEFAULT_TEMPERATURE)
 
 
+#: 按用途路由模型（成本治理）：轻语义用途可路由到更便宜的小模型。
+#: 未配置 ``LLM_LIGHT_MODEL`` 时全部走主力模型（行为不变）；模型名按部署环境填
+#: （DeepSeek 侧如 deepseek-chat，阿里云兼容端点如 qwen-flash）。
+#: 护栏：**判分（quiz_grade）不路由**——人工一致率标注完成前不得更换判分模型
+#: （换模型 = 换判定分布，grading_cache 键含模型名、换模型自动失效重判）。
+LIGHT_PURPOSES: frozenset[str] = frozenset({"topic_validation", "keyword_generation"})
+
+
+def model_for(prompt_name: str) -> str:
+    """按用途返回目标模型；轻语义用途配置了轻模型时路由过去，其余恒为主力模型。"""
+    light = os.environ.get("LLM_LIGHT_MODEL", "").strip()
+    if light and str(prompt_name) in LIGHT_PURPOSES:
+        return light
+    return DEEPSEEK_MODEL
+
+
 class LLMError(Exception):
     """Raised when the underlying DeepSeek call fails or returns unusable output."""
 
@@ -65,7 +81,9 @@ def _render_prompt(template: str, variables: dict[str, Any]) -> str:
 
 
 def _call_api(
-    messages: list[dict[str, str]], temperature: float | None = None
+    messages: list[dict[str, str]],
+    temperature: float | None = None,
+    model: str | None = None,
 ) -> tuple[str, int, int]:
     if not DEEPSEEK_API_KEY:
         raise LLMError("DEEPSEEK_API_KEY is not set")
@@ -75,7 +93,7 @@ def _call_api(
         "Content-Type": "application/json",
     }
     body = {
-        "model": DEEPSEEK_MODEL,
+        "model": DEEPSEEK_MODEL if model is None else model,
         "messages": messages,
         "temperature": DEFAULT_TEMPERATURE if temperature is None else temperature,
         "max_tokens": DEFAULT_MAX_TOKENS,
@@ -138,7 +156,10 @@ def _run_once(prompt_name: str, variables: dict[str, Any]) -> dict[str, Any]:
     ]
 
     start = time.monotonic()
-    output_text, tokens_in, tokens_out = _call_api(messages, temperature_for(prompt_name))
+    model = model_for(prompt_name)
+    output_text, tokens_in, tokens_out = _call_api(
+        messages, temperature=temperature_for(prompt_name), model=model
+    )
     latency_ms = int((time.monotonic() - start) * 1000)
 
     output_json: dict[str, Any] | None = None
@@ -153,7 +174,7 @@ def _run_once(prompt_name: str, variables: dict[str, Any]) -> dict[str, Any]:
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
         "retry_count": 0,
-        "model": DEEPSEEK_MODEL,
+        "model": model,
         "prompt_name": prompt_name,
         "prompt_version": version,
     }
