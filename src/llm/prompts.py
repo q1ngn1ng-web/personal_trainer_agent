@@ -233,9 +233,12 @@ QUIZ_VARIANT_PROMPT: str = """你是测验出题助手。下面给出若干「�
 
 蓝本题列表：
 {blueprints}
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
 """
 
-QUIZ_VARIANT_PROMPT_VERSION: str = "v1.0.0"
+QUIZ_VARIANT_PROMPT_VERSION: str = "v1.1.0"
 
 QUIZ_GRADE_PROMPT: str = """你是测验评分员。请依据参考答案，判定用户对每道题的作答是否正确。
 
@@ -250,9 +253,12 @@ QUIZ_GRADE_PROMPT: str = """你是测验评分员。请依据参考答案，判�
 题目与作答：
 {items}
 {memory_block}
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
 """
 
-QUIZ_GRADE_PROMPT_VERSION: str = "v1.2.0"
+QUIZ_GRADE_PROMPT_VERSION: str = "v1.3.0"
 
 EXPLANATION_PROMPT: str = """你是题目解析助手。用户做错了这道题，请给出解析。
 
@@ -270,9 +276,12 @@ EXPLANATION_PROMPT: str = """你是题目解析助手。用户做错了这道题
 {attempt_history}
 资料片段：
 {source_text}
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
 """
 
-EXPLANATION_PROMPT_VERSION: str = "v1.1.0"
+EXPLANATION_PROMPT_VERSION: str = "v1.2.0"
 
 
 TRAIN_QUESTION_PROMPT: str = """你是训练出题助手。请针对给定知识点出一道**训练题**，并给出参考答案。
@@ -291,9 +300,12 @@ TRAIN_QUESTION_PROMPT: str = """你是训练出题助手。请针对给定知识
 5. **要点清单**：输出 `points`，每条含 `point_id`（p1、p2…）、`text`（这条要点是什么）、`weight`（0.5—5 的相对权重，越关键越大）、`is_required`（是否必答；由你建议，用户可改）。qa 至少 3 条；fill / choice 至少 1 条；
 6. **选择题**：输出 `options`，至少 3 个，每个含 `key`（A/B/C…）、`text`、`is_correct`，且**有且仅有一个** `is_correct` 为 true；干扰项 MUST 取自上面的资料片段，MUST NOT 编造资料里没有的说法；
 7. 只输出 JSON，字段见 schema。
+
+请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
+{schema}
 """
 
-TRAIN_QUESTION_PROMPT_VERSION: str = "v1.0.0"
+TRAIN_QUESTION_PROMPT_VERSION: str = "v1.1.0"
 
 
 PROMPT_REGISTRY: dict[str, tuple[str, str]] = {
