@@ -17,6 +17,7 @@ const sources = ref<SourceSummary[]>([]);
 const quiz = ref<QuizState | null>(null);
 const planRounds = ref<TodayTask[]>([]);
 const planLoading = ref(false);
+const regenerating = ref(false);
 const loading = ref(true);
 
 // 测验流程状态
@@ -41,6 +42,19 @@ function openItemInPlan(itemKey: string) {
 
 function toast(msg: string) {
   (window as any).__toast?.(msg);
+}
+
+async function regeneratePlan() {
+  regenerating.value = true;
+  try {
+    const res = await api.regeneratePlan(trainingId);
+    toast("已补齐，当前 " + res.count + " 轮");
+    await loadPlan();
+  } catch (e: any) {
+    toast(e.message || "操作失败");
+  } finally {
+    regenerating.value = false;
+  }
 }
 
 async function loadPlan() {
@@ -184,6 +198,9 @@ const typeLabel: Record<string, string> = {
           <div class="card-head">
             <div class="card-title">训练计划（全部轮次）</div>
             <span class="badge gray">{{ planRounds.length }} 项</span>
+            <button class="btn sm ghost" :disabled="regenerating" @click="regeneratePlan">
+              {{ regenerating ? '补齐中…' : '补齐缺失轮次' }}
+            </button>
           </div>
           <p style="font-size: 13px; color: var(--muted); margin-top: 6px;">
             按到期日排序。未到期的轮次也可以提前练——展开即可作答。

@@ -4,6 +4,8 @@ import { api, type AnswerResult, type TodayTask } from "../api";
 
 const props = defineProps<{ task: TodayTask; autoOpen?: boolean }>();
 const emit = defineEmits<{ refresh: [] }>();
+const cardEl = ref<HTMLElement | null>(null);
+const reanswer = ref(false);
 
 const expanded = ref(false);
 // autoOpen：从训练路径条目跳转过来时自动展开（并懒加载题目）
@@ -13,6 +15,9 @@ watch(
     if (v && props.task.status === "planned") {
       expanded.value = true;
       void ensureQuestionLoaded();
+      requestAnimationFrame(() =>
+        cardEl.value?.scrollIntoView({ behavior: "smooth", block: "center" })
+      );
     }
   },
   { immediate: true },
@@ -87,6 +92,7 @@ async function submit() {
   submitting.value = true;
   try {
     result.value = await api.answer(props.task.plan_id, value);
+    reanswer.value = false;
     emit("refresh");
   } catch (e: any) {
     toast(e.message || "提交失败");
@@ -130,7 +136,7 @@ async function skip() {
 </script>
 
 <template>
-  <div class="task">
+  <div ref="cardEl" class="task">
     <div class="task-head" @click="expand">
       <span class="t-title">{{ task.title }}</span>
       <span class="t-meta">
@@ -148,7 +154,7 @@ async function skip() {
       <template v-else>
         <div v-if="question" class="question-box">{{ question }}</div>
 
-        <template v-if="!done">
+        <template v-if="!done || reanswer">
           <div v-if="isChoice && optionsList.length" class="question-options">
             <label
               v-for="opt in optionsList"
@@ -184,7 +190,12 @@ async function skip() {
             <div v-if="task.reference_answer" class="ref-answer"><b>参考答案</b>：{{ task.reference_answer }}</div>
           </template>
         </div>
-        <div v-else-if="done" class="verdict-panel none">已记录练习，未系统判分</div>
+        <div v-else-if="done" class="verdict-panel none">
+          已记录练习，未系统判分
+          <div v-if="task.status === 'practiced' && !task.verdict && !reanswer" style="margin-top: 8px;">
+            <button class="btn ghost" @click="reanswer = true">✍️ 重新作答并判分</button>
+          </div>
+        </div>
 
         <div style="margin-top: 10px;">
           <button class="btn text" :disabled="explaining" @click="loadExplanation">

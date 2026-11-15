@@ -389,6 +389,17 @@ def training_path(training_id: int, viewer: Viewer | None = Depends(current_view
     }
 
 
+@app.post("/api/trainings/{training_id}/plan/regenerate")
+def regenerate_plan(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """补齐缺失的训练轮次（幂等）：路径重生成后新增的训练项，由此补入计划。"""
+    _load_training_for(viewer, training_id)
+    summary = plan_service.generate_plan(int(training_id))
+    rounds = plan_service.training_plan_items(int(training_id))
+    return {"ok": True, "count": len(rounds), "created": summary.created}
+
+
 @app.get("/api/trainings/{training_id}/plan-items")
 def training_plan_items(
     training_id: int, viewer: Viewer | None = Depends(current_viewer)

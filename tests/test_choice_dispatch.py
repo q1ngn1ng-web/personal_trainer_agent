@@ -164,6 +164,36 @@ class TestChoiceDispatch(_ObjectiveDispatchBase):
         self.assertEqual(outcome["score"], 0.0)
         self.assertIn("选项错误", outcome["reason"])
 
+    def test_reanswer_practiced_unjudged_then_judged(self) -> None:
+        """「已记录练习，未系统判分」的历史卡（practice-only 产生）：重新作答后被正常判分。"""
+        from src.services import answer_service
+
+        answer_service.ensure_question(self.task.plan_id)
+        answer_service.mark_practiced_only(self.task.plan_id)
+        rounds = plan_service.training_plan_items(self.training.id)
+        self.assertEqual(rounds[0].status, "practiced")
+        self.assertIsNone(rounds[0].verdict, "只练不判的历史卡没有判定")
+
+        # 重新作答：choice 走确定性判分（零 LLM），补上判定
+        second = answer_service.submit_answer(self.task.plan_id, "B")
+        self.assertTrue(second["graded"])
+        self.assertEqual(second["verdict"], "pass")
+
+        conn = queries.get_connection()
+        try:
+            attempts = conn.execute(
+                "SELECT COUNT(*) FROM practice_attempts WHERE training_id = ? AND item_key = ?",
+                (self.training.id, self.task.item_key),
+            ).fetchone()[0]
+            item = conn.execute(
+                "SELECT verdict, graded_by FROM plan_items WHERE id = ?", (self.task.plan_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(attempts, 1, "只练不判不落 attempt；判分的那次落一条")
+        self.assertEqual(item["verdict"], "pass")
+        self.assertEqual(item["graded_by"], "rule")
+
 
 class TestFillDispatch(_ObjectiveDispatchBase):
     PAYLOAD_FACTORY = staticmethod(_fill_payload)
@@ -259,6 +289,22 @@ class TestPlanItemsEndpoint(unittest.TestCase):
             self.assertEqual(rounds_after[0].status, "practiced", "提前作答后轮次状态应推进")
         finally:
             client_module._call_api = self._orig_call_api
+
+    def test_regenerate_restores_missing_rounds(self) -> None:
+        """路径重生成后新增的训练项缺轮次：regenerate 端点幂等补齐。"""
+        conn = queries.get_connection()
+        try:
+            conn.execute("DELETE FROM plan_items WHERE training_id = ?", (self.training.id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(len(plan_service.training_plan_items(self.training.id)), 0)
+
+        resp = self.client.post(f"/api/trainings/{self.training.id}/plan/regenerate")
+        self.assertEqual(resp.status_code, 200)
+
+        rounds = plan_service.training_plan_items(self.training.id)
+        self.assertEqual(len(rounds), 5, "补齐后应恢复 5 轮（OR IGNORE 幂等，不动已有轮次）")
 
 
 if __name__ == "__main__":  # pragma: no cover

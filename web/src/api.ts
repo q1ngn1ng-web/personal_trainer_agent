@@ -228,6 +228,11 @@ export const api = {
       "/api/plan-items/" + planId + "/question",
       { method: "POST" }
     ),
+  regeneratePlan: (trainingId: number) =>
+    request<{ ok: boolean; count: number; created: number }>(
+      "/api/trainings/" + trainingId + "/plan/regenerate",
+      { method: "POST" }
+    ),
   planItems: (trainingId: number) =>
     request<{ count: number; items: TodayTask[] }>(
       "/api/trainings/" + trainingId + "/plan-items"
