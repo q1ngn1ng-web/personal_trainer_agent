@@ -288,6 +288,24 @@ export const api = {
       "/api/plan-items/" + planId + "/question",
       { method: "POST" }
     ),
+  createShareLink: (trainingId: number) =>
+    request<{ token: string; created: boolean; url: string }>(
+      "/api/trainings/" + trainingId + "/share/link",
+      { method: "POST" }
+    ),
+  sharePreview: (token: string) =>
+    request<{
+      training_id: number;
+      topic: string;
+      org_id: number;
+      stages: { ordinal: number; title: string; goal: string | null; estimated_minutes: number; status: string; items: { title: string; knowledge_point: string | null; item_type: string | null }[] }[];
+      acceptance: unknown;
+      keywords: string[];
+    }>("/api/share/" + token),
+  pullShare: (token: string) =>
+    request<{ training_id: number; created: boolean }>("/api/share/" + token + "/pull", {
+      method: "POST",
+    }),
   regeneratePlan: (trainingId: number) =>
     request<{ ok: boolean; count: number; created: number }>(
       "/api/trainings/" + trainingId + "/plan/regenerate",

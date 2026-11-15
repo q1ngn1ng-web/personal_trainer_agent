@@ -103,6 +103,22 @@ async function loadPlan() {
   }
 }
 
+const shareUrl = ref("");
+const sharing = ref(false);
+async function createShare() {
+  sharing.value = true;
+  try {
+    const res = await api.createShareLink(trainingId);
+    shareUrl.value = location.origin + res.url;
+    await navigator.clipboard.writeText(shareUrl.value);
+    toast("分享链接已复制，发给组织内成员即可");
+  } catch (e: any) {
+    toast(e.message || "分享失败");
+  } finally {
+    sharing.value = false;
+  }
+}
+
 async function load() {
   loading.value = true;
   try {
