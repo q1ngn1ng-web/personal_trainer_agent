@@ -46,7 +46,7 @@ p { margin: 0; }
 a { color: var(--brand); text-decoration: none; }
 
 /* ---- 布局骨架 ---- */
-.shell { display: flex; min-height: 100vh; }
+.shell { display: flex; min-height: 100vh; min-width: 1080px; }
 .sidebar {
   width: 232px; flex-shrink: 0; border-right: 1px solid var(--line);
   background: var(--surface); padding: 20px 14px; position: sticky; top: 0;
@@ -96,14 +96,6 @@ a { color: var(--brand); text-decoration: none; }
 }
 .tab-item.active { color: var(--brand-strong); }
 .tab-item .ico { font-size: 19px; }
-
-@media (max-width: 768px) {
-  .sidebar { display: none; }
-  .mobile-bar { display: flex; }
-  .tabbar { display: flex; }
-  .main { padding: 16px 16px 88px; }
-  .page-title { font-size: 20px; }
-}
 
 /* ---- 卡片与统计 ---- */
 .card {
@@ -300,11 +292,6 @@ a { color: var(--brand); text-decoration: none; }
   color: var(--text); cursor: pointer; text-decoration: none;
 }
 .menu-item:hover { background: var(--surface-2); }
-
-@media (max-width: 768px) {
-  .topbar { display: none; }
-  .main { padding-top: 20px; }
-}
 
 /* ---- 向导 ---- */
 .wizard-steps { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
