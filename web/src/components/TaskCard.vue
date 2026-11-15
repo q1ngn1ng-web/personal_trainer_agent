@@ -23,7 +23,7 @@ watch(
   { immediate: true },
 );
 const question = ref<string | null>(props.task.question);
-const questionMeta = ref<{ question_type: string | null; options: { key: string; text: string }[] | null } | null>(null);
+const questionMeta = ref<{ question_type: string | null; options: { key: string; text: string }[] | null; reference_answer?: string } | null>(null);
 const loadingQ = ref(false);
 const answer = ref(props.task.answer_text || "");
 const selectedKey = ref("");
@@ -191,7 +191,18 @@ async function skip() {
           </template>
         </div>
         <div v-else-if="done" class="verdict-panel none">
-          已记录练习，未系统判分
+          <template v-if="question">
+            <div class="question-box">{{ question }}</div>
+            <div v-if="questionMeta?.reference_answer" class="ref-answer"><b>参考答案</b>：{{ questionMeta.reference_answer }}</div>
+          </template>
+          <template v-else>
+            该轮次没有存储题目（「只练不判」的记录不会自动出题）
+            <div style="margin-top: 8px;">
+              <button class="btn ghost" :disabled="loadingQ" @click="ensureQuestionLoaded">
+                {{ loadingQ ? '生成中…' : '📝 生成题目查看' }}
+              </button>
+            </div>
+          </template>
           <div v-if="task.status === 'practiced' && !task.verdict && !reanswer" style="margin-top: 8px;">
             <button class="btn ghost" @click="reanswer = true">✍️ 重新作答并判分</button>
           </div>

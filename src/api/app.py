@@ -490,6 +490,7 @@ def plan_item_question(
         options = None
     return {
         "question": question["question"],
+        "reference_answer": question.get("reference_answer") or "",
         "source": question.get("source"),
         "question_type": question.get("question_type"),
         "options": options,

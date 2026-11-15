@@ -169,12 +169,12 @@ a { color: var(--brand); text-decoration: none; }
 
 /* ---- 任务卡 ---- */
 .task + .task { margin-top: 10px; }
-.task { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
-.task-head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer; user-select: none; }
+.task { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; box-shadow: var(--shadow); }
+.task-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px 6px; cursor: pointer; user-select: none; }
 .task-head:hover { background: var(--surface-2); }
 .task-head .t-title { font-weight: 600; font-size: 14.5px; flex: 1; min-width: 0; }
 .task-head .t-meta { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
-.task-body { padding: 0 16px 16px; border-top: 1px dashed var(--line); padding-top: 14px; max-height: 540px; overflow-y: auto; }
+.task-body { padding: 0 20px 16px; border-top: 1px dashed var(--line); padding-top: 14px; max-height: 540px; overflow-y: auto; }
 /* 切换 section 时内容区高度稳定，避免页面跳动 */
 .section-content { min-height: 640px; }
 .question-box {
