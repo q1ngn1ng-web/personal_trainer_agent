@@ -233,7 +233,13 @@ a { color: var(--brand); text-decoration: none; }
 .error-tip { background: var(--danger-weak); color: var(--danger); font-size: 13px; border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 12px; }
 .ok-tip { background: var(--ok-weak); color: var(--ok); font-size: 13px; border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 12px; }
 
-.section-switch { display: flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 4px; margin-bottom: 16px; }
+.section-switch {
+  position: sticky; top: 56px; z-index: 15; /* 钉在 topbar（56px）正下方，滚动不消失 */
+  display: flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 12px; padding: 4px; margin-bottom: 16px;
+  /* 页面底色实心阴影盖住标签栏下方的 16px 空隙，滚动时内容不从缝里穿过 */
+  box-shadow: 0 18px 0 -2px var(--bg);
+}
 .section-switch button {
   flex: 1; border: none; background: transparent; font-family: inherit; font-size: 14px;
   padding: 7px 0; border-radius: 9px; color: var(--muted); cursor: pointer; font-weight: 500;
