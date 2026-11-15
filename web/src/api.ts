@@ -52,6 +52,13 @@ export type TodayTask = {
   status: "planned" | "practiced" | "skipped";
 };
 
+export type PointSpec = {
+  point_id?: string;
+  text: string;
+  weight: number;
+  is_required: boolean;
+};
+
 export type QuestionOption = { key: string; text: string; is_correct?: boolean };
 
 export type TodayGroup = {
@@ -276,6 +283,7 @@ export const api = {
       source: string;
       question_type: string | null;
       options: QuestionOption[] | null;
+      points?: PointSpec[];
     }>(
       "/api/plan-items/" + planId + "/question",
       { method: "POST" }
@@ -312,6 +320,11 @@ export const api = {
     }),
   skip: (planId: number) =>
     request<{ ok: boolean }>("/api/plan-items/" + planId + "/skip", { method: "POST" }),
+  editPoints: (planId: number, points: PointSpec[]) =>
+    request<{ ok: boolean; points: PointSpec[] }>(
+      "/api/plan-items/" + planId + "/points",
+      { method: "PATCH", body: JSON.stringify({ points }) }
+    ),
   explanation: (planId: number) =>
     request<{
       ok: boolean;

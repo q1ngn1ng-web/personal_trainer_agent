@@ -160,7 +160,7 @@ class TestLlmAudit(unittest.TestCase):
                         "item_key": "abc123",
                         "verdict": "pass",
                         "reason": "覆盖了必答要点",
-                        "point_verdicts": [{"point_id": "p1", "verdict": "hit"}],
+                        "point_verdicts": [{"point_id": "p1", "verdict": "hit", "evidence": "快照"}],
                     }
                 ]
             },

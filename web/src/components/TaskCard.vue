@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { api, type AnswerResult, type TodayTask } from "../api";
+import { api, type AnswerResult, type PointSpec, type TodayTask } from "../api";
 
 const props = defineProps<{ task: TodayTask; autoOpen?: boolean }>();
 const emit = defineEmits<{ refresh: [] }>();
@@ -29,6 +29,11 @@ const answer = ref(props.task.answer_text || "");
 const selectedKey = ref("");
 const submitting = ref(false);
 const result = ref<AnswerResult | null>(null);
+const showPoints = ref(false);
+const pointsLoaded = ref(false);
+const savedPoints = ref<PointSpec[]>([]);
+const draftPoints = ref<PointSpec[]>([]);
+const savingPoints = ref(false);
 const explaining = ref(false);
 const explanation = ref<{ text: string; source_refs: string[]; attempts_used: number } | null>(null);
 
@@ -76,10 +81,52 @@ async function ensureQuestionLoaded() {
     const res = await api.question(props.task.plan_id);
     question.value = res.question;
     questionMeta.value = { question_type: res.question_type, options: res.options };
+    if (res.points) {
+      savedPoints.value = res.points;
+      pointsLoaded.value = true;
+    }
   } catch (e: any) {
     toast(e.message || "出题失败");
   } finally {
     loadingQ.value = false;
+  }
+}
+
+async function togglePoints() {
+  showPoints.value = !showPoints.value;
+  if (showPoints.value && !pointsLoaded.value) {
+    try {
+      const res = await api.question(props.task.plan_id);
+      savedPoints.value = res.points || [];
+      pointsLoaded.value = true;
+    } catch (e: any) {
+      toast(e.message || "读取要点失败");
+    }
+  }
+  draftPoints.value = savedPoints.value.map((p) => ({
+    text: p.text,
+    weight: Number(p.weight) || 1,
+    is_required: !!p.is_required,
+  }));
+  if (showPoints.value && !draftPoints.value.length) {
+    draftPoints.value = [{ text: "", weight: 1, is_required: false }];
+  }
+}
+
+async function savePoints() {
+  savingPoints.value = true;
+  try {
+    const res = await api.editPoints(
+      props.task.plan_id,
+      draftPoints.value.map((p) => ({ text: p.text, weight: p.weight, is_required: p.is_required }))
+    );
+    savedPoints.value = res.points;
+    showPoints.value = false;
+    toast("要点已更新，之后的判分按新要点执行");
+  } catch (e: any) {
+    toast(e.message || "保存失败");
+  } finally {
+    savingPoints.value = false;
   }
 }
 
@@ -153,6 +200,29 @@ async function skip() {
       <div v-if="loadingQ" class="loading-center" style="padding: 18px 0;"><span class="spinner"></span></div>
       <template v-else>
         <div v-if="question" class="question-box">{{ question }}</div>
+
+        <div v-if="question && !done" style="margin: 6px 0 2px;">
+          <button class="btn text" @click="togglePoints">
+            {{ showPoints ? '收起要点' : '要点清单（判分依据，答前可修正）' }}
+          </button>
+          <div v-if="showPoints" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+            <div v-for="(p, i) in draftPoints" :key="i" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+              <input v-model="p.text" class="input" style="flex: 1; min-width: 180px;" :placeholder="'要点 ' + (i + 1)" />
+              <input v-model.number="p.weight" class="input" type="number" min="0.5" max="5" step="0.5" style="width: 70px;" title="权重 0.5-5" />
+              <label style="font-size: 12px; display: flex; gap: 4px; align-items: center; white-space: nowrap;">
+                <input v-model="p.is_required" type="checkbox" />必答
+              </label>
+              <button class="btn text" @click="draftPoints.splice(i, 1)">删</button>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn ghost" @click="draftPoints.push({ text: '', weight: 1, is_required: false })">加一条</button>
+              <button class="btn primary" :disabled="savingPoints" @click="savePoints">
+                {{ savingPoints ? '保存中…' : '保存要点' }}
+              </button>
+            </div>
+            <p style="color: var(--faint); font-size: 12px; margin: 0;">首次判分后要点锁定；编辑只影响之后的判分，不改历史作答。</p>
+          </div>
+        </div>
 
         <template v-if="!done || reanswer">
           <div v-if="isChoice && optionsList.length" class="question-options">

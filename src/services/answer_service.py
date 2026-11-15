@@ -268,6 +268,7 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
     ``score`` / ``point_results`` 仅在要点判分路径下有值（客观表现可解释的来源）。
     """
     from src.services.grading_service import (
+    build_point_results,
         MISSING,
         POINT_VERDICTS,
         PointSpec,
@@ -380,6 +381,7 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
 
     # 要点判分路径：模型逐条判定，规则层算分与达标（模型不得直接决定 pass/fail）
     verdicts: dict[str, str] = {}
+    evidences: dict[str, str] = {}
     for point in entry.get("point_verdicts") or []:
         if not isinstance(point, dict):
             continue
@@ -387,6 +389,7 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
         verdict = str(point.get("verdict") or "")
         if pid and verdict in POINT_VERDICTS:
             verdicts[pid] = verdict
+            evidences[pid] = str(point.get("evidence") or "")
     if specs and verdicts:
         graded = grade_question(
             "qa",
@@ -394,16 +397,13 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
             points=specs,
             point_verdicts=verdicts,
         )
-        point_results = json.dumps(
-            [
-                {
-                    "point_id": spec.point_id,
-                    "verdict": verdicts.get(spec.point_id, MISSING),
-                    "text": spec.text,
-                }
-                for spec in specs
-            ],
-            ensure_ascii=False,
+        # dict 格式 + 证据快照（grading-rubric-hardening）：同时修复此前 list 格式
+        # 导致 derive_mistake_reasons 不认、错因不落库的断链
+        point_results = build_point_results(
+            graded,
+            text_by_pid={spec.point_id: spec.text for spec in specs},
+            evidence_by_pid=evidences,
+            answer_text=answer,
         )
         outcome.update(
             graded=True,
@@ -424,6 +424,72 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
     )
     return outcome
 
+
+class PointsLockedError(Exception):
+    """该计划项已有判分作答（graded attempt），要点已锁定——首判前才可编辑。"""
+
+
+def update_points(
+    plan_id: int,
+    points: list[dict[str, Any]],
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """编辑该计划项的要点清单（grading-rubric-hardening：首判前可修 rubric）。
+
+    规则：必须有题目（先出题）；存在 source='llm' 的判分作答即锁定；
+    重新编号 p1..pN；weight 限 0.5-5；返回归一化后的清单。
+    编辑只影响后续判分，MUST NOT 触碰历史作答。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT question FROM plan_items WHERE id = ?", (int(plan_id),)
+        ).fetchone()
+        if row is None:
+            raise ValueError("计划项不存在")
+        if not str(row["question"] or "").strip():
+            raise ValueError("该任务还没有题目，先出题再编辑要点")
+        locked = active.execute(
+            "SELECT 1 FROM practice_attempts WHERE plan_id = ? AND source = 'llm' LIMIT 1",
+            (int(plan_id),),
+        ).fetchone()
+        if locked:
+            raise PointsLockedError("该题已判分，要点已锁定不可编辑")
+        if not points:
+            raise ValueError("至少保留一条要点")
+
+        normalized: list[dict[str, Any]] = []
+        for idx, entry in enumerate(points, start=1):
+            text = str(entry.get("text") or "").strip()
+            if not text:
+                raise ValueError(f"第 {idx} 条要点文本不能为空")
+            try:
+                weight = float(entry.get("weight", 1.0))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"第 {idx} 条要点权重必须是数字") from exc
+            if not 0.5 <= weight <= 5.0:
+                raise ValueError(f"第 {idx} 条要点权重需在 0.5-5 之间")
+            normalized.append(
+                {
+                    "point_id": f"p{idx}",
+                    "text": text,
+                    "weight": weight,
+                    "is_required": bool(entry.get("is_required", False)),
+                }
+            )
+
+        active.execute(
+            "UPDATE plan_items SET points = ? WHERE id = ?",
+            (json.dumps(normalized, ensure_ascii=False), int(plan_id)),
+        )
+        if own:
+            active.commit()
+        return normalized
+    finally:
+        if own:
+            active.close()
 
 def submit_answer(
     plan_id: int,

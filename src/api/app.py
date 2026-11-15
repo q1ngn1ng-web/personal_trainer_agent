@@ -103,6 +103,16 @@ class VerifyBody(BaseModel):
     token: str
 
 
+class PointEditBody(BaseModel):
+    text: str
+    weight: float = 1.0
+    is_required: bool = False
+
+
+class PointsEditBody(BaseModel):
+    points: list[PointEditBody]
+
+
 class AnswerBody(BaseModel):
     answer: str
 
@@ -530,7 +540,23 @@ def plan_item_question(
         "source": question.get("source"),
         "question_type": question.get("question_type"),
         "options": options,
+        "points": question.get("points") or [],
     }
+
+
+@app.patch("/api/plan-items/{plan_id}/points")
+def edit_plan_item_points(
+    plan_id: int, body: PointsEditBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """编辑该题要点（首判前可修 rubric；已判分 409 锁定）。grading-rubric-hardening。"""
+    _guard_task(viewer, plan_id)
+    try:
+        points = answer_service.update_points(int(plan_id), [p.model_dump() for p in body.points])
+    except answer_service.PointsLockedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"ok": True, "points": points}
 
 
 @app.post("/api/plan-items/{plan_id}/answer")
@@ -763,6 +789,73 @@ def _assert_action(viewer: Viewer, action: Any) -> None:
         assert_can(viewer, action)
     except Exception as exc:  # PermissionDenied
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.post("/api/trainings/{training_id}/share/link")
+def create_share_link(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """生成/返回该训练的分享链接（幂等；仅 owner 或组织管理员）。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要登录")
+    if int(training.owner_user_id or 0) != int(viewer.user_id) and not can(
+        viewer.role, "publish_assignment"
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有训练创建者可以分享")
+    from src.services.training_clone_service import create_share_link
+
+    result = create_share_link(int(training_id), int(viewer.user_id))
+    return {"token": result["token"], "created": result["created"],
+            "url": f"/share/{result['token']}"}
+
+
+@app.get("/api/share/{token}")
+def share_preview(token: str, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    """分享链接预览：只含计划结构与验收标准（不含题库/参考答案/作答数据）。"""
+    from src.services.training_clone_service import get_share_preview
+
+    try:
+        return get_share_preview(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.post("/api/share/{token}/pull")
+def share_pull(token: str, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    """拉取为独立副本（同组织成员；幂等）。"""
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="需要登录")
+    from src.services.training_clone_service import pull_by_token
+
+    try:
+        result = pull_by_token(token, int(viewer.user_id))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return result
+
+
+class ShareMembersBody(BaseModel):
+    user_ids: list[int]
+
+
+@app.post("/api/trainings/{training_id}/share/members")
+def share_to_members(
+    training_id: int, body: ShareMembersBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """把计划（连题库）直接复制推送给指定成员（分享即复制）。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要登录")
+    if int(training.owner_user_id or 0) != int(viewer.user_id) and not can(
+        viewer.role, "publish_assignment"
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有训练创建者可以推送")
+    from src.services.training_clone_service import push_to_members
+
+    return push_to_members(int(training_id), int(viewer.user_id), body.user_ids)
 
 
 @app.get("/api/trainings/{training_id}/review/weekly")

@@ -382,8 +382,11 @@ QUIZ_GRADE_SCHEMA: dict[str, Any] = {
                                     "type": "string",
                                     "enum": ["hit", "partial", "wrong", "missing"],
                                 },
+                                # 证据引用（grading-rubric-hardening）：hit/partial/wrong
+                                # 必填——一字不改摘录作答原文；missing 填空字符串
+                                "evidence": {"type": "string"},
                             },
-                            "required": ["point_id", "verdict"],
+                            "required": ["point_id", "verdict", "evidence"],
                             "additionalProperties": False,
                         },
                     },

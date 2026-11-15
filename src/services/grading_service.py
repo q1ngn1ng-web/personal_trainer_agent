@@ -367,6 +367,76 @@ def grade_question(
     )
 
 
+# ------------------------------------------------- 证据引用（grading-rubric-hardening）
+
+#: 归一化只保留字母数字与中日韩字符——标点、空白、大小写差异不参与证据比对
+_NORMALIZE_RE = re.compile(r"[^0-9a-z\u4e00-\u9fff]+")
+
+
+def normalize_for_evidence(text: Any) -> str:
+    """证据比对用的归一化：小写、去一切非字母数字/非中文字符。"""
+    return _NORMALIZE_RE.sub("", str(text or "").lower())
+
+
+def verify_evidence(answer_text: Any, evidence: Any) -> bool:
+    """核验证据片段确实摘自用户作答（归一化后子串匹配）。
+
+    仅作审计标记：返回 False **不改变**判定与得分（见 change 设计 D1——
+    模型引用常微改写，先积累 evidence_ok 数据再定降级策略）。
+    """
+    needle = normalize_for_evidence(evidence)
+    if not needle:
+        return False
+    return needle in normalize_for_evidence(answer_text)
+
+
+def build_point_results(
+    result: GradeResult,
+    *,
+    text_by_pid: Mapping[str, str] | None = None,
+    evidence_by_pid: Mapping[str, str] | None = None,
+    answer_text: str = "",
+) -> str:
+    """把判分结果组装成 dict 格式的 ``point_results``（practice_attempts 落库用）。
+
+    每条 detail 快照 point_text 与 evidence，并记 ``evidence_ok``：
+    hit/partial/wrong → bool（归一化核验）；missing → None（无证据不适用）。
+    证据**不参与**得分——score/coverage/correctness 全部来自 ``result`` 本身。
+    """
+    texts = dict(text_by_pid or {})
+    evidences = dict(evidence_by_pid or {})
+    detail: list[dict[str, Any]] = []
+    for entry in result.detail:
+        pid = str(entry.get("point_id") or "")
+        verdict = str(entry.get("verdict") or MISSING)
+        if verdict == MISSING:
+            evidence, evidence_ok = "", None
+        else:
+            evidence = str(evidences.get(pid, "") or "")
+            evidence_ok = verify_evidence(answer_text, evidence)
+        detail.append(
+            {
+                "point_id": pid,
+                "text": str(texts.get(pid, "")),
+                "verdict": verdict,
+                "weight": entry.get("weight"),
+                "required": bool(entry.get("required")),
+                "evidence": evidence,
+                "evidence_ok": evidence_ok,
+            }
+        )
+    return json.dumps(
+        {
+            "coverage": result.coverage,
+            "correctness": result.correctness,
+            "missing": list(result.missing),
+            "incorrect": list(result.incorrect),
+            "required_missing": list(result.required_missing),
+            "detail": detail,
+        },
+        ensure_ascii=False,
+    )
+
 # ---------------------------------------------------------------- 持久化
 
 

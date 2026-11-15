@@ -46,8 +46,8 @@ GRADE_ALL_HIT = {
             "item_key": "PLACEHOLDER",
             "verdict": "pass",
             "point_verdicts": [
-                {"point_id": "p1", "verdict": "hit"},
-                {"point_id": "p2", "verdict": "hit"},
+                {"point_id": "p1", "verdict": "hit", "evidence": "fork 创建子进程"},
+                {"point_id": "p2", "verdict": "hit", "evidence": "返回进程 id"},
             ],
             "reason": "要点齐全",
         }
@@ -60,8 +60,8 @@ GRADE_REQUIRED_MISSING = {
             "item_key": "PLACEHOLDER",
             "verdict": "pass",  # 模型整体说 pass——规则层必须否决（必答要点缺失）
             "point_verdicts": [
-                {"point_id": "p1", "verdict": "missing"},
-                {"point_id": "p2", "verdict": "hit"},
+                {"point_id": "p1", "verdict": "missing", "evidence": ""},
+                {"point_id": "p2", "verdict": "hit", "evidence": "返回进程 id"},
             ],
             "reason": "提到了子进程，但没说文件名",
         }
@@ -211,7 +211,7 @@ class TestTrainPointsWiring(unittest.TestCase):
             conn.close()
         self.assertEqual(attempt["result"], "fail")
         self.assertIsNotNone(attempt["score"])
-        detail = json.loads(attempt["point_results"])
+        detail = json.loads(attempt["point_results"])["detail"]
         self.assertEqual(detail[0]["verdict"], "missing", "p1 的判定必须落进 point_results")
 
     def test_all_points_hit_passes_with_score(self) -> None:

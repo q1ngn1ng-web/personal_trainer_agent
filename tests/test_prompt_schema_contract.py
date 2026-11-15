@@ -39,7 +39,7 @@ class TestPromptSchemaContract(unittest.TestCase):
     def test_rescued_templates_carry_placeholder_and_bumped_version(self) -> None:
         expected = {
             "train_question": "v1.1.0",
-            "quiz_grade": "v1.3.0",
+            "quiz_grade": "v1.4.0",  # v1.4.0 = 证据引用判分（grading-rubric-hardening）
             "quiz_variant": "v1.1.0",
             "explanation": "v1.2.0",
         }
