@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { api, type AnswerResult, type TodayTask } from "../api";
 
-const props = defineProps<{ task: TodayTask }>();
+const props = defineProps<{ task: TodayTask; autoOpen?: boolean }>();
 const emit = defineEmits<{ refresh: [] }>();
 
 const expanded = ref(false);
+// autoOpen：从训练路径条目跳转过来时自动展开（并懒加载题目）
+watch(
+  () => props.autoOpen,
+  (v) => {
+    if (v && props.task.status === "planned") {
+      expanded.value = true;
+      void ensureQuestionLoaded();
+    }
+  },
+  { immediate: true },
+);
 const question = ref<string | null>(props.task.question);
 const questionMeta = ref<{ question_type: string | null; options: { key: string; text: string }[] | null } | null>(null);
 const loadingQ = ref(false);
@@ -48,19 +59,22 @@ function toast(msg: string) {
   (window as any).__toast?.(msg);
 }
 
-async function expand() {
+function expand() {
   expanded.value = !expanded.value;
-  if (expanded.value && !question.value && !loadingQ.value) {
-    loadingQ.value = true;
-    try {
-      const res = await api.question(props.task.plan_id);
-      question.value = res.question;
-      questionMeta.value = { question_type: res.question_type, options: res.options };
-    } catch (e: any) {
-      toast(e.message || "出题失败");
-    } finally {
-      loadingQ.value = false;
-    }
+  if (expanded.value) void ensureQuestionLoaded();
+}
+
+async function ensureQuestionLoaded() {
+  if (question.value || loadingQ.value) return;
+  loadingQ.value = true;
+  try {
+    const res = await api.question(props.task.plan_id);
+    question.value = res.question;
+    questionMeta.value = { question_type: res.question_type, options: res.options };
+  } catch (e: any) {
+    toast(e.message || "出题失败");
+  } finally {
+    loadingQ.value = false;
   }
 }
 

@@ -28,6 +28,16 @@ const manualItems = ref<AssessmentSubmit | null>(null);
 const manualVerdicts = ref<Record<number, string>>({});
 const outcome = ref<QuizOutcome | null>(null);
 const openStages = ref<Set<number>>(new Set());
+const openPlanId = ref<number | null>(null);
+
+// 从训练路径条目跳转到完整计划，并自动展开该训练项最早的未完成轮次
+function openItemInPlan(itemKey: string) {
+  section.value = "plan";
+  const first =
+    planRounds.value.find((r) => r.item_key === itemKey && r.status === "planned") ||
+    planRounds.value.find((r) => r.item_key === itemKey);
+  openPlanId.value = first?.plan_id ?? null;
+}
 
 function toast(msg: string) {
   (window as any).__toast?.(msg);
@@ -166,6 +176,8 @@ const typeLabel: Record<string, string> = {
         <button :class="{ active: section === 'quiz' }" @click="section = 'quiz'">测验达标</button>
       </div>
 
+      <div class="section-content">
+
       <!-- ============ 完整计划（含提前练） ============ -->
       <template v-if="section === 'plan'">
         <div class="card">
@@ -218,7 +230,7 @@ const typeLabel: Record<string, string> = {
               <span style="color: var(--faint);">{{ openStages.has(st.id) ? '▾' : '▸' }}</span>
             </div>
             <div v-if="openStages.has(st.id)" style="padding: 0 8px 8px;">
-              <div v-for="it in st.items" :key="it.id" class="list-item">
+              <div v-for="it in st.items" :key="it.id" class="list-item" @click="openItemInPlan(it.item_key)">
                 <span :style="{ color: 'var(--' + ((itemStatus[it.status] || itemStatus.planned).cls === 'ok' ? 'ok' : (itemStatus[it.status] || itemStatus.planned).cls === 'info' ? 'info' : 'faint') + ')' }">
                   {{ (itemStatus[it.status] || itemStatus.planned).ico }}
                 </span>
@@ -228,6 +240,7 @@ const typeLabel: Record<string, string> = {
                 </div>
                 <span v-if="it.item_type" class="badge gray">{{ typeLabel[it.item_type] || it.item_type }}</span>
                 <span v-if="it.difficulty_tier" class="badge gray">难度 {{ it.difficulty_tier }}</span>
+                <span class="badge brand">去练习 →</span>
               </div>
             </div>
           </div>
@@ -330,6 +343,7 @@ const typeLabel: Record<string, string> = {
           </button>
         </div>
       </template>
+      </div>
     </template>
   </div>
 </template>
