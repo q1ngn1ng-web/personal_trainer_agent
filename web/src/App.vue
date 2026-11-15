@@ -50,6 +50,7 @@ function closeMenu() {
 const navs = [
   { name: "today", ico: "◎", label: "今日训练" },
   { name: "wizard", ico: "✚", label: "新建训练" },
+  { name: "dashboard", ico: "▦", label: "仪表盘" },
   { name: "trainings", ico: "◈", label: "我的训练" },
   { name: "me", ico: "◍", label: "我的" },
 ];

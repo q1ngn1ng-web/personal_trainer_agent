@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import {
   api, type AssessmentStart, type AssessmentSubmit, type PathResponse,
+  type WeeklyReviewResponse,
   type QuizOutcome, type QuizState, type SourceSummary, type TodayTask, type TrainingSummary,
 } from "../api";
 import TaskCard from "../components/TaskCard.vue";
@@ -10,7 +11,7 @@ import TaskCard from "../components/TaskCard.vue";
 const route = useRoute();
 const trainingId = Number(route.params.id);
 
-const section = ref<"path" | "plan" | "sources" | "quiz">("path");
+const section = ref<"path" | "plan" | "review" | "sources" | "quiz">("path");
 const training = ref<TrainingSummary | null>(null);
 const pathData = ref<PathResponse | null>(null);
 const sources = ref<SourceSummary[]>([]);
@@ -30,6 +31,39 @@ const manualVerdicts = ref<Record<number, string>>({});
 const outcome = ref<QuizOutcome | null>(null);
 const openStages = ref<Set<number>>(new Set());
 const openPlanId = ref<number | null>(null);
+const reviewData = ref<WeeklyReviewResponse | null>(null);
+const reviewLoading = ref(false);
+
+async function prepareReview() {
+  reviewLoading.value = true;
+  try {
+    reviewData.value = await api.weeklyReview(trainingId);
+  } catch (e: any) {
+    toast(e.message || "生成失败");
+  } finally {
+    reviewLoading.value = false;
+  }
+}
+
+async function applyReview() {
+  if (!reviewData.value) return;
+  try {
+    reviewData.value = await api.applyWeeklyReview(trainingId, reviewData.value.suggestion);
+    toast("已应用并归档");
+  } catch (e: any) {
+    toast(e.message || "应用失败");
+  }
+}
+
+async function skipReview() {
+  if (!reviewData.value) return;
+  try {
+    reviewData.value = await api.skipWeeklyReview(trainingId);
+    toast("已跳过并归档");
+  } catch (e: any) {
+    toast(e.message || "操作失败");
+  }
+}
 
 // 从训练路径条目跳转到完整计划，并自动展开该训练项最早的未完成轮次
 function openItemInPlan(itemKey: string) {
@@ -186,6 +220,7 @@ const typeLabel: Record<string, string> = {
       <div class="section-switch">
         <button :class="{ active: section === 'path' }" @click="section = 'path'">训练路径</button>
         <button :class="{ active: section === 'plan' }" @click="section = 'plan'">完整计划</button>
+        <button :class="{ active: section === 'review' }" @click="section = 'review'">周复盘</button>
         <button :class="{ active: section === 'sources' }" @click="section = 'sources'">资料来源</button>
         <button :class="{ active: section === 'quiz' }" @click="section = 'quiz'">测验达标</button>
       </div>
@@ -263,6 +298,56 @@ const typeLabel: Record<string, string> = {
           </div>
         </div>
         <div v-else class="card empty"><span class="ico">🧭</span>路径尚未生成</div>
+      </template>
+
+      <!-- ============ 周复盘 ============ -->
+      <template v-else-if="section === 'review'">
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">周复盘</div>
+            <span v-if="reviewData?.applied" class="badge ok">已应用</span>
+            <span v-else-if="reviewData" class="badge gray">未应用</span>
+          </div>
+          <p style="font-size: 13px; color: var(--muted); margin-top: 6px;">
+            汇总最近 7 天的完成度、坚持与薄弱主题，由模型给出基线/排期/资料/奖励的调整建议；可应用或跳过（都会归档）。
+          </p>
+          <div v-if="reviewLoading" class="loading-center" style="padding: 14px 0;"><span class="spinner"></span></div>
+          <div v-else-if="!reviewData" style="margin-top: 10px;">
+            <button class="btn primary" @click="prepareReview">生成周复盘</button>
+          </div>
+          <template v-else>
+            <div class="dash-row-metrics" style="margin-top: 10px;">
+              <span>本周完成度 <b>{{ (reviewData.metrics.avg_completion * 100).toFixed(0) }}%</b></span>
+              <span>坚持 <b>{{ reviewData.metrics.consecutive_days }}</b> 天</span>
+              <span>记录 <b>{{ reviewData.metrics.days_logged }}</b>/7 天</span>
+            </div>
+            <div class="dash-row-metrics" style="margin-top: 6px;">
+              <span v-if="reviewData.metrics.weakest_topic">最弱主题：<b>{{ reviewData.metrics.weakest_topic }}</b></span>
+              <span v-if="reviewData.metrics.strongest_topic">最强主题：<b>{{ reviewData.metrics.strongest_topic }}</b></span>
+            </div>
+            <div v-if="reviewData.metrics.missed_tasks.length" class="ref-answer" style="margin-top: 6px;">
+              遗漏任务：{{ reviewData.metrics.missed_tasks.join("；") }}
+            </div>
+            <div class="verdict-panel" :class="reviewData.suggestion.fallback_used ? 'none' : 'pass'" style="margin-top: 12px; text-align: left;">
+              <b>校准建议{{ reviewData.suggestion.fallback_used ? "（模型不可用，启发式兜底）" : "" }}</b>
+              <p style="margin-top: 6px;"><b>下周重点</b>：{{ reviewData.suggestion.next_week_focus || "—" }}</p>
+              <p><b>基线调整</b>：{{ reviewData.suggestion.baseline_score_delta >= 0 ? "+" : "" }}{{ (reviewData.suggestion.baseline_score_delta * 100).toFixed(0) }} 分</p>
+              <p><b>奖励刷新</b>：{{ reviewData.suggestion.reward_refresh || "—" }}</p>
+              <div v-if="Object.keys(reviewData.suggestion.schedule_adjustment).length" style="margin-top: 6px;">
+                <b>排期调整</b>：
+                <div v-for="(v, k) in reviewData.suggestion.schedule_adjustment" :key="k">· {{ k }}：{{ v }}</div>
+              </div>
+              <div v-if="reviewData.suggestion.material_recommendations.length" style="margin-top: 6px;">
+                <b>资料建议</b>：
+                <div v-for="(m, i) in reviewData.suggestion.material_recommendations" :key="i">· {{ m.title || m.action || JSON.stringify(m) }}</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 10px;">
+              <button class="btn primary" @click="applyReview">应用建议</button>
+              <button class="btn ghost" @click="skipReview">跳过本周</button>
+            </div>
+          </template>
+        </div>
       </template>
 
       <!-- ============ 资料 ============ -->

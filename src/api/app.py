@@ -38,9 +38,12 @@ from src.services import (
     path_service,
     plan_service,
     quiz_service,
+    review_service,
     signal_service,
     source_service,
 )
+from src.services.calibration_service import CalibrationSuggestion
+from src.services.progress_service import compute_home_dashboard
 
 logger = logging.getLogger("src.api.app")
 
@@ -322,6 +325,39 @@ def _load_training_for(viewer: Viewer | None, training_id: int) -> Any:
     if not can_view_training(viewer, training.to_dict()):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该训练")
     return training
+
+
+@app.get("/api/dashboard")
+def dashboard(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+    """跨训练进度仪表盘（第一版 Streamlit 首页的 Vue 迁移）。"""
+    snap = compute_home_dashboard()
+    visible_ids = _visible_training_ids(viewer)
+    trainings = []
+    for p in snap.trainings:
+        if visible_ids is not None and p.training_id not in visible_ids:
+            continue
+        trainings.append(
+            {
+                "training_id": p.training_id,
+                "topic": p.topic,
+                "status": str(p.status.value) if hasattr(p.status, "value") else str(p.status),
+                "baseline_score": p.baseline_score,
+                "baseline_level": str(p.baseline_level),
+                "consecutive_days": p.consecutive_days,
+                "days_since_creation": p.days_since_creation,
+                "today_completion": p.today_completion,
+                "today_completed": p.today_completed,
+                "today_total": p.today_total,
+                "last_active_at": p.last_active_at.isoformat() if p.last_active_at else None,
+                "current_week": p.current_week,
+            }
+        )
+    return {
+        "trainings": trainings,
+        "total_active": snap.total_active,
+        "total_all": snap.total_all,
+        "avg_baseline": snap.avg_baseline,
+    }
 
 
 @app.get("/api/trainings")
@@ -727,6 +763,60 @@ def _assert_action(viewer: Viewer, action: Any) -> None:
         assert_can(viewer, action)
     except Exception as exc:  # PermissionDenied
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.get("/api/trainings/{training_id}/review/weekly")
+def review_weekly_prepare(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """周复盘准备：本周指标 + LLM 校准建议（LLM 不可用时启发式兜底；不落库）。"""
+    _load_training_for(viewer, training_id)
+    outcome = review_service.prepare_weekly_review(int(training_id))
+    return {
+        "metrics": outcome.metrics.to_plain_dict(),
+        "suggestion": outcome.suggestion.to_dict(),
+        "applied": outcome.applied,
+    }
+
+
+@app.post("/api/trainings/{training_id}/review/apply")
+def review_weekly_apply(
+    training_id: int,
+    body: dict[str, Any],
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """应用周复盘建议：持久化基线/排期/资料调整并归档。"""
+    _load_training_for(viewer, training_id)
+    raw = body.get("suggestion") or {}
+    suggestion = CalibrationSuggestion(
+        baseline_score_delta=float(raw.get("baseline_score_delta") or 0.0),
+        schedule_adjustment=dict(raw.get("schedule_adjustment") or {}),
+        material_recommendations=list(raw.get("material_recommendations") or []),
+        reward_refresh=str(raw.get("reward_refresh") or ""),
+        next_week_focus=str(raw.get("next_week_focus") or ""),
+        raw=dict(raw.get("raw") or {}),
+        fallback_used=bool(raw.get("fallback_used") or False),
+    )
+    outcome = review_service.apply_weekly_review(int(training_id), suggestion)
+    return {
+        "metrics": outcome.metrics.to_plain_dict(),
+        "suggestion": outcome.suggestion.to_dict(),
+        "applied": outcome.applied,
+    }
+
+
+@app.post("/api/trainings/{training_id}/review/skip")
+def review_weekly_skip(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """跳过本周复盘：归档快照但不做任何调整。"""
+    _load_training_for(viewer, training_id)
+    outcome = review_service.skip_weekly_review(int(training_id))
+    return {
+        "metrics": outcome.metrics.to_plain_dict(),
+        "suggestion": outcome.suggestion.to_dict(),
+        "applied": outcome.applied,
+    }
 
 
 @app.get("/api/org/departments")

@@ -70,6 +70,58 @@ export type TodayResponse = {
   tasks: TodayTask[];
 };
 
+export type DashboardProgress = {
+  training_id: number;
+  topic: string;
+  status: string;
+  baseline_score: number;
+  baseline_level: string;
+  consecutive_days: number;
+  days_since_creation: number;
+  today_completion: number;
+  today_completed: number;
+  today_total: number;
+  last_active_at: string | null;
+  current_week: number;
+};
+
+export type DashboardResponse = {
+  trainings: DashboardProgress[];
+  total_active: number;
+  total_all: number;
+  avg_baseline: number | null;
+};
+
+export type WeeklyMetrics = {
+  training_id: number;
+  week_start: string;
+  week_end: string;
+  avg_completion: number;
+  avg_recall_success: number;
+  three_reflection_coverage: number;
+  consecutive_days: number;
+  weakest_topic: string | null;
+  strongest_topic: string | null;
+  missed_tasks: string[];
+  days_logged: number;
+};
+
+export type CalibrationSuggestionDto = {
+  baseline_score_delta: number;
+  schedule_adjustment: Record<string, string>;
+  material_recommendations: { title?: string; action?: string; [k: string]: unknown }[];
+  reward_refresh: string;
+  next_week_focus: string;
+  raw: Record<string, unknown>;
+  fallback_used: boolean;
+};
+
+export type WeeklyReviewResponse = {
+  metrics: WeeklyMetrics;
+  suggestion: CalibrationSuggestionDto;
+  applied: boolean;
+};
+
 export type TrainingSummary = {
   id: number;
   topic: string;
@@ -233,6 +285,18 @@ export const api = {
       "/api/trainings/" + trainingId + "/plan/regenerate",
       { method: "POST" }
     ),
+  dashboard: () => request<DashboardResponse>("/api/dashboard"),
+  weeklyReview: (trainingId: number) =>
+    request<WeeklyReviewResponse>("/api/trainings/" + trainingId + "/review/weekly"),
+  applyWeeklyReview: (trainingId: number, suggestion: CalibrationSuggestionDto) =>
+    request<WeeklyReviewResponse>("/api/trainings/" + trainingId + "/review/apply", {
+      method: "POST",
+      body: JSON.stringify({ suggestion }),
+    }),
+  skipWeeklyReview: (trainingId: number) =>
+    request<WeeklyReviewResponse>("/api/trainings/" + trainingId + "/review/skip", {
+      method: "POST",
+    }),
   planItems: (trainingId: number) =>
     request<{ count: number; items: TodayTask[] }>(
       "/api/trainings/" + trainingId + "/plan-items"
