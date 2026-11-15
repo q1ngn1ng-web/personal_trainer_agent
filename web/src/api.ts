@@ -44,11 +44,15 @@ export type TodayTask = {
   due_date: string;
   is_overdue: boolean;
   question: string | null;
+  question_type: string | null;
+  options: QuestionOption[] | null;
   reference_answer: string;
   answer_text: string | null;
   verdict: string | null;
   status: "planned" | "practiced" | "skipped";
 };
+
+export type QuestionOption = { key: string; text: string; is_correct?: boolean };
 
 export type TodayGroup = {
   training_id: number;
@@ -214,9 +218,19 @@ export const api = {
   me: () => request<Viewer>("/api/me"),
   today: () => request<TodayResponse>("/api/today"),
   question: (planId: number) =>
-    request<{ question: string; reference_answer?: string; source: string }>(
+    request<{
+      question: string;
+      reference_answer?: string;
+      source: string;
+      question_type: string | null;
+      options: QuestionOption[] | null;
+    }>(
       "/api/plan-items/" + planId + "/question",
       { method: "POST" }
+    ),
+  planItems: (trainingId: number) =>
+    request<{ count: number; items: TodayTask[] }>(
+      "/api/trainings/" + trainingId + "/plan-items"
     ),
   answer: (planId: number, answer: string) =>
     request<AnswerResult>("/api/plan-items/" + planId + "/answer", {

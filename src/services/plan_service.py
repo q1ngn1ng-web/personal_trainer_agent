@@ -357,6 +357,62 @@ def today_tasks(
     return tasks
 
 
+def training_plan_items(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> list[PlannedTask]:
+    """完整训练计划视图：该训练全部训练轮次（含未到期与已完成的，按到期日排序）。
+
+    与 ``today_tasks`` 的差别：不过滤到期日、不按"最早未完成轮次"去重——
+    用于「完整计划」页（查看全貌 + 支持提前练）。任务动作端点本身不设到期门，
+    未来轮次可直接提交作答。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        sql = (
+            "SELECT p.*, t.topic AS training_topic FROM plan_items p "
+            "JOIN trainings t ON t.id = p.training_id "
+            "WHERE p.kind = 'train' AND p.training_id = ? "
+            "ORDER BY p.due_date, p.round_index, p.id"
+        )
+        rows = active.execute(sql, (int(training_id),)).fetchall()
+
+        tasks: list[PlannedTask] = []
+        cache: dict[int, dict[str, dict[str, Any]]] = {}
+        for row in rows:
+            tid = int(row["training_id"])
+            if tid not in cache:
+                cache[tid] = _item_metadata(active, tid)
+            tasks.append(
+                _row_to_task(
+                    row,
+                    metadata=cache[tid],
+                    training_topic=str(row["training_topic"] or ""),
+                )
+            )
+        return tasks
+    finally:
+        if own:
+            active.close()
+
+
+def question_meta(plan_id: int, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """计划项内联的题型与选项 JSON 原文（随题固化），供前端渲染客观题。"""
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT question_type, options FROM plan_items WHERE id = ?",
+            (int(plan_id),),
+        ).fetchone()
+    finally:
+        if own:
+            active.close()
+    if row is None:
+        return {"question_type": None, "options": None}
+    return {"question_type": row["question_type"], "options": row["options"]}
+
+
 def today_summary(
     *,
     training_id: int | None = None,

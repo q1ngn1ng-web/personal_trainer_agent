@@ -306,6 +306,27 @@ def save_answers(
     return updated
 
 
+def _question_meta(
+    conn: sqlite3.Connection | None, training_id: int | None, item_key: str
+) -> tuple[str, str | None]:
+    """取题库里的题型与选项 JSON（客观题分流的数据来源）。"""
+    if training_id is None:
+        return "qa", None
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT question_type, options FROM question_bank WHERE training_id = ? AND item_key = ?",
+            (int(training_id), str(item_key)),
+        ).fetchone()
+    finally:
+        if own:
+            active.close()
+    if row is None:
+        return "qa", None
+    return (str(row["question_type"] or "qa"), row["options"])
+
+
 def grade_with_llm(
     assessment_id: int, *, conn: sqlite3.Connection | None = None
 ) -> bool:
@@ -315,7 +336,13 @@ def grade_with_llm(
     覆盖率 × 正确性 + 必答否决 + 阈值（0.8）确定性地算出来。
     返回是否判分成功（失败时由用户自评兜底）。
     """
-    from src.services.grading_service import grade_question, load_points
+    from src.services.grading_service import (
+        correct_key_of,
+        grade_objective,
+        grade_question,
+        load_points,
+        parse_options,
+    )
 
     assessment = load_assessment(assessment_id, conn=conn)
     items = load_items(assessment_id, conn=conn)
@@ -326,12 +353,17 @@ def grade_with_llm(
             if assessment
             else []
         )
+        qtype, options_json = _question_meta(
+            conn, int(assessment.training_id) if assessment else None, item.item_key
+        )
         payload.append(
             {
                 "item_key": item.item_key,
                 "question": item.question,
                 "reference_answer": item.reference_answer or "",
                 "answer": item.user_answer or "",
+                "question_type": qtype,
+                "options": parse_options(options_json),
                 "points": [
                     {
                         "point_id": spec.point_id,
@@ -397,30 +429,47 @@ def grade_with_llm(
             entry = verdicts.get(item.item_key)
             if entry is None:
                 continue
-            point_verdicts = {
-                str(raw_point.get("point_id")): str(raw_point.get("verdict"))
-                for raw_point in (entry.get("point_verdicts") or [])
-            }
-            specs = (
-                load_points(int(assessment.training_id), item.item_key, conn=conn)
-                if assessment
-                else []
+            # 客观题分流（2026-11-15 修复）：choice/fill 用确定性判分覆盖模型意见，
+            # 不再让 LLM 对客观题做语义判断（ADR-0022 硬约束）。
+            qtype, options_json = _question_meta(
+                conn, int(assessment.training_id) if assessment else None, item.item_key
             )
-            if specs:
-                grade = grade_question(
-                    "qa",
-                    answer=item.user_answer,
-                    points=specs,
-                    point_verdicts=point_verdicts,
-                )
-                verdict = "pass" if grade.passed else "fail"
-                reason = grade.reason
-                item_score = grade.score
+            obj = grade_objective(
+                qtype,
+                item.user_answer,
+                expected=item.reference_answer,
+                correct_key=correct_key_of(options_json),
+                options=parse_options(options_json),
+            )
+            if obj is not None:
+                verdict = "pass" if obj.passed else "fail"
+                reason = obj.reason
+                item_score = round(float(obj.score), 4)
             else:
-                # 没有要点清单的历史题：退回旧的二元口径，不伪造分数
-                verdict = "pass" if entry.get("verdict") == "pass" else "fail"
-                reason = str(entry.get("reason") or "")
-                item_score = None
+                point_verdicts = {
+                    str(raw_point.get("point_id")): str(raw_point.get("verdict"))
+                    for raw_point in (entry.get("point_verdicts") or [])
+                }
+                specs = (
+                    load_points(int(assessment.training_id), item.item_key, conn=conn)
+                    if assessment
+                    else []
+                )
+                if specs:
+                    grade = grade_question(
+                        "qa",
+                        answer=item.user_answer,
+                        points=specs,
+                        point_verdicts=point_verdicts,
+                    )
+                    verdict = "pass" if grade.passed else "fail"
+                    reason = grade.reason
+                    item_score = grade.score
+                else:
+                    # 没有要点清单的历史题：退回旧的二元口径，不伪造分数
+                    verdict = "pass" if entry.get("verdict") == "pass" else "fail"
+                    reason = str(entry.get("reason") or "")
+                    item_score = None
             active.execute(
                 "UPDATE assessment_items SET verdict = ?, reason = ?, score = ? WHERE id = ?",
                 (verdict, reason, item_score, item.id),

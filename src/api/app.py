@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -25,6 +26,7 @@ from src.core.permissions import (
     visible_sources,
     visible_trainings,
 )
+from src.services.grading_service import parse_options
 from src.db import queries
 from src.db.connection import IntegrityError
 from src.services import (
@@ -262,8 +264,20 @@ def _visible_training_ids(viewer: Viewer | None) -> set[int] | None:
 
 
 def _task_payload(task: Any) -> dict[str, Any]:
-    """任务明细。**参考答案只在已判分后返回**，避免把答案提前送给用户。"""
+    """任务明细。**参考答案只在已判分后返回**，避免把答案提前送给用户。
+
+    客观题（choice/fill）附带 question_type 与选项数组，供前端渲染可选项；
+    选项来自出题时固化的 plan_items 字段，is_correct 字段不下发给前端。
+    """
     graded = bool(task.verdict)
+    meta = plan_service.question_meta(task.plan_id)
+    options = json.loads(meta["options"]) if meta["options"] else None
+    if isinstance(options, list) and options:
+        options = [
+            {k: v for k, v in option.items() if k != "is_correct"} for option in options if isinstance(option, dict)
+        ]
+    else:
+        options = None
     return {
         "plan_id": task.plan_id,
         "training_id": task.training_id,
@@ -272,6 +286,8 @@ def _task_payload(task: Any) -> dict[str, Any]:
         "title": task.title,
         "knowledge_point": task.knowledge_point,
         "item_type": task.item_type,
+        "question_type": meta["question_type"],
+        "options": options,
         "round_index": task.round_index,
         "planned_minutes": task.planned_minutes,
         "due_date": task.due_date.isoformat(),
@@ -373,6 +389,22 @@ def training_path(training_id: int, viewer: Viewer | None = Depends(current_view
     }
 
 
+@app.get("/api/trainings/{training_id}/plan-items")
+def training_plan_items(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """完整训练计划：全部训练轮次（含未到期），按到期日排序——支持查看全貌与提前练。
+
+    任务动作端点（answer/practice-only/skip）不设到期门，未来轮次可直接提交作答。
+    """
+    _load_training_for(viewer, training_id)
+    tasks = plan_service.training_plan_items(int(training_id))
+    return {
+        "count": len(tasks),
+        "items": [_task_payload(task) for task in tasks],
+    }
+
+
 @app.get("/api/trainings/{training_id}/sources")
 def training_sources(
     training_id: int, viewer: Viewer | None = Depends(current_viewer)
@@ -433,12 +465,24 @@ def plan_item_question(
     plan_id: int, viewer: Viewer | None = Depends(current_viewer)
 ) -> dict[str, Any]:
     """按需生成这道题的题干与参考答案（懒生成，避免打开页面就批量烧 token）。"""
-    _guard_task(viewer, plan_id)
+    task = _guard_task(viewer, plan_id)
     try:
         question = answer_service.ensure_question(int(plan_id))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return {"question": question["question"], "source": question.get("source")}
+    options = parse_options(question.get("options"))
+    if options:
+        options = [
+            {k: v for k, v in option.items() if k != "is_correct"} for option in options
+        ]
+    else:
+        options = None
+    return {
+        "question": question["question"],
+        "source": question.get("source"),
+        "question_type": question.get("question_type"),
+        "options": options,
+    }
 
 
 @app.post("/api/plan-items/{plan_id}/answer")

@@ -188,6 +188,54 @@ def _rebuild_sources(conn: sqlite3.Connection) -> None:
     logger.info("migrate: rebuilt sources (added enabled flag)")
 
 
+_PRACTICE_ATTEMPTS_DDL = """
+CREATE TABLE practice_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    plan_id INTEGER,
+    round_index INTEGER,
+    result TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
+    answer_text TEXT,
+    score REAL,
+    point_results TEXT,
+    mistake_reasons TEXT,
+    source TEXT DEFAULT 'self' CHECK (source IN ('self', 'quiz', 'llm', 'rule')),
+    note TEXT,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+"""
+
+_PRACTICE_ATTEMPTS_COLUMNS = (
+    "id, training_id, item_key, plan_id, round_index, result, answer_text, "
+    "score, point_results, mistake_reasons, source, note, created_at"
+)
+
+
+def _rebuild_practice_attempts(conn: sqlite3.Connection) -> None:
+    """放宽 ``source`` 枚举：新增 ``rule``（客观题确定性判分，change grading-consistency 延伸）。
+
+    只复制新旧表共有的列——老库若缺后期补的列（score/answer_text 等），由
+    ``_add_missing_columns`` 先补齐后再走到这里。
+    """
+    conn.execute("ALTER TABLE practice_attempts RENAME TO practice_attempts_old")
+    conn.execute(_PRACTICE_ATTEMPTS_DDL)
+    shared = [
+        name for name in _PRACTICE_ATTEMPTS_COLUMNS.replace("\n", " ").split(", ")
+        if name in _column_names(conn, "practice_attempts_old")
+    ]
+    conn.execute(
+        f"INSERT INTO practice_attempts ({', '.join(shared)}) "
+        f"SELECT {', '.join(shared)} FROM practice_attempts_old"
+    )
+    conn.execute("DROP TABLE practice_attempts_old")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_practice_attempts_item ON practice_attempts(training_id, item_key, id)"
+    )
+    logger.info("migrate: rebuilt practice_attempts (source enum + rule)")
+
+
 def _add_missing_columns(
     conn: sqlite3.Connection, table: str, columns: dict[str, str]
 ) -> list[str]:
@@ -216,6 +264,9 @@ _PLAN_ITEM_QUESTION_COLUMNS: dict[str, str] = {
     "verdict": "TEXT",
     "graded_by": "TEXT",
     "graded_at": "DATETIME",
+    # 客观题分流：题型与选项随题固化（2026-11-15，choice/fill 零 LLM 判分的数据基础）
+    "question_type": "TEXT",
+    "options": "TEXT",
 }
 
 
@@ -432,7 +483,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or "'practiced'" not in item_sql
     )
     plan_columns = _column_names(conn, "plan_items")
-    needs_plan_questions = bool(plan_columns) and "question" not in plan_columns
+    needs_plan_questions = bool(plan_columns) and (
+        "question" not in plan_columns or "question_type" not in plan_columns
+    )
 
     grading_columns = {
         table: cols for table, cols in _GRADING_COLUMNS.items() if _column_names(conn, table)
@@ -444,6 +497,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     needs_memory = any(not _column_names(conn, table) for table in _MEMORY_DDL)
 
     needs_grading_cache = not _column_names(conn, "grading_cache")
+
+    practice_sql = _table_sql(conn, "practice_attempts")
+    needs_practice_source = bool(practice_sql) and "source IN ('self', 'quiz', 'llm')" in practice_sql
 
     account_columns = {
         table: cols for table, cols in _ACCOUNT_COLUMNS.items() if _column_names(conn, table)
@@ -462,6 +518,7 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_memory
         or needs_account
         or needs_grading_cache
+        or needs_practice_source
     ):
         return applied
 
@@ -508,6 +565,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_grading_cache:
                 if _ensure_grading_cache_table(conn):
                     applied.append("grading_cache:new_table")
+            if needs_practice_source:
+                _rebuild_practice_attempts(conn)
+                applied.append("practice_attempts:source_rule")
             if needs_account:
                 for table, cols in account_columns.items():
                     added = _add_missing_columns(conn, table, cols)

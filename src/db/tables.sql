@@ -244,6 +244,10 @@ CREATE TABLE IF NOT EXISTS plan_items (
     -- 判分时只引用不再生成（与 question_points 同一约束，但按计划项内联，
     -- 避免与 question_bank 的 item_key 键空间冲突：同一知识点每轮题目不同）
     points TEXT,
+    -- 客观题分流：题型与选项随题固化（2026-11-15 修复——此前选项只存在于出题响应里，
+    -- 判分时丢失，选择题被当语义问答题送进 LLM）
+    question_type TEXT,
+    options TEXT,
     answer_text TEXT,
     verdict TEXT,
     graded_by TEXT,
@@ -314,7 +318,7 @@ CREATE TABLE IF NOT EXISTS practice_attempts (
     score REAL,
     point_results TEXT,
     mistake_reasons TEXT,
-    source TEXT DEFAULT 'self' CHECK (source IN ('self', 'quiz', 'llm')),
+    source TEXT DEFAULT 'self' CHECK (source IN ('self', 'quiz', 'llm', 'rule')),
     note TEXT,
     created_at DATETIME NOT NULL,
     FOREIGN KEY (training_id) REFERENCES trainings(id)

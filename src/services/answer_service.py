@@ -23,6 +23,7 @@ from src.db.sqlite import get_connection
 from src.llm.client import DEEPSEEK_MODEL, PROMPT_REGISTRY, complete
 from src.llm.schema import SCHEMA_REGISTRY
 from src.services import attempt_service, grading_cache, memory_service, plan_service
+from src.services.grading_service import correct_key_of, grade_objective, parse_options
 
 logger = logging.getLogger("src.services.answer_service")
 
@@ -42,11 +43,12 @@ def _connect(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
 
 
 def _task_context(active: sqlite3.Connection, plan_id: int) -> dict[str, Any] | None:
-    """取一条计划项 + 它对应的训练项/训练信息。"""
+    """取一条计划项 + 它对应的训练项/训练信息（含题型与选项，供客观题分流）。"""
     row = active.execute(
         """
         SELECT p.id AS plan_id, p.training_id, p.item_key, p.round_index, p.kind,
                p.question, p.reference_answer, p.points, p.answer_text, p.verdict, p.status,
+               p.question_type, p.options,
                t.topic AS training_topic,
                i.title, i.knowledge_point, i.item_type, i.difficulty_tier, i.source_chunk_ids
         FROM plan_items p
@@ -195,6 +197,10 @@ def ensure_question(
             "total_rounds": _TOTAL_ROUNDS,
             "sample_text": sample or "（这道题没有关联资料片段，请按知识点本身出题）",
         }
+        # 降级路径（probe/fallback）的题目按 qa 语义判分；question_type/options 仅在
+        # LLM 成功产出时由下方分支填写（客观题分流：题型与选项随题固化）。
+        question_type = "qa"
+        options_json = None
         try:
             result = complete(
                 "train_question",
@@ -205,12 +211,22 @@ def ensure_question(
             output = result.get("output_json") or {}
             question = str(output.get("question") or "").strip()
             answer = str(output.get("reference_answer") or "").strip()
+            question_type = str(output.get("question_type") or "qa")
+            options_json = None
             if question:
                 source = "llm"
                 # 出题时固化要点清单：判分只引用不再生成（与测验同约束）
                 normalized = _normalize_points(output.get("points"))
                 if normalized:
                     points_json = json.dumps(normalized, ensure_ascii=False)
+                # 客观题分流：题型与选项随题固化到 plan_items（判分零 LLM 的数据基础）。
+                # 选项缺失/非法的选择题降级为 qa 语义判分——不伪造客观判定。
+                if question_type == "choice":
+                    normalized_options = parse_options(output.get("options"))
+                    if normalized_options and correct_key_of(json.dumps(normalized_options, ensure_ascii=False)):
+                        options_json = json.dumps(normalized_options, ensure_ascii=False)
+                    else:
+                        question_type = "qa"
         except Exception as exc:  # 模型不可用不该让用户没题可做（失败审计由客户端写入）
             logger.warning("ensure_question: LLM unavailable (%s), using fallback", exc)
 
@@ -226,8 +242,9 @@ def ensure_question(
             answer = sample[:200] or "（资料里没有可用片段，先按你的理解回答）"
 
         active.execute(
-            "UPDATE plan_items SET question = ?, reference_answer = ?, points = ? WHERE id = ?",
-            (question, answer or None, points_json, int(plan_id)),
+            "UPDATE plan_items SET question = ?, reference_answer = ?, points = ?, "
+            "question_type = ?, options = ? WHERE id = ?",
+            (question, answer or None, points_json, question_type, options_json, int(plan_id)),
         )
         if own:
             active.commit()
@@ -235,6 +252,8 @@ def ensure_question(
             "question": question,
             "reference_answer": answer,
             "source": source,
+            "question_type": question_type,
+            "options": options_json,
             "points": json.loads(points_json) if points_json else [],
         }
     finally:
@@ -287,7 +306,27 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
         "reason": "",
         "score": None,
         "point_results": None,
+        "graded_by": None,
     }
+    # 客观题分流（2026-11-15 修复）：choice/fill 走确定性判分，零模型调用。
+    # 此前主链无分流，选择题也被送进 LLM 语义判分（ADR-0022 硬约束未接通）。
+    objective = grade_objective(
+        str(context.get("question_type") or "qa"),
+        answer,
+        expected=context.get("reference_answer"),
+        correct_key=correct_key_of(context.get("options")),
+        options=parse_options(context.get("options")),
+    )
+    if objective is not None:
+        outcome.update(
+            graded=True,
+            verdict="pass" if objective.passed else "fail",
+            reason=objective.reason,
+            score=round(float(objective.score), 4),
+            point_results=None,
+            graded_by="rule",
+        )
+        return outcome
     variables = {
         "items": json.dumps(payload, ensure_ascii=False, indent=2),
         "memory_block": memory_service.grade_memory_block(
@@ -372,6 +411,7 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
             reason=graded.reason or reason,
             score=round(float(graded.score), 4),
             point_results=point_results,
+            graded_by="llm",
         )
         return outcome
 
@@ -380,6 +420,7 @@ def _grade_answer(context: dict[str, Any], answer: str) -> dict[str, Any]:
         graded=True,
         verdict="pass" if entry.get("verdict") == "pass" else "fail",
         reason=reason,
+        graded_by="llm",
     )
     return outcome
 
@@ -421,14 +462,15 @@ def submit_answer(
         graded = graded_result["graded"]
         verdict = graded_result["verdict"]
         reason = graded_result["reason"]
+        graded_by = graded_result.get("graded_by") or "llm"
         training_id = int(context["training_id"])
         item_key = str(context["item_key"])
         mastered = False
 
         if graded:
             active.execute(
-                "UPDATE plan_items SET verdict = ?, graded_by = 'llm', graded_at = ? WHERE id = ?",
-                (verdict, _now(), int(plan_id)),
+                "UPDATE plan_items SET verdict = ?, graded_by = ?, graded_at = ? WHERE id = ?",
+                (verdict, graded_by, _now(), int(plan_id)),
             )
             if own:
                 active.commit()
@@ -438,8 +480,8 @@ def submit_answer(
                 verdict,
                 plan_id=int(plan_id),
                 round_index=int(context.get("round_index") or 0) or None,
-                # 判分来源：模型判的日常作答（枚举里 self=自评 / quiz=测验 / llm=模型判分）
-                source="llm",
+                # 判分来源：self=自评 / quiz=测验 / llm=模型判分 / rule=客观题确定性判分
+                source=graded_by,
                 answer_text=answer,
                 score=graded_result["score"],
                 point_results=graded_result["point_results"],

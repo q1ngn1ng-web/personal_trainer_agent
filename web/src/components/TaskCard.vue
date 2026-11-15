@@ -7,14 +7,24 @@ const emit = defineEmits<{ refresh: [] }>();
 
 const expanded = ref(false);
 const question = ref<string | null>(props.task.question);
+const questionMeta = ref<{ question_type: string | null; options: { key: string; text: string }[] | null } | null>(null);
 const loadingQ = ref(false);
 const answer = ref(props.task.answer_text || "");
+const selectedKey = ref("");
 const submitting = ref(false);
 const result = ref<AnswerResult | null>(null);
 const explaining = ref(false);
 const explanation = ref<{ text: string; source_refs: string[]; attempts_used: number } | null>(null);
 
 const done = computed(() => props.task.status !== "planned");
+const isChoice = computed(() => {
+  const qtype = (questionMeta.value?.question_type ?? props.task.question_type) || "qa";
+  const options = questionMeta.value?.options ?? props.task.options;
+  return qtype === "choice" && (options?.length ?? 0) > 0;
+});
+const optionsList = computed(() => questionMeta.value?.options ?? props.task.options ?? []);
+const todayStr = new Date().toISOString().slice(0, 10);
+const isFuture = computed(() => !done.value && props.task.due_date > todayStr);
 const verdictBadge = computed(() => {
   if (props.task.verdict === "pass") return { cls: "ok", text: "通过" };
   if (props.task.verdict === "fail") return { cls: "warn", text: "未通过" };
@@ -45,6 +55,7 @@ async function expand() {
     try {
       const res = await api.question(props.task.plan_id);
       question.value = res.question;
+      questionMeta.value = { question_type: res.question_type, options: res.options };
     } catch (e: any) {
       toast(e.message || "出题失败");
     } finally {
@@ -54,13 +65,14 @@ async function expand() {
 }
 
 async function submit() {
-  if (!answer.value.trim()) {
-    toast("先写下你的作答");
+  const value = (isChoice.value ? selectedKey.value : answer.value).trim();
+  if (!value) {
+    toast(isChoice.value ? "请先选择一个选项" : "先写下你的作答");
     return;
   }
   submitting.value = true;
   try {
-    result.value = await api.answer(props.task.plan_id, answer.value.trim());
+    result.value = await api.answer(props.task.plan_id, value);
     emit("refresh");
   } catch (e: any) {
     toast(e.message || "提交失败");
@@ -108,6 +120,7 @@ async function skip() {
     <div class="task-head" @click="expand">
       <span class="t-title">{{ task.title }}</span>
       <span class="t-meta">
+        <span v-if="isFuture" class="badge gray">未到期 · 可提前练</span>
         <span v-if="task.is_overdue" class="badge danger">逾期</span>
         <span class="badge gray">第{{ task.round_index }}轮</span>
         <span v-if="task.item_type" class="badge gray">{{ typeLabel[task.item_type] || task.item_type }}</span>
@@ -122,12 +135,24 @@ async function skip() {
         <div v-if="question" class="question-box">{{ question }}</div>
 
         <template v-if="!done">
-          <textarea v-model="answer" class="textarea" placeholder="凭理解作答，判分口径与测验一致（按要点覆盖判分）"></textarea>
+          <div v-if="isChoice && optionsList.length" class="question-options">
+            <label
+              v-for="opt in optionsList"
+              :key="opt.key"
+              class="option-row"
+              :class="{ picked: selectedKey === opt.key }"
+            >
+              <input type="radio" :name="'q-' + task.plan_id" :value="opt.key" v-model="selectedKey" />
+              <span class="opt-key">{{ opt.key }}</span>
+              <span>{{ opt.text }}</span>
+            </label>
+          </div>
+          <textarea v-else v-model="answer" class="textarea" placeholder="凭理解作答，判分口径与测验一致（按要点覆盖判分）"></textarea>
           <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
             <button class="btn primary" :disabled="submitting" @click="submit">
-              {{ submitting ? '判分中…' : '提交作答' }}
+              {{ submitting ? '判分中…' : isChoice ? '提交选择' : '提交作答' }}
             </button>
-            <button class="btn ghost" @click="practiceOnly">只练不判</button>
+            <button v-if="!isChoice" class="btn ghost" @click="practiceOnly">只练不判</button>
             <button class="btn text" @click="skip">跳过</button>
           </div>
         </template>

@@ -99,6 +99,58 @@ def grade_fill(
     return WRONG, "填空错误"
 
 
+def parse_options(raw: Any) -> list[dict[str, Any]] | None:
+    """解析 ``question_bank.options``（JSON 数组：key/text/is_correct），坏数据一律当没有选项。"""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, list) or not raw:
+        return None
+    return [entry for entry in raw if isinstance(entry, dict)]
+
+
+def correct_key_of(raw: Any) -> str | None:
+    """取唯一正确项的 key（有且仅有一个 ``is_correct``；异常形态返回 None）。"""
+    options = parse_options(raw)
+    if not options:
+        return None
+    correct = [str(entry.get("key") or "") for entry in options if entry.get("is_correct")]
+    return correct[0] if len(correct) == 1 else None
+
+
+def grade_objective(
+    question_type: str,
+    answer: Any,
+    *,
+    expected: Any = None,
+    correct_key: Any = None,
+    options: Sequence[Mapping[str, Any]] | None = None,
+) -> "GradeResult | None":
+    """客观题（choice / fill）确定性判分的统一入口；``qa`` 返回 None 走语义链路。
+
+    2026-11-15 修复：此前主链（answer_service / quiz_service）没有按题型分流，
+    选择题也被送进 LLM 语义判分——违反本模块头部的硬约束（客观题 MUST NOT 调用大模型）。
+    """
+    kind = str(question_type or DEFAULT_QUESTION_TYPE)
+    if kind == "choice":
+        verdict, reason = grade_choice(answer, correct_key=correct_key, options=options)
+    elif kind == "fill":
+        verdict, reason = grade_fill(answer, expected=expected)
+    else:
+        return None
+    passed = verdict == HIT
+    return GradeResult(
+        question_type=kind,
+        verdict=verdict,
+        passed=passed,
+        score=1.0 if passed else 0.0,
+        graded_by="rule",
+        reason=reason,
+    )
+
+
 # ---------------------------------------------------------------- 主观题评分
 
 

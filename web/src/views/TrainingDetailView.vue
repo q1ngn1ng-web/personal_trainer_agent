@@ -3,17 +3,20 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import {
   api, type AssessmentStart, type AssessmentSubmit, type PathResponse,
-  type QuizOutcome, type QuizState, type SourceSummary, type TrainingSummary,
+  type QuizOutcome, type QuizState, type SourceSummary, type TodayTask, type TrainingSummary,
 } from "../api";
+import TaskCard from "../components/TaskCard.vue";
 
 const route = useRoute();
 const trainingId = Number(route.params.id);
 
-const section = ref<"path" | "sources" | "quiz">("path");
+const section = ref<"path" | "plan" | "sources" | "quiz">("path");
 const training = ref<TrainingSummary | null>(null);
 const pathData = ref<PathResponse | null>(null);
 const sources = ref<SourceSummary[]>([]);
 const quiz = ref<QuizState | null>(null);
+const planRounds = ref<TodayTask[]>([]);
+const planLoading = ref(false);
 const loading = ref(true);
 
 // 测验流程状态
@@ -28,6 +31,18 @@ const openStages = ref<Set<number>>(new Set());
 
 function toast(msg: string) {
   (window as any).__toast?.(msg);
+}
+
+async function loadPlan() {
+  planLoading.value = true;
+  try {
+    const res = await api.planItems(trainingId);
+    planRounds.value = res.items;
+  } catch (e: any) {
+    toast(e.message || "计划加载失败");
+  } finally {
+    planLoading.value = false;
+  }
 }
 
 async function load() {
@@ -49,6 +64,7 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  await loadPlan();
 }
 onMounted(load);
 
@@ -145,9 +161,30 @@ const typeLabel: Record<string, string> = {
     <template v-else>
       <div class="section-switch">
         <button :class="{ active: section === 'path' }" @click="section = 'path'">训练路径</button>
+        <button :class="{ active: section === 'plan' }" @click="section = 'plan'">完整计划</button>
         <button :class="{ active: section === 'sources' }" @click="section = 'sources'">资料来源</button>
         <button :class="{ active: section === 'quiz' }" @click="section = 'quiz'">测验达标</button>
       </div>
+
+      <!-- ============ 完整计划（含提前练） ============ -->
+      <template v-if="section === 'plan'">
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">训练计划（全部轮次）</div>
+            <span class="badge gray">{{ planRounds.length }} 项</span>
+          </div>
+          <p style="font-size: 13px; color: var(--muted); margin-top: 6px;">
+            按到期日排序。未到期的轮次也可以提前练——展开即可作答。
+          </p>
+        </div>
+        <div v-if="planLoading" class="loading-center" style="padding: 18px 0;"><span class="spinner"></span></div>
+        <div v-else-if="!planRounds.length" class="card" style="color: var(--muted);">还没有训练轮次——完成向导后这里会显示五轮计划。</div>
+        <div v-else>
+          <div v-for="round in planRounds" :key="round.plan_id">
+            <TaskCard :task="round" @refresh="loadPlan" />
+          </div>
+        </div>
+      </template>
 
       <!-- ============ 路径 ============ -->
       <template v-if="section === 'path'">
