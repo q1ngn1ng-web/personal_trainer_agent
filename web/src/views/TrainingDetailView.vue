@@ -237,7 +237,7 @@ const typeLabel: Record<string, string> = {
 
         <div v-if="pathData && pathData.stages.length">
           <div v-for="st in pathData.stages" :key="st.id" class="card stage" style="padding: 0; overflow: hidden;">
-            <div class="stage-head" @click="toggleStage(st.id)">
+            <div class="stage-head" style="padding: 13px 20px 6px;" @click="toggleStage(st.id)">
               <span class="badge gray">阶段 {{ st.ordinal }}</span>
               <div style="flex: 1; min-width: 0;">
                 <div style="font-weight: 600;">{{ st.title }}</div>
@@ -246,7 +246,7 @@ const typeLabel: Record<string, string> = {
               <span style="color: var(--faint); font-size: 12.5px;">{{ st.estimated_minutes }}′ · {{ st.items.length }} 项</span>
               <span style="color: var(--faint);">{{ openStages.has(st.id) ? '▾' : '▸' }}</span>
             </div>
-            <div v-if="openStages.has(st.id)" style="padding: 0 8px 8px;">
+            <div v-if="openStages.has(st.id)" style="padding: 0 20px 14px;">
               <div v-for="it in st.items" :key="it.id" class="list-item" @click="openItemInPlan(it.item_key)">
                 <span :style="{ color: 'var(--' + ((itemStatus[it.status] || itemStatus.planned).cls === 'ok' ? 'ok' : (itemStatus[it.status] || itemStatus.planned).cls === 'info' ? 'info' : 'faint') + ')' }">
                   {{ (itemStatus[it.status] || itemStatus.planned).ico }}
