@@ -29,6 +29,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _now_iso_attempt() -> str:
+    return _now()
+
+
 def _connect(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
     return conn if conn is not None else get_connection()
 
@@ -95,6 +99,26 @@ def record_attempt(
                 _now(),
             ),
         )
+        # 学习者模型增量更新（layered-learner-memory）：派生层随作答事务维护，
+        # 失败只告警——事实记录（attempts 是单一事实源）绝不被派生层阻塞，可 rebuild 追平。
+        try:
+            from src.services import learner_service
+
+            learner_service.apply_attempt(
+                active,
+                training_id=int(training_id),
+                item_key=str(item_key),
+                result=result,
+                score=score,
+                point_results=point_results,
+                created_at=_now_iso_attempt(),
+            )
+        except Exception:  # pragma: no cover - 派生层失败不阻塞事实
+            logger.exception(
+                "learner_service.apply_attempt failed for training=%s item=%s",
+                training_id,
+                item_key,
+            )
         if own:
             active.commit()
         row = active.execute(

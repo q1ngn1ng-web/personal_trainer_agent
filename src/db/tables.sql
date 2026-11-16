@@ -579,3 +579,25 @@ CREATE INDEX IF NOT EXISTS idx_memberships_org ON memberships(org_id, role);
 CREATE INDEX IF NOT EXISTS idx_roster_org ON roster_entries(org_id, status);
 CREATE INDEX IF NOT EXISTS idx_assignments_org ON assignments(org_id, status);
 CREATE INDEX IF NOT EXISTS idx_assignment_targets_user ON assignment_targets(user_id);
+
+-- 学习者模型（change layered-learner-memory）：per (training_id, item_key) 的掌握度递推
+-- 与活跃误解清单。从 practice_attempts 增量更新，可全量重放重建（单一事实源仍是 attempts）。
+-- decayed_mastery 读时计算不落盘；misconceptions 为 JSON 数组
+-- [{point_id, text, reason}]，reason 取错因码（concept_confusion / key_omission）。
+CREATE TABLE IF NOT EXISTS learner_knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    knowledge_point TEXT,
+    mastery REAL NOT NULL DEFAULT 0.5,
+    misconceptions TEXT,
+    attempts_count INTEGER NOT NULL DEFAULT 0,
+    passes_count INTEGER NOT NULL DEFAULT 0,
+    last_seen_at DATETIME,
+    updated_at DATETIME NOT NULL,
+    UNIQUE (training_id, item_key),
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_learner_knowledge_training
+    ON learner_knowledge(training_id, last_seen_at);

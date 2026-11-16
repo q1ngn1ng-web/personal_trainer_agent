@@ -652,6 +652,37 @@ def submit_signal(
     }
 
 
+@app.get("/api/trainings/{training_id}/learner-model")
+def training_learner_model(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """学习者模型（只读，未来对话 agent 的记忆工具面）：掌握度 + 读时衰减 + 活跃误解。
+
+    change layered-learner-memory——纯增量，不改变任何现有判分/解析链路。
+    """
+    _load_training_for(viewer, training_id)
+    from src.services import learner_service
+
+    rows = learner_service.get_learner_model(int(training_id))
+    return {
+        "training_id": int(training_id),
+        "count": len(rows),
+        "weak_count": sum(1 for row in rows if row["weak"]),
+        "items": rows,
+    }
+
+
+@app.post("/api/trainings/{training_id}/learner-model/rebuild")
+def rebuild_learner_model(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """从 practice_attempts 全量重放重建学习者模型（部署后回填存量；幂等）。"""
+    _load_training_for(viewer, training_id)
+    from src.services import learner_service
+
+    return learner_service.rebuild(int(training_id))
+
+
 @app.get("/api/trainings/{training_id}/quiz")
 def quiz_state(
     training_id: int, viewer: Viewer | None = Depends(current_viewer)
