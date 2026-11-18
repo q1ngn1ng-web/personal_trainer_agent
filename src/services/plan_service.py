@@ -507,11 +507,11 @@ def pregenerate_questions(
         for plan_id in ids:
             try:
                 ensure_question(plan_id, conn=active)
+                active.commit()  # 逐条提交：不持长写事务，交互请求不被锁阻塞
                 generated += 1
             except Exception as exc:  # 单题失败不阻塞整批（留下次重试）
+                active.rollback()
                 logger.warning("pregenerate_questions: plan %s failed: %s", plan_id, exc)
-        if own:
-            active.commit()
         logger.info("pregenerate_questions: training=%s generated=%s/%s", training_id, generated, len(ids))
         return {"generated": generated, "total": len(ids)}
     finally:

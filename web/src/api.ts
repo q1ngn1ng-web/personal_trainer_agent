@@ -24,7 +24,15 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     ...init,
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  let data: any = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // 非 JSON 响应体（如 500 的 "Internal Server Error" 纯文本）：给出可读错误而非解析崩溃
+      throw new ApiError(response.status, text.slice(0, 200) || "非 JSON 响应 " + response.status);
+    }
+  }
   if (!response.ok) {
     throw new ApiError(response.status, data?.detail || "请求失败 " + response.status);
   }

@@ -27,6 +27,8 @@ def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    # 写锁冲突时等待而非立即失败（默认 0ms——后台批任务与交互写并发时必需）
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
