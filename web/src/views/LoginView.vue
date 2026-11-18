@@ -67,7 +67,7 @@ async function legacyLogin() {
         </div>
       </div>
 
-      <div class="section-switch">
+      <div class="login-switch">
         <button :class="{ active: mode === 'login' }" @click="mode = 'login'">登录</button>
         <button :class="{ active: mode === 'register' }" @click="mode = 'register'">注册</button>
       </div>
