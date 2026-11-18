@@ -72,7 +72,7 @@ a { color: var(--brand); text-decoration: none; }
 .nav-item .ico { width: 20px; text-align: center; flex-shrink: 0; }
 .sidebar-foot { margin-top: auto; padding: 10px 12px 0; border-top: 1px solid var(--line); }
 
-.main { flex: 1; min-width: 0; padding: 28px 32px 48px; max-width: 980px; margin: 0 auto; }
+.main { flex: 1; min-width: 980px; padding: 28px 32px 48px; max-width: 980px; margin: 0 auto; }
 .page-head { margin-bottom: 22px; }
 .page-title { font-size: 24px; }
 .page-sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
