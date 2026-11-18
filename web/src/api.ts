@@ -75,6 +75,7 @@ export type TodayResponse = {
   minutes: number;
   groups: TodayGroup[];
   tasks: TodayTask[];
+  done: TodayTask[];
 };
 
 export type DashboardProgress = {
@@ -336,8 +337,35 @@ export const api = {
     request<{ ok: boolean }>("/api/plan-items/" + planId + "/practice-only", {
       method: "POST",
     }),
-  skip: (planId: number) =>
-    request<{ ok: boolean }>("/api/plan-items/" + planId + "/skip", { method: "POST" }),
+  skip: (planId: number, reason: string) =>
+    request<{ ok: boolean }>("/api/plan-items/" + planId + "/skip", {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+  pregenerateQuestions: (trainingId: number) =>
+    request<{ generated: number; total: number; skipped?: string }>(
+      "/api/trainings/" + trainingId + "/questions/pregenerate",
+      { method: "POST" }
+    ),
+  deleteTraining: (trainingId: number) =>
+    request<{ ok: boolean }>("/api/trainings/" + trainingId, { method: "DELETE" }),
+  archiveTraining: (trainingId: number) =>
+    request<{ ok: boolean; status: string }>("/api/trainings/" + trainingId + "/archive", {
+      method: "POST",
+    }),
+  questionsOverview: (trainingId: number) =>
+    request<{
+      count: number;
+      questions: {
+        item_key: string;
+        knowledge_point: string | null;
+        question_type: string;
+        question_text: string | null;
+        practiced_count: number;
+        status: string | null;
+        in_cooldown: boolean;
+      }[];
+    }>("/api/trainings/" + trainingId + "/questions"),
   editPoints: (planId: number, points: PointSpec[]) =>
     request<{ ok: boolean; points: PointSpec[] }>(
       "/api/plan-items/" + planId + "/points",

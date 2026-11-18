@@ -98,6 +98,19 @@ a { color: var(--brand); text-decoration: none; }
 .tab-item .ico { font-size: 19px; }
 
 /* ---- 卡片与统计 ---- */
+.card-fade-enter-active { animation: cardIn 0.35s ease; }
+.card-fade-leave-active { transition: opacity 0.25s, transform 0.25s; }
+.card-fade-leave-to { opacity: 0; transform: translateY(8px); }
+@keyframes cardIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.question-fill { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 12px; font-size: 14.5px; }
+.fill-seg { white-space: pre-wrap; }
+.fill-input {
+  display: inline-block; width: 140px; padding: 4px 8px; font-size: 14.5px; font-family: inherit;
+  border: none; border-bottom: 2px solid var(--brand); background: var(--surface-2);
+  border-radius: 6px 6px 0 0; color: var(--text); outline: none;
+}
+.fill-input:focus { background: var(--brand-weak); }
+.question-box, .task-body, .card, .ref-answer, .textarea, .dash-row { overflow-wrap: anywhere; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: var(--shadow); padding: 18px 20px; margin-bottom: 14px;

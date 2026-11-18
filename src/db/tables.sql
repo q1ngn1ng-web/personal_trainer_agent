@@ -21,8 +21,22 @@ CREATE TABLE IF NOT EXISTS trainings (
     -- 账户归属（personal-auth-tests 随 schema 对齐补入；与生产库一致）
     org_id INTEGER,
     owner_user_id INTEGER,
+    -- 分享溯源（change plan-sharing）：NULL = 原创训练；非 NULL = 从分享拉取/推送的独立副本
+    shared_from_training_id INTEGER,
+    shared_by_user_id INTEGER,
     created_at DATETIME NOT NULL,
     last_active_at DATETIME
+);
+
+-- 训练计划分享链接（change plan-sharing）：组织内成员凭 token 预览并拉取独立副本
+CREATE TABLE IF NOT EXISTS share_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    revoked_at DATETIME,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
 );
 
 CREATE TABLE IF NOT EXISTS daily_logs (

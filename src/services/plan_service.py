@@ -18,6 +18,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from src.core.plan import (
+    LOCAL_TZ_NAME,
     ROUND_OFFSETS,
     PlanSlot,
     PlannedTask,
@@ -30,6 +31,7 @@ from src.core.plan import (
     select_today_slots,
     total_minutes,
 )
+from zoneinfo import ZoneInfo
 from src.db.sqlite import get_connection
 
 logger = logging.getLogger("src.services.plan_service")
@@ -329,6 +331,11 @@ def today_tasks(
             )
             for row in rows
         ]
+        # 同一训练项一天只推一轮：今天已作答过的项，其后续逾期轮次不再顶格出现
+        # （否则"做了几题数量不减少"）。次日仍会按顺延规则重新出现。
+        practiced_keys = _practiced_today_keys(active, effective_today, training_id)
+        slots = [slot for slot in slots if slot.item_key not in practiced_keys]
+
         keep = {
             (slot.item_key, slot.round_index) for slot in select_today_slots(slots, effective_today)
         }
@@ -396,6 +403,37 @@ def training_plan_items(
             active.close()
 
 
+def questions_overview(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> list[dict[str, Any]]:
+    """题库总览：该训练全部题目与状态（不含参考答案——防背题）。"""
+    active = _connect(conn)
+    own = conn is None
+    try:
+        rows = active.execute(
+            "SELECT item_key, knowledge_point, question_type, substr(question_text, 1, 200) "
+            "AS question_text, practiced_count, status, cooldown_until FROM question_bank "
+            "WHERE training_id = ? ORDER BY knowledge_point, item_key",
+            (int(training_id),),
+        ).fetchall()
+        today_iso = local_today().isoformat()
+        return [
+            {
+                "item_key": str(r["item_key"]),
+                "knowledge_point": r["knowledge_point"],
+                "question_type": r["question_type"] or "qa",
+                "question_text": r["question_text"],
+                "practiced_count": int(r["practiced_count"] or 0),
+                "status": r["status"] or "active",
+                "in_cooldown": bool(r["cooldown_until"] and str(r["cooldown_until"]) > today_iso),
+            }
+            for r in rows
+        ]
+    finally:
+        if own:
+            active.close()
+
+
 def question_meta(plan_id: int, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     """计划项内联的题型与选项 JSON 原文（随题固化），供前端渲染客观题。"""
     active = _connect(conn)
@@ -411,6 +449,105 @@ def question_meta(plan_id: int, *, conn: sqlite3.Connection | None = None) -> di
     if row is None:
         return {"question_type": None, "options": None}
     return {"question_type": row["question_type"], "options": row["options"]}
+
+
+def _local_day_start_utc(today: date) -> str:
+    """本地今天 0 点对应的 UTC ISO 时刻（用于"今天作答过"的比较）。"""
+    tz = ZoneInfo(LOCAL_TZ_NAME)
+    local_midnight = datetime(today.year, today.month, today.day, tzinfo=tz)
+    return local_midnight.astimezone(timezone.utc).isoformat()
+
+
+def _practiced_today_keys(
+    active: sqlite3.Connection, today: date, training_id: int | None = None
+) -> set[str]:
+    """今天（本地日）已作答过的训练项 item_key 集合——同一训练项一天只推一轮。
+
+    用 SQLite date(localtime) 判日：与 practiced_at 的存储格式（ISO/老格式）解耦。
+    """
+    sql = (
+        "SELECT DISTINCT item_key FROM plan_items WHERE kind = 'train' "
+        "AND status = 'practiced' AND date(practiced_at, 'localtime') = ?"
+    )
+    params: list[Any] = [today.isoformat()]
+    if training_id is not None:
+        sql += " AND training_id = ?"
+        params.append(int(training_id))
+    rows = active.execute(sql, params).fetchall()
+    return {str(r["item_key"]) for r in rows}
+
+
+def pregenerate_questions(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> dict[str, Any]:
+    """提前生成该训练全部未生成轮次的题目（"早早生成"，不再临时现出题）。
+
+    幂等：只处理 question 为空的轮次；模型不可用时直接跳过（不产出降级题目）。
+    后台任务调用——逐轮 LLM 生成，大训练耗时数分钟属预期。
+    """
+    from src.llm import client as llm_client
+    from src.services.answer_service import ensure_question
+
+    if not llm_client.DEEPSEEK_API_KEY:
+        return {"skipped": "llm_unavailable", "generated": 0, "total": 0}
+
+    active = _connect(conn)
+    own = conn is None
+    try:
+        ids = [
+            int(r["id"])
+            for r in active.execute(
+                "SELECT id FROM plan_items WHERE training_id = ? AND kind = 'train' "
+                "AND status = 'planned' AND (question IS NULL OR question = '') "
+                "ORDER BY due_date, round_index, id",
+                (int(training_id),),
+            ).fetchall()
+        ]
+        generated = 0
+        for plan_id in ids:
+            try:
+                ensure_question(plan_id, conn=active)
+                generated += 1
+            except Exception as exc:  # 单题失败不阻塞整批（留下次重试）
+                logger.warning("pregenerate_questions: plan %s failed: %s", plan_id, exc)
+        if own:
+            active.commit()
+        logger.info("pregenerate_questions: training=%s generated=%s/%s", training_id, generated, len(ids))
+        return {"generated": generated, "total": len(ids)}
+    finally:
+        if own:
+            active.close()
+
+
+def done_today_tasks(
+    today: date | None = None, *, conn: sqlite3.Connection | None = None
+) -> list[PlannedTask]:
+    """今天已作答的轮次（跨训练，按作答时间倒序）——今日页"已作答"分组的数据源。"""
+    effective_today = today or local_today()
+    start_iso = _local_day_start_utc(effective_today)
+    active = _connect(conn)
+    own = conn is None
+    try:
+        rows = active.execute(
+            "SELECT p.*, t.topic AS training_topic FROM plan_items p "
+            "JOIN trainings t ON t.id = p.training_id "
+            "WHERE p.kind = 'train' AND p.status = 'practiced' AND p.practiced_at >= ? "
+            "ORDER BY p.practiced_at DESC",
+            (start_iso,),
+        ).fetchall()
+        tasks: list[PlannedTask] = []
+        cache: dict[int, dict[str, dict[str, Any]]] = {}
+        for row in rows:
+            tid = int(row["training_id"])
+            if tid not in cache:
+                cache[tid] = _item_metadata(active, tid)
+            tasks.append(
+                _row_to_task(row, metadata=cache[tid], training_topic=str(row["training_topic"] or ""))
+            )
+        return tasks
+    finally:
+        if own:
+            active.close()
 
 
 def today_summary(

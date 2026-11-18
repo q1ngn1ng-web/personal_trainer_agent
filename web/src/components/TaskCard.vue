@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { api, type AnswerResult, type PointSpec, type TodayTask } from "../api";
 
 const props = defineProps<{ task: TodayTask; autoOpen?: boolean }>();
-const emit = defineEmits<{ refresh: [] }>();
+const emit = defineEmits<{ refresh: []; answered: [planId: number] }>();
 const cardEl = ref<HTMLElement | null>(null);
 const reanswer = ref(false);
 
@@ -27,6 +27,15 @@ const questionMeta = ref<{ question_type: string | null; options: { key: string;
 const loadingQ = ref(false);
 const answer = ref(props.task.answer_text || "");
 const selectedKey = ref("");
+const skipOpen = ref(false);
+const skipReason = ref("");
+const isFill = computed(() => {
+  const qtype = (questionMeta.value?.question_type ?? props.task.question_type) || "qa";
+  return qtype === "fill";
+});
+const fillSegments = computed(() => (question.value || "").split(/_{3,}/));
+const fillBlankCount = computed(() => Math.max(fillSegments.value.length - 1, 0));
+const fillBlankValues = ref<string[]>([]);
 const submitting = ref(false);
 const result = ref<AnswerResult | null>(null);
 const showPoints = ref(false);
@@ -81,6 +90,7 @@ async function ensureQuestionLoaded() {
     const res = await api.question(props.task.plan_id);
     question.value = res.question;
     questionMeta.value = { question_type: res.question_type, options: res.options };
+    fillBlankValues.value = new Array(fillBlankCount.value).fill("");
     if (res.points) {
       savedPoints.value = res.points;
       pointsLoaded.value = true;
@@ -131,15 +141,31 @@ async function savePoints() {
 }
 
 async function submit() {
-  const value = (isChoice.value ? selectedKey.value : answer.value).trim();
-  if (!value) {
-    toast(isChoice.value ? "请先选择一个选项" : "先写下你的作答");
-    return;
+  let value: string;
+  if (isChoice.value) {
+    value = selectedKey.value.trim();
+    if (!value) {
+      toast("请先选择一个选项");
+      return;
+    }
+  } else if (isFill.value) {
+    value = fillBlankValues.value.map((v) => v.trim()).join("|");
+    if (!value.replace(/\|/g, "").trim()) {
+      toast("请把每个空都填上");
+      return;
+    }
+  } else {
+    value = answer.value.trim();
+    if (!value) {
+      toast("先写下你的作答");
+      return;
+    }
   }
   submitting.value = true;
   try {
     result.value = await api.answer(props.task.plan_id, value);
     reanswer.value = false;
+    emit("answered", props.task.plan_id);
     emit("refresh");
   } catch (e: any) {
     toast(e.message || "提交失败");
@@ -172,8 +198,14 @@ async function loadExplanation() {
 }
 
 async function skip() {
+  if (!skipOpen.value) {
+    skipOpen.value = true;
+    return;
+  }
+  const reason = skipReason.value.trim() || "未填写原因";
   try {
-    await api.skip(props.task.plan_id);
+    await api.skip(props.task.plan_id, reason);
+    skipOpen.value = false;
     emit("refresh");
     toast("已跳过");
   } catch (e: any) {
@@ -237,13 +269,29 @@ async function skip() {
               <span>{{ opt.text }}</span>
             </label>
           </div>
+          <div v-else-if="isFill && fillSegments.length > 1" class="question-fill">
+            <template v-for="(seg, i) in fillSegments" :key="i">
+              <span class="fill-seg">{{ seg }}</span>
+              <input
+                v-if="i < fillSegments.length - 1"
+                v-model="fillBlankValues[i]"
+                class="fill-input"
+                :placeholder="'第 ' + (i + 1) + ' 空'"
+              />
+            </template>
+          </div>
           <textarea v-else v-model="answer" class="textarea" placeholder="凭理解作答，判分口径与测验一致（按要点覆盖判分）"></textarea>
           <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
             <button class="btn primary" :disabled="submitting" @click="submit">
-              {{ submitting ? '判分中…' : isChoice ? '提交选择' : '提交作答' }}
+              {{ submitting ? '判分中…' : isChoice ? '提交选择' : isFill ? '提交填空' : '提交作答' }}
             </button>
             <button v-if="!isChoice" class="btn ghost" @click="practiceOnly">只练不判</button>
             <button class="btn text" @click="skip">跳过</button>
+          </div>
+          <div v-if="skipOpen" style="display: flex; gap: 8px; margin-top: 8px; align-items: center;">
+            <input v-model="skipReason" class="input" style="flex: 1;" placeholder="跳过原因（必填，例如：今天没时间）" />
+            <button class="btn ghost" @click="skip">确认跳过</button>
+            <button class="btn text" @click="skipOpen = false">取消</button>
           </div>
         </template>
 

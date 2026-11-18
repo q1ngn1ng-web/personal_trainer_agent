@@ -39,6 +39,17 @@ async function load() {
 }
 onMounted(load);
 
+const autoOpenId = ref<number | null>(null);
+const doneTasks = computed(() => data.value?.done || []);
+
+// 答完一题自动切到下一个未完成任务（展开新卡片）
+function onAnswered(planId: number) {
+  const tasks = data.value?.tasks || [];
+  const idx = tasks.findIndex((t) => t.plan_id === planId);
+  const next = tasks.slice(idx + 1).find((t) => t.status === "planned");
+  autoOpenId.value = next ? next.plan_id : null;
+}
+
 const groups = computed(() => {
   if (!data.value) return [];
   return data.value.groups.map((g) => ({
@@ -81,19 +92,27 @@ async function sendSignal(trainingId: number, type: string) {
         <span style="font-size: 13px;">去「训练」页看看你的路径，或休息一下</span>
       </div>
 
-      <div v-for="g in groups" :key="g.training_id" class="card">
-        <div class="card-head">
-          <div style="min-width: 0;">
-            <div class="card-title">{{ g.topic }}</div>
-            <div style="font-size: 12.5px; color: var(--muted); margin-top: 2px;">
-              {{ g.practiced }}/{{ g.total }} 完成 · 约 {{ g.minutes }} 分钟
+      <TransitionGroup name="card-fade">
+        <div v-for="g in groups" :key="g.training_id" class="card">
+          <div class="card-head">
+            <div style="min-width: 0;">
+              <div class="card-title">{{ g.topic }}</div>
+              <div style="font-size: 12.5px; color: var(--muted); margin-top: 2px;">
+                {{ g.practiced }}/{{ g.total }} 完成 · 约 {{ g.minutes }} 分钟
+              </div>
             </div>
+            <span class="badge" :class="g.pct === 100 ? 'ok' : 'brand'">{{ g.pct }}%</span>
           </div>
-          <span class="badge" :class="g.pct === 100 ? 'ok' : 'brand'">{{ g.pct }}%</span>
-        </div>
-        <div class="progress" style="margin-bottom: 14px;"><i :style="{ width: g.pct + '%' }"></i></div>
+          <div class="progress" style="margin-bottom: 14px;"><i :style="{ width: g.pct + '%' }"></i></div>
 
-        <TaskCard v-for="t in g.tasks" :key="t.plan_id" :task="t" @refresh="load" />
+          <TaskCard
+            v-for="t in g.tasks"
+            :key="t.plan_id"
+            :task="t"
+            :auto-open="autoOpenId === t.plan_id"
+            @answered="onAnswered"
+            @refresh="load"
+          />
 
         <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);">
           <div style="font-size: 12.5px; color: var(--faint); margin-bottom: 8px;">今天的感受（反馈会调整训练安排）</div>
@@ -103,6 +122,18 @@ async function sendSignal(trainingId: number, type: string) {
             </button>
           </div>
         </div>
+        </div>
+      </TransitionGroup>
+
+      <!-- 今天已作答：不闪走，留在这里看结果与解析 -->
+      <div v-if="doneTasks.length" class="card" style="margin-top: 16px;">
+        <div class="card-head">
+          <div class="card-title">今天已作答</div>
+          <span class="badge gray">{{ doneTasks.length }} 项</span>
+        </div>
+        <TransitionGroup name="card-fade">
+          <TaskCard v-for="t in doneTasks" :key="t.plan_id" :task="t" />
+        </TransitionGroup>
       </div>
     </template>
   </div>

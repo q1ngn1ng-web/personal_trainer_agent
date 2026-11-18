@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -249,8 +249,14 @@ def me(viewer: Viewer = Depends(require_viewer)) -> dict[str, Any]:
 
 
 @app.get("/api/today")
-def today(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
-    """今日训练（跨训练聚合）：汇总 + 任务明细（P1）。"""
+def today(
+    background_tasks: BackgroundTasks,
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """今日训练（跨训练聚合）：汇总 + 任务明细 + 今日已作答（P1）。
+
+    早早生成：今日任务的题目若未生成，交后台任务补齐（幂等，模型不可用时跳过）。
+    """
     summary = plan_service.today_summary()
     visible_ids = _visible_training_ids(viewer)
     tasks = [
@@ -259,12 +265,20 @@ def today(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
         if visible_ids is None or task.training_id in visible_ids
     ]
     groups = [group for group in summary["groups"] if visible_ids is None or group["training_id"] in visible_ids]
+    done = [
+        _task_payload(task)
+        for task in plan_service.done_today_tasks()
+        if visible_ids is None or task.training_id in visible_ids
+    ]
+    for tid in sorted({task.training_id for task in summary["tasks"]}):
+        background_tasks.add_task(plan_service.pregenerate_questions, tid)
     return {
         "viewer": _viewer_payload(viewer) if viewer else None,
         "count": len(tasks),
         "minutes": sum(task["planned_minutes"] for task in tasks),
         "groups": groups,
         "tasks": tasks,
+        "done": done,
     }
 
 
@@ -433,6 +447,52 @@ def training_path(training_id: int, viewer: Viewer | None = Depends(current_view
             "reason": report.reason,
         },
     }
+
+
+@app.post("/api/trainings/{training_id}/questions/pregenerate")
+def pregenerate_training_questions(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """手动触发：把该训练全部未生成轮次的题目提前生成（同步执行）。"""
+    _load_training_for(viewer, training_id)
+    return plan_service.pregenerate_questions(int(training_id))
+
+
+@app.delete("/api/trainings/{training_id}")
+def delete_training_view(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, bool]:
+    """删除训练及其全部关联数据（不可恢复；仅创建者）。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is not None:
+        if training.owner_user_id in (None, "") or int(training.owner_user_id) != int(viewer.user_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有创建者可以删除训练")
+    return {"ok": queries.delete_training(int(training_id))}
+
+
+@app.post("/api/trainings/{training_id}/archive")
+def archive_training_view(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """归档已完成的训练（仅 owner；仅已达标状态可归档）。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is not None:
+        if training.owner_user_id in (None, "") or int(training.owner_user_id) != int(viewer.user_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有创建者可以归档")
+    if training.status != "completed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有已达标的训练可以归档")
+    queries.update_training(int(training_id), status="archived")
+    return {"ok": True, "status": "archived"}
+
+
+@app.get("/api/trainings/{training_id}/questions")
+def training_questions(
+    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """题库总览：该训练的全部题目与状态（不含参考答案，防背题）。"""
+    _load_training_for(viewer, training_id)
+    rows = plan_service.questions_overview(int(training_id))
+    return {"count": len(rows), "questions": rows}
 
 
 @app.post("/api/trainings/{training_id}/plan/regenerate")
@@ -1563,7 +1623,11 @@ def wizard_activate(training_id: int, viewer: Viewer | None = Depends(current_vi
 
 
 @app.post("/api/wizard/{training_id}/path")
-def wizard_generate_path(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
+def wizard_generate_path(
+    training_id: int,
+    background_tasks: BackgroundTasks,
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
     _require_user(viewer)
     from src.services import path_service, plan_service
 
@@ -1576,6 +1640,8 @@ def wizard_generate_path(training_id: int, viewer: Viewer | None = Depends(curre
         )
         path_service.save_skeleton(skeleton)
         plan_service.generate_plan(int(training_id))
+        # 早早生成：路径一出就把题目全部预生成（后台，幂等）
+        background_tasks.add_task(plan_service.pregenerate_questions, int(training_id))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"路径生成失败：{exc}") from exc
     return {

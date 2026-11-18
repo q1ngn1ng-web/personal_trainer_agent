@@ -213,6 +213,27 @@ _PRACTICE_ATTEMPTS_COLUMNS = (
 )
 
 
+_SHARE_LINKS_DDL = """
+CREATE TABLE share_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    revoked_at DATETIME,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+"""
+
+
+def _ensure_share_links_table(conn: sqlite3.Connection) -> bool:
+    """建 ``share_links``（训练计划分享链接）表。返回是否新建。"""
+    if _column_names(conn, "share_links"):
+        return False
+    conn.execute(_SHARE_LINKS_DDL)
+    return True
+
+
 def _rebuild_practice_attempts(conn: sqlite3.Connection) -> None:
     """放宽 ``source`` 枚举：新增 ``rule``（客观题确定性判分，change grading-consistency 延伸）。
 
@@ -498,6 +519,13 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
 
     needs_grading_cache = not _column_names(conn, "grading_cache")
 
+    needs_share_links = not _column_names(conn, "share_links")
+    training_columns = _column_names(conn, "trainings")
+    needs_shared_from = bool(training_columns) and (
+        "shared_from_training_id" not in training_columns
+        or "shared_by_user_id" not in training_columns
+    )
+
     practice_sql = _table_sql(conn, "practice_attempts")
     needs_practice_source = bool(practice_sql) and "source IN ('self', 'quiz', 'llm')" in practice_sql
 
@@ -519,6 +547,8 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_account
         or needs_grading_cache
         or needs_practice_source
+        or needs_share_links
+        or needs_shared_from
     ):
         return applied
 
@@ -568,6 +598,16 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_practice_source:
                 _rebuild_practice_attempts(conn)
                 applied.append("practice_attempts:source_rule")
+            if needs_share_links:
+                if _ensure_share_links_table(conn):
+                    applied.append("share_links:new_table")
+            if needs_shared_from:
+                added = _add_missing_columns(
+                    conn, "trainings",
+                    {"shared_from_training_id": "INTEGER", "shared_by_user_id": "INTEGER"},
+                )
+                if added:
+                    applied.append("trainings:shared_from")
             if needs_account:
                 for table, cols in account_columns.items():
                     added = _add_missing_columns(conn, table, cols)
