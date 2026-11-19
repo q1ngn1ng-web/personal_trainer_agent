@@ -485,6 +485,15 @@ def archive_training_view(
     return {"ok": True, "status": "archived"}
 
 
+@app.get("/api/sources/overview")
+def sources_overview_view(
+    viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """资料总览：按内容指纹聚合，回答「这份资料被几个训练计划引用」。"""
+    visible_ids = _visible_training_ids(viewer)
+    return {"sources": source_service.sources_overview(visible_ids)}
+
+
 @app.get("/api/trainings/{training_id}/questions")
 def training_questions(
     training_id: int, viewer: Viewer | None = Depends(current_viewer)

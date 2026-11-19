@@ -39,6 +39,59 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def sources_overview(
+    visible_training_ids: list[int] | None,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """资料总览：按内容指纹聚合，回答「这份资料被几个训练计划引用」。
+
+    同一 checksum = 同一份文档被导入到多个训练计划（如任务分享产生的副本）——
+    聚合为一条，引用数 = 覆盖的训练计划数，并列出各计划的主题。
+    ``visible_training_ids`` 为 None（个人版无鉴权）时不限训练；
+    否则仅统计调用方可见的训练（引用计数也按可见口径）。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        rows = active.execute(
+            "SELECT s.checksum, s.title, s.type, s.parse_status, s.enabled, s.training_id, "
+            "t.topic AS training_topic, "
+            "(SELECT COUNT(*) FROM source_chunks c WHERE c.source_id = s.id) AS chunk_count "
+            "FROM sources s JOIN trainings t ON t.id = s.training_id ORDER BY s.id"
+        ).fetchall()
+    finally:
+        if own:
+            active.close()
+    visible = set(visible_training_ids) if visible_training_ids is not None else None
+    groups: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        tid = int(r["training_id"])
+        if visible is not None and tid not in visible:
+            continue
+        key = str(r["checksum"]) if r["checksum"] else f"title:{r['title']}#{tid}"
+        g = groups.setdefault(
+            key,
+            {
+                "checksum": r["checksum"],
+                "title": str(r["title"]),
+                "type": str(r["type"]),
+                "parse_status": str(r["parse_status"] or "pending"),
+                "enabled": bool(r["enabled"]),
+                "chunk_total": 0,
+                "trainings": [],
+            },
+        )
+        g["chunk_total"] += int(r["chunk_count"] or 0)
+        g["trainings"].append({"training_id": tid, "topic": str(r["training_topic"] or "")})
+    result = []
+    for g in groups.values():
+        g["reference_count"] = len(g["trainings"])
+        result.append(g)
+    result.sort(key=lambda x: (-x["reference_count"], x["title"]))
+    return result
+
+
 def _connect(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
     return conn if conn is not None else get_connection()
 

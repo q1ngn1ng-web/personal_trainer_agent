@@ -321,6 +321,19 @@ export const api = {
       "/api/trainings/" + trainingId + "/plan/regenerate",
       { method: "POST" }
     ),
+  sourcesOverview: () =>
+    request<{
+      sources: {
+        checksum: string | null;
+        title: string;
+        type: string;
+        parse_status: string;
+        enabled: boolean;
+        chunk_total: number;
+        reference_count: number;
+        trainings: { training_id: number; topic: string }[];
+      }[];
+    }>("/api/sources/overview"),
   dashboard: () => request<DashboardResponse>("/api/dashboard"),
   weeklyReview: (trainingId: number) =>
     request<WeeklyReviewResponse>("/api/trainings/" + trainingId + "/review/weekly"),
