@@ -264,6 +264,22 @@ const typeLabel: Record<string, string> = {
             <TaskCard :task="round" @refresh="loadPlan" />
           </div>
         </div>
+
+        <div v-if="questionList.length" class="card" style="margin-top: 14px;">
+          <div class="card-head">
+            <div class="card-title">题库总览（{{ questionList.length }} 题）</div>
+            <span class="badge gray">不含参考答案</span>
+          </div>
+          <div v-for="q in questionList" :key="q.item_key + q.question_text" class="list-item">
+            <span class="badge" :class="q.in_cooldown ? 'gray' : 'ok'">{{ q.in_cooldown ? '冷却中' : '可用' }}</span>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-size: 13.5px;">{{ q.question_text || "（题目未生成）" }}</div>
+              <div style="font-size: 12px; color: var(--faint);">
+                {{ q.knowledge_point || "未分类" }} · {{ q.question_type }} · 练过 {{ q.practiced_count }} 次
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
 
       <!-- ============ 路径 ============ -->

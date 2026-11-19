@@ -146,6 +146,7 @@ a { color: var(--brand); text-decoration: none; }
   transition: background 0.15s, border-color 0.15s, opacity 0.15s; line-height: 1.5;
 }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn.danger { background: #b3261e; color: #fff; }
 .btn.primary { background: var(--brand); color: #fff; }
 .btn.primary:hover:not(:disabled) { background: var(--brand-strong); }
 .btn.ghost { background: var(--surface); color: var(--text); border-color: var(--line-strong); }

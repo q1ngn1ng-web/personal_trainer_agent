@@ -31,6 +31,9 @@ async function load() {
   loading.value = true;
   try {
     data.value = await api.today();
+    // 快照对账：后台 done 列表已落地（含判分结果）的，移除临时快照
+    const landed = new Set((data.value?.done || []).map((t) => t.plan_id));
+    pendingDone.value = pendingDone.value.filter((p) => !landed.has(p.task.plan_id));
   } catch (e: any) {
     (window as any).__toast?.(e.message || "加载失败");
   } finally {
@@ -41,13 +44,31 @@ onMounted(load);
 
 const autoOpenId = ref<number | null>(null);
 const doneTasks = computed(() => data.value?.done || []);
+const pendingPlanIds = computed(() => new Set(pendingDone.value.map((p) => p.task.plan_id)));
+const allDone = computed(() => {
+  const landed = new Set(doneTasks.value.map((t) => t.plan_id));
+  const snapshots = pendingDone.value
+    .filter((p) => !landed.has(p.task.plan_id))
+    .map((p) => ({ ...p.task, judging: true }));
+  return [...snapshots, ...doneTasks.value.map((t) => ({ ...t, judging: pendingPlanIds.has(t.plan_id) }))];
+});
 
-// 答完一题自动切到下一个未完成任务（展开新卡片）
-function onAnswered(planId: number) {
+// 提交即移入"今天已作答"：快照先行，判分由下方卡片完成（沉浸式）
+const pendingDone = ref<{ task: TodayTask; judging: boolean }[]>([]);
+const hiddenPlanIds = computed(() => new Set(pendingDone.value.map((p) => p.task.plan_id)));
+
+function onAnswered(task: TodayTask) {
+  pendingDone.value.push({ task: { ...task, status: "practiced" }, judging: true });
+  // 自动切到下一个未完成任务
   const tasks = data.value?.tasks || [];
-  const idx = tasks.findIndex((t) => t.plan_id === planId);
-  const next = tasks.slice(idx + 1).find((t) => t.status === "planned");
+  const idx = tasks.findIndex((t) => t.plan_id === task.plan_id);
+  const next = tasks.slice(idx + 1).find((t) => t.status === "planned" && t.plan_id !== task.plan_id);
   autoOpenId.value = next ? next.plan_id : null;
+}
+
+function onSubmitFailed(planId: number) {
+  pendingDone.value = pendingDone.value.filter((p) => p.task.plan_id !== planId);
+  toast("提交失败，题目已放回待完成");
 }
 
 const groups = computed(() => {
@@ -106,11 +127,12 @@ async function sendSignal(trainingId: number, type: string) {
           <div class="progress" style="margin-bottom: 14px;"><i :style="{ width: g.pct + '%' }"></i></div>
 
           <TaskCard
-            v-for="t in g.tasks"
+            v-for="t in g.tasks.filter((t) => !hiddenPlanIds.has(t.plan_id))"
             :key="t.plan_id"
             :task="t"
             :auto-open="autoOpenId === t.plan_id"
             @answered="onAnswered"
+            @submit-failed="onSubmitFailed"
             @refresh="load"
           />
 
@@ -132,7 +154,12 @@ async function sendSignal(trainingId: number, type: string) {
           <span class="badge gray">{{ doneTasks.length }} 项</span>
         </div>
         <TransitionGroup name="card-fade">
-          <TaskCard v-for="t in doneTasks" :key="t.plan_id" :task="t" />
+          <TaskCard
+            v-for="t in allDone"
+            :key="t.plan_id"
+            :task="t"
+            :judging="pendingPlanIds.has(t.plan_id)"
+          />
         </TransitionGroup>
       </div>
     </template>

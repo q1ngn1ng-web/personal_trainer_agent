@@ -2,8 +2,12 @@
 import { computed, ref, watch } from "vue";
 import { api, type AnswerResult, type PointSpec, type TodayTask } from "../api";
 
-const props = defineProps<{ task: TodayTask; autoOpen?: boolean }>();
-const emit = defineEmits<{ refresh: []; answered: [planId: number] }>();
+const props = defineProps<{ task: TodayTask; autoOpen?: boolean; judging?: boolean }>();
+const emit = defineEmits<{
+  refresh: [];
+  answered: [task: TodayTask];
+  submitFailed: [planId: number];
+}>();
 const cardEl = ref<HTMLElement | null>(null);
 const reanswer = ref(false);
 
@@ -161,13 +165,16 @@ async function submit() {
       return;
     }
   }
+  // 沉浸式：提交瞬间卡片即移入"今天已作答"分组，判分在下方完成（父层按快照渲染）
+  emit("answered", { ...props.task, answer_text: value, status: "practiced" as const });
   submitting.value = true;
   try {
     result.value = await api.answer(props.task.plan_id, value);
     reanswer.value = false;
-    emit("answered", props.task.plan_id);
     emit("refresh");
   } catch (e: any) {
+    // 判分失败：让父层把卡片放回待完成，并提示
+    emit("submitFailed", props.task.plan_id);
     toast(e.message || "提交失败");
   } finally {
     submitting.value = false;
@@ -301,16 +308,23 @@ async function skip() {
             <span v-if="result.score != null" style="margin-left: 8px; font-weight: 600;">得分 {{ (result.score * 100).toFixed(0) }}</span>
             <p style="margin-top: 4px;">{{ result.reason }}</p>
             <p v-if="result.mastered" style="margin-top: 6px;"><span class="badge ok">🎉 连续通过，已达标</span></p>
+            <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
             <div v-if="result.reference_answer" class="ref-answer"><b>参考答案</b>：{{ result.reference_answer }}</div>
           </template>
           <template v-else>
             <b>{{ task.verdict === 'pass' ? '✓ 通过' : '✗ 未通过' }}</b>
+            <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
             <div v-if="task.reference_answer" class="ref-answer"><b>参考答案</b>：{{ task.reference_answer }}</div>
           </template>
         </div>
         <div v-else-if="done" class="verdict-panel none">
+          <div v-if="judging" style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+            <span class="spinner"></span>
+            <b>大模型判分中…结果出来会自动更新</b>
+          </div>
           <template v-if="question">
             <div class="question-box">{{ question }}</div>
+            <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
             <div v-if="questionMeta?.reference_answer" class="ref-answer"><b>参考答案</b>：{{ questionMeta.reference_answer }}</div>
           </template>
           <template v-else>
@@ -321,7 +335,7 @@ async function skip() {
               </button>
             </div>
           </template>
-          <div v-if="task.status === 'practiced' && !task.verdict && !reanswer" style="margin-top: 8px;">
+          <div v-if="task.status === 'practiced' && !task.verdict && !judging && !reanswer" style="margin-top: 8px;">
             <button class="btn ghost" @click="reanswer = true">✍️ 重新作答并判分</button>
           </div>
         </div>

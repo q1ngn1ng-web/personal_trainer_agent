@@ -58,6 +58,7 @@ export type TodayTask = {
   answer_text: string | null;
   verdict: string | null;
   status: "planned" | "practiced" | "skipped";
+  judging?: boolean;
 };
 
 export type PointSpec = {

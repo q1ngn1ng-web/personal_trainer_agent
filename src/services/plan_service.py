@@ -556,21 +556,51 @@ def today_summary(
     today: date | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """首页「今日训练」用的汇总：条数、合计时长、按训练分组。"""
+    """首页「今日训练」用的汇总：条数、合计时长、按训练分组。
+
+    分组统计口径：``total`` = 今日应做轮次（待完成 + 今天已完成）；
+    ``practiced`` = 今天已完成——前端完成度随作答递增（修复"百分比不动"）。
+    """
     tasks = today_tasks(training_id=training_id, today=today, conn=conn)
+    done = done_today_tasks(today=today, conn=conn)
+    done_by_training: dict[int, int] = {}
+    for task in done:
+        done_by_training[task.training_id] = done_by_training.get(task.training_id, 0) + 1
     groups: dict[int, dict[str, Any]] = {}
     for task in tasks:
         group = groups.setdefault(
             task.training_id,
-            {"training_id": task.training_id, "topic": task.training_topic, "count": 0, "minutes": 0},
+            {
+                "training_id": task.training_id,
+                "topic": task.training_topic,
+                "count": 0,
+                "minutes": 0,
+                "practiced": done_by_training.get(task.training_id, 0),
+                "total": 0,
+            },
         )
         group["count"] += 1
         group["minutes"] += int(task.planned_minutes or 0)
+    # 今日应做总数 = 待完成 + 今天已完成；只完成过的训练也进分组
+    for tid, done_count in done_by_training.items():
+        if tid in groups:
+            groups[tid]["total"] = groups[tid]["count"] + done_count
+    for task in done:
+        if task.training_id not in groups:
+            groups[task.training_id] = {
+                "training_id": task.training_id,
+                "topic": task.training_topic,
+                "count": 0,
+                "minutes": 0,
+                "practiced": done_by_training.get(task.training_id, 0),
+                "total": done_by_training.get(task.training_id, 0),
+            }
     return {
         "count": len(tasks),
         "minutes": total_minutes(tasks),
         "groups": list(groups.values()),
         "tasks": tasks,
+        "done": done,
     }
 
 
