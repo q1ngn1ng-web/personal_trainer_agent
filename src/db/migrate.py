@@ -213,6 +213,92 @@ _PRACTICE_ATTEMPTS_COLUMNS = (
 )
 
 
+_VISIBILITY_MIGRATION_DDL = {
+    "share-links-table": """
+CREATE TABLE IF NOT EXISTS share_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    revoked_at DATETIME,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+""",
+    "training-shares-table": """
+CREATE TABLE IF NOT EXISTS training_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (training_id, user_id),
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+""",
+    "source-shares-table": """
+CREATE TABLE IF NOT EXISTS source_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (source_id, user_id),
+    FOREIGN KEY (source_id) REFERENCES sources(id)
+)
+""",
+}
+
+_TRAINING_VISIBILITY_COLUMN = "visibility TEXT NOT NULL DEFAULT 'private'"
+
+
+def _apply_visibility_migration(conn: sqlite3.Connection) -> list[str]:
+    """可见性三档迁移（change content-visibility）：
+    sources.scope 两档 → 三档（重建表 + 数据映射 org_shared→public / personal→private），
+    trainings 补 visibility 列（默认 private），新建两张指定成员授权表。
+    """
+    applied: list[str] = []
+    # 1) sources 重建（CHECK 变更必须重建表）
+    conn.execute("ALTER TABLE sources RENAME TO sources_old_vis")
+    conn.execute(
+        "CREATE TABLE sources ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, training_id INTEGER NOT NULL, "
+        "type TEXT NOT NULL, title TEXT NOT NULL, origin TEXT, origin_url TEXT, "
+        "fetched_at DATETIME, snapshot_text TEXT, org_id INTEGER, "
+        "scope TEXT DEFAULT 'private' CHECK (scope IN ('private', 'specific', 'public')), "
+        "enabled INTEGER DEFAULT 1, checksum TEXT, parse_status TEXT DEFAULT 'pending' "
+        "CHECK (parse_status IN ('pending', 'ok', 'failed', 'unsupported')), parse_error TEXT, "
+        "imported_at DATETIME NOT NULL, department_id INTEGER, "
+        "FOREIGN KEY (training_id) REFERENCES trainings(id))"
+    )
+    shared_cols = [c for c in _column_names(conn, "sources_old_vis") if c in _column_names(conn, "sources")]
+    select_cols = ", ".join(
+        "CASE WHEN scope = 'org_shared' THEN 'public' ELSE 'private' END" if c == "scope" else c
+        for c in shared_cols
+    )
+    conn.execute(
+        f"INSERT INTO sources ({', '.join(shared_cols)}) "
+        f"SELECT {select_cols} FROM sources_old_vis"
+    )
+    conn.execute("DROP TABLE sources_old_vis")
+    applied.append("sources:scope_three_tier")
+
+    # 2) trainings.visibility 列
+    if "visibility" not in _column_names(conn, "trainings"):
+        conn.execute(f"ALTER TABLE trainings ADD COLUMN {_TRAINING_VISIBILITY_COLUMN}")
+        applied.append("trainings:visibility_column")
+
+    # 3) 两张授权表
+    for name, ddl in _VISIBILITY_MIGRATION_DDL.items():
+        if name in ("share-links-table",):
+            continue
+        if _column_names(conn, name):
+            continue
+        conn.execute(ddl)
+        applied.append(f"{name}:new_table")
+    return applied
+
+
 _SHARE_LINKS_DDL = """
 CREATE TABLE share_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -520,6 +606,8 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     needs_grading_cache = not _column_names(conn, "grading_cache")
 
     needs_share_links = not _column_names(conn, "share_links")
+    sources_sql = _table_sql(conn, "sources")
+    needs_visibility = bool(sources_sql) and "scope IN ('private', 'specific', 'public')" not in sources_sql
     training_columns = _column_names(conn, "trainings")
     needs_shared_from = bool(training_columns) and (
         "shared_from_training_id" not in training_columns
@@ -549,6 +637,7 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_practice_source
         or needs_share_links
         or needs_shared_from
+        or needs_visibility
     ):
         return applied
 
@@ -601,6 +690,8 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_share_links:
                 if _ensure_share_links_table(conn):
                     applied.append("share_links:new_table")
+            if needs_visibility:
+                applied.extend(_apply_visibility_migration(conn))
             if needs_shared_from:
                 added = _add_missing_columns(
                     conn, "trainings",

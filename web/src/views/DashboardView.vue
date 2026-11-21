@@ -44,33 +44,8 @@ function toast(msg: string) {
   (window as any).__toast?.(msg);
 }
 
-const sourcesOverview = ref<
-  {
-    checksum: string | null;
-    title: string;
-    type: string;
-    parse_status: string;
-    enabled: boolean;
-    chunk_total: number;
-    reference_count: number;
-    trainings: { training_id: number; topic: string }[];
-  }[]
->([]);
-const sourcesLoading = ref(false);
 const deletingId = ref<number | null>(null);
 const archivingId = ref<number | null>(null);
-
-async function loadSources() {
-  sourcesLoading.value = true;
-  try {
-    const res = await api.sourcesOverview();
-    sourcesOverview.value = res.sources;
-  } catch (e: any) {
-    toast(e.message || "资料加载失败");
-  } finally {
-    sourcesLoading.value = false;
-  }
-}
 
 async function deleteTrainingRow(trainingId: number) {
   if (!window.confirm("彻底删除这个训练及其全部数据？不可恢复。")) return;
@@ -78,7 +53,7 @@ async function deleteTrainingRow(trainingId: number) {
   try {
     await api.deleteTraining(trainingId);
     toast("已删除");
-    await Promise.all([load(), loadSources()]);
+    await load();
   } catch (e: any) {
     toast(e.message || "删除失败");
   } finally {
@@ -91,7 +66,7 @@ async function archiveTrainingRow(trainingId: number) {
   try {
     await api.archiveTraining(trainingId);
     toast("已归档");
-    await Promise.all([load(), loadSources()]);
+    await load();
   } catch (e: any) {
     toast(e.message || "归档失败");
   } finally {
@@ -108,7 +83,6 @@ async function load() {
   } finally {
     loading.value = false;
   }
-  await loadSources();
 }
 onMounted(load);
 </script>
@@ -144,27 +118,6 @@ onMounted(load);
 
       <div v-if="!data.trainings.length" class="card empty">
         <span class="ico">🧭</span>还没有训练——去「新建训练」开始第一课。
-      </div>
-
-      <div class="card" style="margin-top: 16px;">
-        <div class="card-head">
-          <div class="card-title">资料总览（按内容指纹聚合）</div>
-          <span class="badge gray">{{ sourcesOverview.length }} 份</span>
-        </div>
-        <div v-if="sourcesLoading" class="loading-center" style="padding: 14px 0;"><span class="spinner"></span></div>
-        <div v-else-if="!sourcesOverview.length" style="color: var(--muted); font-size: 13.5px;">还没有资料——创建训练并导入后这里会汇总。</div>
-        <div v-for="s in sourcesOverview" :key="s.checksum ?? s.title" class="list-item" style="align-items: flex-start;">
-          <span class="badge" :class="s.parse_status === 'ok' ? 'ok' : s.parse_status === 'ok' ? '' : 'warn'">{{ s.parse_status === 'ok' ? '✓' : s.parse_status }}</span>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 14px;">{{ s.title }}<span v-if="!s.enabled" class="badge gray" style="margin-left: 6px;">已停用</span></div>
-            <div style="font-size: 12px; color: var(--faint);">
-              被引用于 <b>{{ s.reference_count }}</b> 个训练计划 · 切片 {{ s.chunk_total }} 条 · 类型 {{ s.type }}
-            </div>
-            <div v-if="s.trainings.length" style="font-size: 12px; color: var(--faint); margin-top: 2px;">
-              {{ s.trainings.map((x) => x.topic).join(" / ") }}
-            </div>
-          </div>
-        </div>
       </div>
 
       <div

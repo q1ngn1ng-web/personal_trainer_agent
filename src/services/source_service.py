@@ -104,7 +104,7 @@ def create_source(
     origin: str | None = None,
     origin_url: str | None = None,
     content: str | None = None,
-    scope: str = "personal",
+    scope: str = "private",
     conn: sqlite3.Connection | None = None,
 ) -> Source:
     """登记一条资料来源。``content`` 给出时直接落库并计算校验值。"""
@@ -319,7 +319,7 @@ def create_source_from_file(
     *,
     filename: str,
     data: bytes,
-    scope: str = "personal",
+    scope: str = "private",
     conn: sqlite3.Connection | None = None,
 ) -> Source:
     """从上传文件的字节登记来源。

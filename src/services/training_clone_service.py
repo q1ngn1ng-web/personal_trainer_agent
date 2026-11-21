@@ -219,11 +219,11 @@ def clone_for_user(
             cur = active.execute(
                 "INSERT INTO sources (training_id, type, title, origin, origin_url, fetched_at, "
                 "snapshot_text, org_id, scope, enabled, checksum, parse_status, parse_error, "
-                "imported_at, department_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'personal', ?, ?, "
+                "imported_at, department_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                 "?, ?, ?, NULL)",
                 (
                     new_tid, s["type"], s["title"], s["origin"], s["origin_url"], s["fetched_at"],
-                    s["snapshot_text"], org_id, s["enabled"], s["checksum"],
+                    s["snapshot_text"], org_id, s["scope"], s["enabled"], s["checksum"],
                     s["parse_status"], s["parse_error"], s["imported_at"],
                 ),
             )

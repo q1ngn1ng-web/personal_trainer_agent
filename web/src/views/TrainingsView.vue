@@ -7,6 +7,21 @@ const router = useRouter();
 const trainings = ref<TrainingSummary[]>([]);
 const loading = ref(true);
 
+// 资料总览（按内容指纹聚合）：同文档被几个训练计划引用，从桌面迁到训练页
+const sourcesOverview = ref<
+  {
+    checksum: string | null;
+    title: string;
+    type: string;
+    parse_status: string;
+    enabled: boolean;
+    chunk_total: number;
+    reference_count: number;
+    trainings: { training_id: number; topic: string }[];
+  }[]
+>([]);
+const sourcesLoading = ref(false);
+
 const statusLabel: Record<string, { cls: string; text: string }> = {
   active: { cls: "ok", text: "进行中" },
   draft: { cls: "gray", text: "草稿" },
@@ -14,6 +29,18 @@ const statusLabel: Record<string, { cls: string; text: string }> = {
   completed: { cls: "brand", text: "已完成" },
   paused: { cls: "warn", text: "已暂停" },
 };
+
+async function loadSources() {
+  sourcesLoading.value = true;
+  try {
+    const res = await api.sourcesOverview();
+    sourcesOverview.value = res.sources;
+  } catch (e: any) {
+    (window as any).__toast?.(e.message || "资料加载失败");
+  } finally {
+    sourcesLoading.value = false;
+  }
+}
 
 onMounted(async () => {
   try {
@@ -24,6 +51,7 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+  await loadSources();
 });
 </script>
 
@@ -50,6 +78,27 @@ onMounted(async () => {
         <div style="display: flex; gap: 14px; color: var(--muted); font-size: 13px;">
           <span v-if="t.baseline_score">基线 {{ (t.baseline_score * 100).toFixed(0) }}</span>
           <span>点击查看路径 · 资料 · 测验 →</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <div class="card-head">
+        <div class="card-title">资料总览（按内容指纹聚合）</div>
+        <span class="badge gray">{{ sourcesOverview.length }} 份</span>
+      </div>
+      <div v-if="sourcesLoading" class="loading-center" style="padding: 14px 0;"><span class="spinner"></span></div>
+      <div v-else-if="!sourcesOverview.length" style="color: var(--muted); font-size: 13.5px;">还没有资料——创建训练并导入后这里会汇总。</div>
+      <div v-for="s in sourcesOverview" :key="s.checksum ?? s.title" class="list-item" style="align-items: flex-start;">
+        <span class="badge" :class="s.parse_status === 'ok' ? 'ok' : s.parse_status === 'ok' ? '' : 'warn'">{{ s.parse_status === 'ok' ? '✓' : s.parse_status }}</span>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 14px;">{{ s.title }}<span v-if="!s.enabled" class="badge gray" style="margin-left: 6px;">已停用</span></div>
+          <div style="font-size: 12px; color: var(--faint);">
+            被引用于 <b>{{ s.reference_count }}</b> 个训练计划 · 切片 {{ s.chunk_total }} 条 · 类型 {{ s.type }}
+          </div>
+          <div v-if="s.trainings.length" style="font-size: 12px; color: var(--faint); margin-top: 2px;">
+            {{ s.trainings.map((x) => x.topic).join(" / ") }}
+          </div>
         </div>
       </div>
     </div>

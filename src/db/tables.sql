@@ -24,8 +24,32 @@ CREATE TABLE IF NOT EXISTS trainings (
     -- 分享溯源（change plan-sharing）：NULL = 原创训练；非 NULL = 从分享拉取/推送的独立副本
     shared_from_training_id INTEGER,
     shared_by_user_id INTEGER,
+    -- 可见性三档（change content-visibility）：private 仅自己 / specific 指定成员 / public 组织内全部
+    visibility TEXT DEFAULT 'private',
     created_at DATETIME NOT NULL,
     last_active_at DATETIME
+);
+
+-- 训练可见性的指定成员授权（change content-visibility）
+CREATE TABLE IF NOT EXISTS training_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (training_id, user_id),
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+);
+
+-- 资料可见性的指定成员授权（change content-visibility）
+CREATE TABLE IF NOT EXISTS source_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    UNIQUE (source_id, user_id),
+    FOREIGN KEY (source_id) REFERENCES sources(id)
 );
 
 -- 训练计划分享链接（change plan-sharing）：组织内成员凭 token 预览并拉取独立副本
@@ -118,7 +142,7 @@ CREATE TABLE IF NOT EXISTS sources (
     snapshot_text TEXT,
     org_id INTEGER,
     department_id INTEGER,
-    scope TEXT DEFAULT 'personal' CHECK (scope IN ('org_shared', 'personal')),
+    scope TEXT DEFAULT 'private' CHECK (scope IN ('private', 'specific', 'public')),
     enabled INTEGER DEFAULT 1,
     checksum TEXT,
     parse_status TEXT DEFAULT 'pending' CHECK (parse_status IN ('pending', 'ok', 'failed', 'unsupported')),

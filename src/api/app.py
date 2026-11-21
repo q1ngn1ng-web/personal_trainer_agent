@@ -22,8 +22,9 @@ from src.core.permissions import (
     Action,
     Role,
     Viewer,
+    can,
+    can_view_source,
     can_view_training,
-    visible_sources,
     visible_trainings,
 )
 from src.services.grading_service import parse_options
@@ -287,7 +288,9 @@ def _visible_training_ids(viewer: Viewer | None) -> set[int] | None:
     if viewer is None:
         return None
     rows = [row.to_dict() for row in queries.list_trainings()]
-    return {int(row["id"]) for row in visible_trainings(viewer, rows)}
+    visible = {int(row["id"]) for row in visible_trainings(viewer, rows)}
+    visible |= set(queries.list_shared_training_ids(viewer.user_id))
+    return visible
 
 
 def _task_payload(task: Any) -> dict[str, Any]:
@@ -336,6 +339,7 @@ def _training_payload(training: Any) -> dict[str, Any]:
         "status": data.get("status") or "draft",
         "org_id": data.get("org_id") or 1,
         "owner_user_id": data.get("owner_user_id"),
+        "visibility": data.get("visibility") or "private",
         "baseline_score": data.get("baseline_score") or 0,
         "created_at": data.get("created_at"),
         "last_active_at": data.get("last_active_at"),
@@ -346,7 +350,8 @@ def _load_training_for(viewer: Viewer | None, training_id: int) -> Any:
     training = queries.get_training(int(training_id))
     if training is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="训练不存在")
-    if not can_view_training(viewer, training.to_dict()):
+    shared_uids = queries.list_training_shared_user_ids(int(training_id))
+    if not can_view_training(viewer, training.to_dict(), shared_uids):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该训练")
     return training
 
@@ -388,7 +393,12 @@ def dashboard(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]
 def list_trainings_endpoint(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
     rows = [_training_payload(training) for training in queries.list_trainings()]
     if viewer is not None:
-        rows = visible_trainings(viewer, rows)
+        shares_by_training = _shares_grouped("training_shares", "training_id")
+        rows = [
+            row
+            for row in rows
+            if can_view_training(viewer, row, shares_by_training.get(int(row["id"])))
+        ]
     return {"trainings": rows}
 
 
@@ -449,6 +459,118 @@ def training_path(training_id: int, viewer: Viewer | None = Depends(current_view
     }
 
 
+class VisibilityBody(BaseModel):
+    visibility: str  # private / specific / public
+    shared_user_ids: list[int] = []
+    shared_emails: list[str] = []  # 指定成员按邮箱输入，服务端解析为本组织 user_id
+
+
+@app.put("/api/trainings/{training_id}/visibility")
+def set_training_visibility(
+    training_id: int, body: VisibilityBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """设置训练可见性（仅 owner 或组织管理员）。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is not None:
+        if int(training.owner_user_id or 0) != int(viewer.user_id) and not can(
+            viewer.role, "publish_assignment"
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有创建者可以修改可见性")
+    if body.visibility not in ("private", "specific", "public"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="visibility 取值非法")
+    if body.visibility == "specific":
+        org_for_check = int(viewer.org_id) if viewer else 1
+        resolved_uids = set(body.shared_user_ids) | set(
+            _resolve_shared_uids(org_for_check, body.shared_emails)
+        )
+        for uid in sorted(resolved_uids):
+            member = queries.get_connection().execute(
+                "SELECT 1 FROM memberships WHERE user_id = ? AND org_id = ? AND status = 'active'",
+                (int(uid), org_for_check),
+            ).fetchone()
+            if member is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"用户 {uid} 不是本组织成员")
+    else:
+        resolved_uids = set()
+    conn = queries.get_connection()
+    try:
+        queries.update_training(training_id, visibility=body.visibility, conn=conn)
+        conn.execute("DELETE FROM training_shares WHERE training_id = ?", (training_id,))
+        if body.visibility == "specific":
+            for uid in sorted(resolved_uids):
+                conn.execute(
+                    "INSERT OR IGNORE INTO training_shares (training_id, user_id, created_by, created_at) "
+                    "VALUES (?, ?, ?, 'now')",
+                    (training_id, int(uid), int(viewer.user_id or 0)),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+    shared = (
+        queries.list_training_shared_user_ids(training_id) if body.visibility == "specific" else []
+    )
+    return {"ok": True, "visibility": body.visibility, "shared_user_ids": shared}
+
+
+class SourceVisibilityBody(BaseModel):
+    visibility: str
+    shared_user_ids: list[int] = []
+    shared_emails: list[str] = []  # 同训练可见性：指定成员按邮箱输入
+
+
+@app.put("/api/trainings/{training_id}/sources/{source_id}/visibility")
+def set_source_visibility(
+    training_id: int,
+    source_id: int,
+    body: SourceVisibilityBody,
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """设置单条资料的可见性（资料归属训练，owner 或组织管理员）。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is not None:
+        if int(training.owner_user_id or 0) != int(viewer.user_id) and not can(
+            viewer.role, "publish_assignment"
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有创建者可以修改可见性")
+    if body.visibility not in ("private", "specific", "public"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="visibility 取值非法")
+    resolved_uids: set[int] = set(body.shared_user_ids)
+    if body.visibility == "specific":
+        org_for_check = int(viewer.org_id) if viewer else 1
+        resolved_uids |= set(_resolve_shared_uids(org_for_check, body.shared_emails))
+        for uid in sorted(resolved_uids):
+            member = queries.get_connection().execute(
+                "SELECT 1 FROM memberships WHERE user_id = ? AND org_id = ? AND status = 'active'",
+                (int(uid), org_for_check),
+            ).fetchone()
+            if member is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"用户 {uid} 不是本组织成员")
+    conn = queries.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id FROM sources WHERE id = ? AND training_id = ?",
+            (int(source_id), int(training_id)),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资料不存在")
+        conn.execute(
+            "UPDATE sources SET scope = ? WHERE id = ?",
+            (body.visibility, int(source_id)),
+        )
+        conn.execute("DELETE FROM source_shares WHERE source_id = ?", (int(source_id),))
+        if body.visibility == "specific":
+            for uid in sorted(resolved_uids):
+                conn.execute(
+                    "INSERT OR IGNORE INTO source_shares (source_id, user_id, created_by, created_at) "
+                    "VALUES (?, ?, ?, 'now')",
+                    (int(source_id), int(uid), int(viewer.user_id or 0)),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "visibility": body.visibility}
+
+
 @app.post("/api/trainings/{training_id}/questions/pregenerate")
 def pregenerate_training_questions(
     training_id: int, viewer: Viewer | None = Depends(current_viewer)
@@ -483,6 +605,57 @@ def archive_training_view(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有已达标的训练可以归档")
     queries.update_training(int(training_id), status="archived")
     return {"ok": True, "status": "archived"}
+
+
+def _training_owner(training_id: int | None) -> int | None:
+    if training_id in (None, ""):
+        return None
+    training = queries.get_training(int(training_id))
+    owner = training.owner_user_id if training is not None else None
+    return int(owner) if owner not in (None, "") else None
+
+
+def _shares_grouped(table: str, key_col: str) -> dict[int, list[int]]:
+    """读指定成员授权表，按 key 列分组为 ``{key_id: [user_id, ...]}``。"""
+    conn = queries.get_connection()
+    try:
+        rows = conn.execute(f"SELECT {key_col} AS key_id, user_id FROM {table}").fetchall()
+    finally:
+        conn.close()
+    grouped: dict[int, list[int]] = {}
+    for row in rows:
+        grouped.setdefault(int(row["key_id"]), []).append(int(row["user_id"]))
+    return grouped
+
+
+def _resolve_shared_uids(org_id: int, emails: list[str]) -> list[int]:
+    """把「指定人」的邮箱解析为本组织在册 user_id；不存在或不在本组织 → 400。
+
+    前端指定成员用邮箱输入（个人用户无成员列表权限），服务端统一解析校验。
+    """
+    normalized = [email.strip().lower() for email in emails if email and email.strip()]
+    if not normalized:
+        return []
+    conn = queries.get_connection()
+    found: dict[str, int] = {}
+    try:
+        for email in normalized:
+            row = conn.execute(
+                "SELECT u.id FROM users u JOIN memberships m ON m.user_id = u.id "
+                "WHERE LOWER(u.email) = ? AND m.org_id = ? AND m.status = 'active'",
+                (email, int(org_id)),
+            ).fetchone()
+            if row is not None:
+                found[email] = int(row["id"])
+    finally:
+        conn.close()
+    missing = [email for email in normalized if email not in found]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="以下邮箱不是本组织成员：" + "、".join(missing),
+        )
+    return list(found.values())
 
 
 @app.get("/api/sources/overview")
@@ -538,8 +711,18 @@ def training_sources(
     _load_training_for(viewer, training_id)
     rows = [source.to_dict() for source in source_service.list_sources(int(training_id))]
     if viewer is not None:
-        rows = visible_sources(viewer, rows)
+        shares_by_source = _shares_grouped("source_shares", "source_id")
+        rows = [
+            {**row, "owner_user_id": _training_owner(row.get("training_id"))}
+            for row in rows
+        ]
+        rows = [
+            row for row in rows if can_view_source(viewer, row, shares_by_source.get(int(row["id"])))
+        ]
+    training = queries.get_training(int(training_id))
     return {
+        "training_visibility": getattr(training, "visibility", None) or "private",
+        "training_shared_user_ids": queries.list_training_shared_user_ids(int(training_id)),
         "sources": [
             {
                 "id": row["id"],
@@ -551,6 +734,7 @@ def training_sources(
                 "parse_status": row.get("parse_status"),
                 "origin_url": row.get("origin_url"),
                 "imported_at": row.get("imported_at"),
+                "owner_user_id": row.get("owner_user_id"),
             }
             for row in rows
         ]

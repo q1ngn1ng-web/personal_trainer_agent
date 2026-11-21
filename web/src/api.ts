@@ -144,6 +144,7 @@ export type TrainingSummary = {
   topic: string;
   status: string;
   org_id: number;
+  owner_user_id?: number | null;
   baseline_score: number;
 };
 
@@ -199,6 +200,7 @@ export type SourceSummary = {
   enabled: number;
   parse_status: string;
   origin_url: string | null;
+  owner_user_id?: number | null;
 };
 
 export type AnswerResult = {
@@ -409,7 +411,25 @@ export const api = {
   trainings: () => request<{ trainings: TrainingSummary[] }>("/api/trainings"),
   path: (trainingId: number) => request<PathResponse>("/api/trainings/" + trainingId + "/path"),
   sources: (trainingId: number) =>
-    request<{ sources: SourceSummary[] }>("/api/trainings/" + trainingId + "/sources"),
+    request<{
+      training_visibility: string;
+      training_shared_user_ids: number[];
+      sources: SourceSummary[];
+    }>("/api/trainings/" + trainingId + "/sources"),
+  setVisibility: (trainingId: number, body: { visibility: string; shared_emails?: string[] }) =>
+    request<{ ok: boolean; visibility: string; shared_user_ids: number[] }>(
+      "/api/trainings/" + trainingId + "/visibility",
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
+  setSourceVisibility: (
+    trainingId: number,
+    sourceId: number,
+    body: { visibility: string; shared_emails?: string[] }
+  ) =>
+    request<{ ok: boolean; visibility: string }>(
+      "/api/trainings/" + trainingId + "/sources/" + sourceId + "/visibility",
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
   quizState: (trainingId: number) => request<QuizState>("/api/trainings/" + trainingId + "/quiz"),
   startAssessment: (trainingId: number) =>
     request<AssessmentStart>("/api/assessments", {

@@ -114,7 +114,7 @@ class TestSourceService(unittest.TestCase):
                 self.assertEqual(source.type, source_type)
                 self.assertEqual(source.parse_status, "ok")
                 self.assertEqual(source.org_id, svc.DEFAULT_ORG_ID)
-                self.assertEqual(source.scope, "personal")
+                self.assertEqual(source.scope, "private")
         self.assertEqual(len(svc.list_sources(self.training.id)), 3)
 
     def test_parse_creates_chunks_and_paths(self) -> None:

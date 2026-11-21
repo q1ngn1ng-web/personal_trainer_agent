@@ -183,6 +183,8 @@ def ensure_question(
                 "reference_answer": str(context.get("reference_answer") or ""),
                 "source": "stored",
                 "points": _parse_points_json(context.get("points")),
+                "question_type": context.get("question_type"),
+                "options": context.get("options"),
             }
 
         knowledge_point = str(context.get("knowledge_point") or context.get("title") or "")

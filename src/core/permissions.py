@@ -26,12 +26,11 @@ class Role(str, Enum):
 
 
 class SourceScope(str, Enum):
-    """资料来源的可见范围。"""
+    """资料来源的可见范围（change content-visibility 三档）。"""
 
-    PERSONAL = "personal"
-    DEPARTMENT = "department"
-    ORG_SHARED = "org_shared"
-    ASSIGNED = "assigned"
+    PRIVATE = "private"
+    SPECIFIC = "specific"
+    PUBLIC = "public"
 
 
 class Action(str, Enum):
@@ -135,16 +134,35 @@ def assert_can(viewer: Viewer | None, action: Action | str) -> None:
         raise PermissionDenied(f"role {viewer.role.value!r} may not perform {str(action)!r}")
 
 
-def can_view_training(viewer: Viewer | None, training: dict[str, Any]) -> bool:
-    """训练可见性：同一组织内可见；个人训练只有本人可见。"""
+def can_view_training(
+    viewer: Viewer | None,
+    training: dict[str, Any],
+    shared_user_ids: list[int] | None = None,
+) -> bool:
+    """训练可见性三档（change content-visibility）：
+
+    * owner 恒可见；
+    * ``public`` → 同组织成员全部可见；
+    * ``specific`` → owner + 指定成员（training_shares，调用方 join 提供）；
+    * ``private``（默认）→ 仅 owner；
+    * 组织不同一律不可见。owner 缺失的历史数据沿用旧口径（同组织可见）。
+    """
     if viewer is None:
         return True
     if int(training.get("org_id") or 1) != int(viewer.org_id):
         return False
+    uid = int(viewer.user_id)
     owner = training.get("owner_user_id")
     if owner in (None, ""):
         return True
-    return int(owner) == int(viewer.user_id)
+    if int(owner) == uid:
+        return True
+    scope = str(training.get("visibility") or "private")
+    if scope == "public":
+        return True
+    if scope == "specific":
+        return uid in {int(x) for x in (shared_user_ids or ())}
+    return False
 
 
 def visible_trainings(
@@ -153,35 +171,31 @@ def visible_trainings(
     return [row for row in rows if can_view_training(viewer, row)]
 
 
-def can_view_source(viewer: Viewer | None, source: dict[str, Any]) -> bool:
-    """资料可见性（四档范围，ADR-0022）：
+def can_view_source(
+    viewer: Viewer | None, source: dict[str, Any], shared_user_ids: list[int] | None = None
+) -> bool:
+    """资料可见性三档（change content-visibility）：
 
-    * `personal` → 仅本人
-    * `department` → 本部门成员
-    * `org_shared` → 全组织
-    * `assigned` → 任务指派到的人或部门
+    * owner（来源所属训练的创建者，调用方 join 提供 owner_user_id）恒可见；
+    * ``public`` → 同组织成员全部可见；
+    * ``specific`` → owner + 指定成员（source_shares）；
+    * ``private`` → 仅 owner；
+    * 组织不同一律不可见。资料无独立 owner 列——owner 取所属训练的创建者。
     """
     if viewer is None:
         return True
-    scope = str(source.get("scope") or SourceScope.PERSONAL.value)
-    source_org = int(source.get("org_id") or 1)
-    if scope == SourceScope.ORG_SHARED.value:
-        return source_org == int(viewer.org_id)
-    if scope == SourceScope.DEPARTMENT.value:
-        if source_org != int(viewer.org_id):
-            return False
-        department_id = source.get("department_id")
-        return department_id not in (None, "") and int(department_id) in viewer.department_ids
-    if scope == SourceScope.ASSIGNED.value:
-        assigned_users = {int(value) for value in (source.get("assigned_user_ids") or [])}
-        if int(viewer.user_id) in assigned_users:
-            return True
-        assigned_departments = {
-            int(value) for value in (source.get("assigned_department_ids") or [])
-        }
-        return bool(viewer.department_ids & assigned_departments)
+    if int(source.get("org_id") or 1) != int(viewer.org_id):
+        return False
+    uid = int(viewer.user_id)
     owner = source.get("owner_user_id")
-    return owner not in (None, "") and int(owner) == int(viewer.user_id)
+    if owner not in (None, "") and int(owner) == uid:
+        return True
+    scope = str(source.get("scope") or SourceScope.PRIVATE.value)
+    if scope == "public":
+        return True
+    if scope == "specific":
+        return uid in {int(x) for x in (shared_user_ids or ())}
+    return False
 
 
 def can_manage_department(viewer: Viewer | None, department_id: int) -> bool:

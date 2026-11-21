@@ -53,6 +53,7 @@ _TRAINING_FIELDS = {
     "last_review_at",
     "created_at",
     "last_active_at",
+    "visibility",
 }
 
 
@@ -413,3 +414,38 @@ def get_reviews_by_training(
             (training_id,),
         ).fetchall()
     return [ReviewArchive.from_row(row) for row in rows]
+
+
+# ---------------------------------------------------------------- 可见性授权（change content-visibility）
+
+
+def list_training_shared_user_ids(training_id: int, conn: sqlite3.Connection | None = None) -> list[int]:
+    with _connection(conn) as active:
+        rows = active.execute(
+            "SELECT user_id FROM training_shares WHERE training_id = ?", (int(training_id),)
+        ).fetchall()
+    return [int(r["user_id"]) for r in rows]
+
+
+def list_source_shared_user_ids(source_id: int, conn: sqlite3.Connection | None = None) -> list[int]:
+    with _connection(conn) as active:
+        rows = active.execute(
+            "SELECT user_id FROM source_shares WHERE source_id = ?", (int(source_id),)
+        ).fetchall()
+    return [int(r["user_id"]) for r in rows]
+
+
+def list_shared_training_ids(user_id: int, conn: sqlite3.Connection | None = None) -> list[int]:
+    with _connection(conn) as active:
+        rows = active.execute(
+            "SELECT training_id FROM training_shares WHERE user_id = ?", (int(user_id),)
+        ).fetchall()
+    return [int(r["training_id"]) for r in rows]
+
+
+def list_shared_source_ids(user_id: int, conn: sqlite3.Connection | None = None) -> list[int]:
+    with _connection(conn) as active:
+        rows = active.execute(
+            "SELECT source_id FROM source_shares WHERE user_id = ?", (int(user_id),)
+        ).fetchall()
+    return [int(r["source_id"]) for r in rows]

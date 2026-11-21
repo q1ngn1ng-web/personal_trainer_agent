@@ -6,6 +6,7 @@ import {
   type WeeklyReviewResponse,
   type QuizOutcome, type QuizState, type SourceSummary, type TodayTask, type TrainingSummary,
 } from "../api";
+import { authState } from "../auth";
 import TaskCard from "../components/TaskCard.vue";
 
 const route = useRoute();
@@ -15,6 +16,65 @@ const section = ref<"path" | "plan" | "review" | "sources" | "quiz">("path");
 const training = ref<TrainingSummary | null>(null);
 const pathData = ref<PathResponse | null>(null);
 const sources = ref<SourceSummary[]>([]);
+
+// 可见性（change content-visibility 三档）：训练级 + 每条资料，指定人按邮箱输入
+const isOwner = computed(
+  () => !!authState.viewer?.user_id && training.value?.owner_user_id === authState.viewer.user_id
+);
+const trainingVisibility = ref("private");
+const trainingVisEmails = ref("");
+const sourceVisibility = ref<Record<number, string>>({});
+const sourceVisEmails = ref<Record<number, string>>({});
+const savingVisibility = ref(false);
+
+const visibilityOptions = [
+  { value: "private", label: "私有" },
+  { value: "specific", label: "指定人" },
+  { value: "public", label: "组织公开" },
+];
+
+function splitEmails(raw: string): string[] {
+  return raw.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+async function saveTrainingVisibility() {
+  savingVisibility.value = true;
+  try {
+    await api.setVisibility(trainingId, {
+      visibility: trainingVisibility.value,
+      shared_emails: trainingVisibility.value === "specific" ? splitEmails(trainingVisEmails.value) : [],
+    });
+    toast("可见性已更新");
+    const ss = await api.sources(trainingId);
+    trainingVisibility.value = ss.training_visibility;
+  } catch (e: any) {
+    toast(e.message || "保存失败");
+  } finally {
+    savingVisibility.value = false;
+  }
+}
+
+async function saveSourceVisibility(sourceId: number) {
+  const visibility = sourceVisibility.value[sourceId] || "private";
+  try {
+    await api.setSourceVisibility(trainingId, sourceId, {
+      visibility,
+      shared_emails: visibility === "specific" ? splitEmails(sourceVisEmails.value[sourceId] || "") : [],
+    });
+    toast("资料可见性已更新");
+    const ss = await api.sources(trainingId);
+    sources.value = ss.sources;
+    syncSourceVisibilityState();
+  } catch (e: any) {
+    toast(e.message || "保存失败");
+  }
+}
+
+function syncSourceVisibilityState() {
+  const next: Record<number, string> = {};
+  for (const s of sources.value) next[s.id] = s.scope || "private";
+  sourceVisibility.value = next;
+}
 const quiz = ref<QuizState | null>(null);
 const planRounds = ref<TodayTask[]>([]);
 const planLoading = ref(false);
@@ -131,6 +191,8 @@ async function load() {
     training.value = ts.trainings.find((t) => t.id === trainingId) || null;
     pathData.value = pd;
     sources.value = ss.sources;
+    trainingVisibility.value = ss.training_visibility || "private";
+    syncSourceVisibilityState();
     quiz.value = qs;
     if (pd.stages.length) openStages.value = new Set([pd.stages[0].id]);
   } catch (e: any) {
@@ -384,6 +446,29 @@ const typeLabel: Record<string, string> = {
 
       <!-- ============ 资料 ============ -->
       <template v-else-if="section === 'sources'">
+        <div v-if="isOwner" class="card">
+          <div class="card-head" style="margin-bottom: 8px;">
+            <div class="card-title">训练可见性</div>
+            <span class="badge gray">{{ visibilityOptions.find((v) => v.value === trainingVisibility)?.label || trainingVisibility }}</span>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <select v-model="trainingVisibility" class="input" style="width: auto; padding: 6px 10px;">
+              <option v-for="v in visibilityOptions" :key="v.value" :value="v.value">{{ v.label }}</option>
+            </select>
+            <input
+              v-if="trainingVisibility === 'specific'"
+              v-model="trainingVisEmails"
+              class="input"
+              style="flex: 1; min-width: 220px; padding: 6px 10px;"
+              placeholder="指定成员邮箱（多个用逗号分隔）"
+            />
+            <button class="btn" :disabled="savingVisibility" @click="saveTrainingVisibility">保存</button>
+          </div>
+          <div style="font-size: 12px; color: var(--faint); margin-top: 6px;">
+            私有仅自己可见 · 指定人按邮箱授权 · 组织公开对同组织成员可见
+          </div>
+        </div>
+
         <div v-if="!sources.length" class="card empty"><span class="ico">📚</span>暂无资料来源</div>
         <div v-for="s in sources" :key="s.id" class="card">
           <div class="card-head" style="margin-bottom: 6px;">
@@ -398,6 +483,19 @@ const typeLabel: Record<string, string> = {
             <span v-if="s.origin_url" style="max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               {{ s.origin_url }}
             </span>
+          </div>
+          <div v-if="isOwner" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
+            <select v-model="sourceVisibility[s.id]" class="input" style="width: auto; padding: 5px 9px; font-size: 13px;">
+              <option v-for="v in visibilityOptions" :key="v.value" :value="v.value">{{ v.label }}</option>
+            </select>
+            <input
+              v-if="sourceVisibility[s.id] === 'specific'"
+              v-model="sourceVisEmails[s.id]"
+              class="input"
+              style="flex: 1; min-width: 200px; padding: 5px 9px; font-size: 13px;"
+              placeholder="指定成员邮箱（多个用逗号分隔）"
+            />
+            <button class="btn" style="padding: 5px 12px; font-size: 13px;" @click="saveSourceVisibility(s.id)">保存</button>
           </div>
         </div>
       </template>

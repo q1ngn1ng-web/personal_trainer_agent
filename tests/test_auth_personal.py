@@ -168,16 +168,17 @@ class TestPermissionsMatrix(unittest.TestCase):
         self.assertTrue(permissions.can_view_training(viewer, {"org_id": 1, "owner_user_id": None}))  # 组织级训练
 
     def test_view_source_scopes(self) -> None:
+        # 三档可见性（change content-visibility）：private / specific / public
         viewer = permissions.Viewer(user_id=2, org_id=1, role=permissions.Role.EMPLOYEE, department_ids=frozenset({5}))
-        self.assertTrue(permissions.can_view_source(viewer, {"scope": "personal", "owner_user_id": 2}))
-        self.assertFalse(permissions.can_view_source(viewer, {"scope": "personal", "owner_user_id": 3}))
-        self.assertTrue(permissions.can_view_source(viewer, {"scope": "org_shared", "org_id": 1}))
-        self.assertFalse(permissions.can_view_source(viewer, {"scope": "org_shared", "org_id": 2}))
+        self.assertTrue(permissions.can_view_source(viewer, {"scope": "private", "owner_user_id": 2}))
+        self.assertFalse(permissions.can_view_source(viewer, {"scope": "private", "owner_user_id": 3}))
+        self.assertTrue(permissions.can_view_source(viewer, {"scope": "public", "org_id": 1}))
+        self.assertFalse(permissions.can_view_source(viewer, {"scope": "public", "org_id": 2}))
         self.assertTrue(
-            permissions.can_view_source(viewer, {"scope": "department", "org_id": 1, "department_id": 5})
+            permissions.can_view_source(viewer, {"scope": "specific", "owner_user_id": 3}, [2])
         )
-        self.assertTrue(
-            permissions.can_view_source(viewer, {"scope": "assigned", "assigned_user_ids": [2]})
+        self.assertFalse(
+            permissions.can_view_source(viewer, {"scope": "specific", "owner_user_id": 3}, [9])
         )
 
 

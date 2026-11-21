@@ -45,6 +45,7 @@ class Training(RowModel):
     status: str = "draft"
     org_id: int | None = None
     owner_user_id: int | None = None
+    visibility: str = "private"
     goal_json: Any = None
     goal_confirmed_at: str | None = None
     clarification_rounds: int = 0
@@ -167,7 +168,7 @@ class Source(RowModel):
     snapshot_text: str | None = None
     org_id: int | None = None
     department_id: int | None = None
-    scope: str = "personal"
+    scope: str = "private"
     enabled: int = 1
     checksum: str | None = None
     parse_status: str = "pending"
