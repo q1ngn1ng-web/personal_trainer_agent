@@ -109,7 +109,9 @@ async function doLogout() {
         <span v-if="!collapsed">{{ n.label }}</span>
       </router-link>
       <div class="sidebar-foot" v-if="!collapsed">
-        <div class="foot-hint">要点判分 · 可解释</div>
+        <div class="foot-title">训练教练</div>
+        <div class="foot-hint">意图驱动的自适应训练：目标澄清 → 边缘定位 → 路径 → 每日训练 → 测验达标</div>
+        <div class="foot-hint" style="margin-top: 4px;">判分 = 要点清单 × 规则层，可解释</div>
       </div>
     </aside>
 

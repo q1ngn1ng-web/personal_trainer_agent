@@ -255,10 +255,5 @@ onMounted(loadOrg);
       </div>
     </div>
 
-    <div class="card" style="color: var(--muted); font-size: 13.5px;">
-      <div class="card-title" style="margin-bottom: 8px;">关于</div>
-      训练教练 · 意图驱动的自适应训练系统。描述学习目标 → AI 澄清 → 定位理解边缘 →
-      生成训练路径 → 每日训练与反馈 → 测验达标。所有判分由「要点清单 × 规则层」给出，可解释。
-    </div>
   </div>
 </template>
