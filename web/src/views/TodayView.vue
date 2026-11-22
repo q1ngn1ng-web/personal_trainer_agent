@@ -3,6 +3,8 @@ import { Moon } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
 import { api, type TodayResponse, type TodayTask } from "../api";
 import TaskCard from "../components/TaskCard.vue";
+import Card from "../components/ui/Card.vue";
+import Badge from "../components/ui/Badge.vue";
 
 const data = ref<TodayResponse | null>(null);
 const loading = ref(true);
@@ -102,76 +104,89 @@ async function sendSignal(trainingId: number, type: string) {
 
 <template>
   <div>
-    <div class="page-head">
-      <h1 class="page-title">{{ greeting }}，继续今天的训练</h1>
-      <p class="page-sub">{{ dateText }}</p>
+    <div class="mb-5">
+      <h1 class="text-[28px] font-semibold leading-tight">{{ greeting }}，继续今天的训练</h1>
+      <p class="mt-1 text-[13.5px] text-muted">{{ dateText }}</p>
     </div>
 
-    <div v-if="loading && !data" class="loading-center"><span class="spinner"></span></div>
+    <div v-if="loading && !data" class="flex h-40 items-center justify-center">
+      <span class="inline-block h-6 w-6 animate-spin rounded-full border-2 border-line border-t-primary" />
+    </div>
 
     <template v-else-if="data">
-      <div class="stat-row">
-        <div class="stat"><div class="num">{{ data.count }}</div><div class="lbl">今日任务</div></div>
-        <div class="stat"><div class="num">{{ data.minutes }}′</div><div class="lbl">预计时长</div></div>
-        <div class="stat"><div class="num">{{ data.groups.length }}</div><div class="lbl">进行中的训练</div></div>
+      <div class="grid grid-cols-3 gap-3">
+        <Card v-for="m in [
+          { num: data.count, label: '今日任务' },
+          { num: data.minutes + '′', label: '预计时长' },
+          { num: data.groups.length, label: '进行中的训练' },
+        ]" :key="m.label" padding="sm" class="py-4 text-center">
+          <div class="text-[22px] font-semibold tabular-nums">{{ m.num }}</div>
+          <div class="mt-1 text-xs text-muted">{{ m.label }}</div>
+        </Card>
       </div>
 
-      <div v-if="!data.tasks.length" class="card empty">
-        <Moon class="ico-svg ico-svg-lg" style="margin: 0 auto 8px;" />
+      <div v-if="!data.tasks.length" class="mt-4 rounded-lg border border-line bg-surface p-8 text-center text-muted">
+        <Moon class="mx-auto mb-2 h-6 w-6" />
         今天没有安排任务<br />
-        <span style="font-size: 13px;">去「训练」页看看你的路径，或休息一下</span>
+        <span class="text-[13px]">去「训练」页看看你的路径，或休息一下</span>
       </div>
 
-      <TransitionGroup name="card-fade">
-        <div v-for="g in groups" :key="g.training_id" class="card">
-          <div class="card-head">
-            <div style="min-width: 0;">
-              <div class="card-title">{{ g.topic }}</div>
-              <div style="font-size: 12.5px; color: var(--muted); margin-top: 2px;">
+      <TransitionGroup name="card-fade" tag="div" class="mt-4 flex flex-col gap-4">
+        <div v-for="g in groups" :key="g.training_id" class="rounded-lg border border-line bg-surface p-5">
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-[15px] font-semibold">{{ g.topic }}</div>
+              <div class="mt-0.5 text-[12.5px] text-muted">
                 <template v-if="g.total">{{ g.practiced }}/{{ g.total }} 完成 · 约 {{ g.minutes }} 分钟</template>
                 <template v-else>今天已完成 {{ g.practiced }} 题 · 无待办</template>
               </div>
             </div>
-            <span v-if="g.total" class="badge" :class="g.pct === 100 ? 'ok' : 'brand'">{{ g.pct }}%</span>
+            <Badge v-if="g.total" :tone="g.pct === 100 ? 'ok' : 'brand'">{{ g.pct }}%</Badge>
           </div>
-          <div v-if="g.total" class="progress" style="margin-bottom: 14px;"><i :style="{ width: g.pct + '%' }"></i></div>
+          <div v-if="g.total" class="mb-3.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
+            <i class="block h-full rounded-full bg-primary transition-all" :style="{ width: g.pct + '%' }" />
+          </div>
 
           <div
             v-if="g.overdueCount"
-            class="badge danger"
-            style="display: block; width: 100%; text-align: left; padding: 7px 12px; margin-bottom: 10px; border-radius: var(--radius-sm); font-weight: 500;"
+            class="mb-2.5 w-full rounded-md border border-danger/30 bg-danger-weak px-3 py-1.5 text-left text-[13px] font-medium text-danger"
           >
             ⚠ 以下 {{ g.overdueCount }} 题均逾期（最早 {{ g.earliestOverdue }}）——按顺序从最早的一道开始即可，不用一次还清
           </div>
-          <TaskCard
-            v-for="t in g.tasks.filter((t) => !hiddenPlanIds.has(t.plan_id))"
-            :key="t.plan_id"
-            :task="t"
-            compact
-            :auto-open="autoOpenId === t.plan_id"
-            @answered="onAnswered"
-            @submit-failed="onSubmitFailed"
-            @refresh="load"
-          />
-
-        <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);">
-          <div style="font-size: 12.5px; color: var(--faint); margin-bottom: 8px;">今天的感受（反馈会调整训练安排）</div>
-          <div class="signal-row">
-            <button v-for="s in signals" :key="s.key" class="signal-btn" @click="sendSignal(g.training_id, s.key)">
-              {{ s.label }}
-            </button>
+          <div class="flex flex-col gap-2">
+            <TaskCard
+              v-for="t in g.tasks.filter((t) => !hiddenPlanIds.has(t.plan_id))"
+              :key="t.plan_id"
+              :task="t"
+              compact
+              :auto-open="autoOpenId === t.plan_id"
+              @answered="onAnswered"
+              @submit-failed="onSubmitFailed"
+              @refresh="load"
+            />
           </div>
-        </div>
+
+          <div class="mt-3.5 border-t border-line pt-3">
+            <div class="mb-2 text-[12.5px] text-faint">今天的感受（反馈会调整训练安排）</div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="s in signals"
+                :key="s.key"
+                class="rounded-full border border-line px-3 py-1 text-[12.5px] text-muted transition-colors hover:border-primary/40 hover:text-primary"
+                @click="sendSignal(g.training_id, s.key)"
+              >{{ s.label }}</button>
+            </div>
+          </div>
         </div>
       </TransitionGroup>
 
       <!-- 今天已作答：不闪走，留在这里看结果与解析 -->
-      <div v-if="doneTasks.length" class="card" style="margin-top: 16px;">
-        <div class="card-head">
-          <div class="card-title">今天已作答</div>
-          <span class="badge gray">{{ doneTasks.length }} 项</span>
+      <Card v-if="doneTasks.length" class="mt-4">
+        <div class="mb-3 flex items-center justify-between">
+          <div class="text-[15px] font-semibold">今天已作答</div>
+          <Badge>{{ doneTasks.length }} 项</Badge>
         </div>
-        <TransitionGroup name="card-fade">
+        <TransitionGroup name="card-fade" tag="div" class="flex flex-col gap-2">
           <TaskCard
             v-for="t in allDone"
             :key="t.plan_id"
@@ -179,7 +194,7 @@ async function sendSignal(trainingId: number, type: string) {
             :judging="pendingPlanIds.has(t.plan_id)"
           />
         </TransitionGroup>
-      </div>
+      </Card>
     </template>
   </div>
 </template>

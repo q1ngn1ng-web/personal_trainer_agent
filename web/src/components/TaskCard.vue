@@ -224,135 +224,147 @@ async function skip() {
 </script>
 
 <template>
-  <div ref="cardEl" class="task">
-    <div class="task-head" @click="expand">
-      <span class="t-title">{{ task.title }}</span>
-      <span class="t-meta">
-        <span v-if="isFuture && !compact" class="badge gray">未到期 · 可提前练</span>
+  <div ref="cardEl" class="rounded-lg border border-line bg-surface p-4">
+    <div class="flex cursor-pointer items-center justify-between gap-3" @click="expand">
+      <span class="min-w-0 flex-1 text-[14px] font-medium">{{ task.title }}</span>
+      <span class="flex flex-shrink-0 items-center gap-1.5">
+        <span v-if="isFuture && !compact" class="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs leading-none text-muted">未到期 · 可提前练</span>
         <!-- 逾期红墙降噪：compact（今日待办组）不逐行挂红标，由组级聚合条承担 -->
-        <span v-if="task.is_overdue && !compact" class="badge danger">逾期</span>
-        <span class="badge gray">{{ sessionMode ? `第${task.round_index}次会话` : `第${task.round_index}轮` }}</span>
-        <span v-if="task.item_type && !compact" class="badge gray">{{ typeLabel[task.item_type] || task.item_type }}</span>
-        <span v-if="task.verdict || !compact" class="badge" :class="verdictBadge.cls">{{ verdictBadge.text }}</span>
-        <span style="color: var(--faint); font-size: 12px;">{{ task.planned_minutes }}′</span>
+        <span v-if="task.is_overdue && !compact" class="rounded-full border border-danger/30 bg-danger-weak px-2 py-0.5 text-xs leading-none text-danger">逾期</span>
+        <span class="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs leading-none text-muted">{{ sessionMode ? `第${task.round_index}次会话` : `第${task.round_index}轮` }}</span>
+        <span v-if="task.item_type && !compact" class="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs leading-none text-muted">{{ typeLabel[task.item_type] || task.item_type }}</span>
+        <span
+          v-if="task.verdict || !compact"
+          class="rounded-full border px-2 py-0.5 text-xs leading-none"
+          :class="verdictBadge.cls === 'ok' ? 'border-ok/30 bg-ok-weak text-ok' : verdictBadge.cls === 'fail' ? 'border-warn/30 bg-warn-weak text-warn' : 'border-line bg-surface-2 text-muted'"
+        >{{ verdictBadge.text }}</span>
+        <span class="text-xs text-faint">{{ task.planned_minutes }}′</span>
       </span>
     </div>
 
-    <div v-if="expanded" class="task-body">
-      <div v-if="loadingQ" class="loading-center" style="padding: 18px 0;"><span class="spinner"></span></div>
+    <div v-if="expanded" class="mt-3 border-t border-line pt-3">
+      <div v-if="loadingQ" class="flex items-center justify-center py-4">
+        <span class="inline-block h-5 w-5 animate-spin rounded-full border-2 border-line border-t-primary" />
+      </div>
       <template v-else>
-        <div v-if="question" class="question-box">{{ question }}</div>
+        <div v-if="question" class="whitespace-pre-wrap rounded-md bg-surface-2 p-3 text-[14px] leading-relaxed">{{ question }}</div>
 
-        <div v-if="question && !done" style="margin: 6px 0 2px;">
-          <button class="btn text" @click="togglePoints">
+        <div v-if="question && !done" class="my-2">
+          <button class="text-[13px] text-primary hover:underline" @click="togglePoints">
             {{ showPoints ? '收起要点' : '要点清单（判分依据，答前可修正）' }}
           </button>
-          <div v-if="showPoints" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
-            <div v-for="(p, i) in draftPoints" :key="i" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-              <input v-model="p.text" class="input" style="flex: 1; min-width: 180px;" :placeholder="'要点 ' + (i + 1)" />
-              <input v-model.number="p.weight" class="input" type="number" min="0.5" max="5" step="0.5" style="width: 70px;" title="权重 0.5-5" />
-              <label style="font-size: 12px; display: flex; gap: 4px; align-items: center; white-space: nowrap;">
+          <div v-if="showPoints" class="mt-2 flex flex-col gap-1.5">
+            <div v-for="(p, i) in draftPoints" :key="i" class="flex flex-wrap items-center gap-1.5">
+              <input v-model="p.text" class="h-8 min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-primary/40" :placeholder="'要点 ' + (i + 1)" />
+              <input v-model.number="p.weight" class="h-8 w-16 rounded-md border border-line bg-surface px-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/40" type="number" min="0.5" max="5" step="0.5" title="权重 0.5-5" />
+              <label class="flex items-center gap-1 whitespace-nowrap text-xs text-muted">
                 <input v-model="p.is_required" type="checkbox" />必答
               </label>
-              <button class="btn text" @click="draftPoints.splice(i, 1)">删</button>
+              <button class="px-1 text-[13px] text-primary hover:underline" @click="draftPoints.splice(i, 1)">删</button>
             </div>
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <button class="btn ghost" @click="draftPoints.push({ text: '', weight: 1, is_required: false })">加一条</button>
-              <button class="btn primary" :disabled="savingPoints" @click="savePoints">
+            <div class="flex items-center gap-2">
+              <button class="rounded-md border border-line px-3 py-1.5 text-[13px] text-muted hover:bg-surface-2" @click="draftPoints.push({ text: '', weight: 1, is_required: false })">加一条</button>
+              <button class="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50" :disabled="savingPoints" @click="savePoints">
                 {{ savingPoints ? '保存中…' : '保存要点' }}
               </button>
             </div>
-            <p style="color: var(--faint); font-size: 12px; margin: 0;">首次判分后要点锁定；编辑只影响之后的判分，不改历史作答。</p>
+            <p class="m-0 text-xs text-faint">首次判分后要点锁定；编辑只影响之后的判分，不改历史作答。</p>
           </div>
         </div>
 
         <template v-if="!done || reanswer">
-          <div v-if="isChoice && optionsList.length" class="question-options">
+          <div v-if="isChoice && optionsList.length" class="flex flex-col gap-2">
             <label
               v-for="opt in optionsList"
               :key="opt.key"
-              class="option-row"
-              :class="{ picked: selectedKey === opt.key }"
+              class="flex cursor-pointer items-center gap-2.5 rounded-md border p-2.5 text-[14px] transition-colors"
+              :class="selectedKey === opt.key ? 'border-primary bg-primary/10' : 'border-line hover:bg-surface-2'"
             >
-              <input type="radio" :name="'q-' + task.plan_id" :value="opt.key" v-model="selectedKey" />
-              <span class="opt-key">{{ opt.key }}</span>
+              <input type="radio" :name="'q-' + task.plan_id" :value="opt.key" v-model="selectedKey" class="accent-primary" />
+              <span class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-line text-xs font-semibold">{{ opt.key }}</span>
               <span>{{ opt.text }}</span>
             </label>
           </div>
-          <div v-else-if="isFill && fillSegments.length > 1" class="question-fill">
+          <div v-else-if="isFill && fillSegments.length > 1" class="flex flex-wrap items-center gap-2">
             <template v-for="(seg, i) in fillSegments" :key="i">
-              <span class="fill-seg">{{ seg }}</span>
+              <span class="text-[14px]">{{ seg }}</span>
               <input
                 v-if="i < fillSegments.length - 1"
                 v-model="fillBlankValues[i]"
-                class="fill-input"
+                class="inline-block w-36 rounded-md border border-line bg-surface px-2 py-1.5 text-center text-[14px] focus:outline-none focus:ring-2 focus:ring-primary/40"
                 :placeholder="'第 ' + (i + 1) + ' 空'"
               />
             </template>
           </div>
-          <textarea v-else v-model="answer" class="textarea" placeholder="凭理解作答，判分口径与测验一致（按要点覆盖判分）"></textarea>
-          <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
-            <button class="btn primary" :disabled="submitting" @click="submit">
+          <textarea v-else v-model="answer" class="mt-1 min-h-[76px] w-full rounded-md border border-line bg-surface p-3 text-[14px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/40" placeholder="凭理解作答，判分口径与测验一致（按要点覆盖判分）" />
+          <div class="mt-2.5 flex flex-wrap gap-2">
+            <button class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50" :disabled="submitting" @click="submit">
               {{ submitting ? '判分中…' : isChoice ? '提交选择' : isFill ? '提交填空' : '提交作答' }}
             </button>
-            <button v-if="!isChoice" class="btn ghost" @click="practiceOnly">只练不判</button>
-            <button class="btn text" @click="skip">跳过</button>
+            <button v-if="!isChoice" class="rounded-md border border-line px-4 py-2 text-sm text-text hover:bg-surface-2" @click="practiceOnly">只练不判</button>
+            <button class="px-2 text-[13px] text-primary hover:underline" @click="skipOpen = !skipOpen">跳过</button>
           </div>
-          <div v-if="skipOpen" style="display: flex; gap: 8px; margin-top: 8px; align-items: center;">
-            <input v-model="skipReason" class="input" style="flex: 1;" placeholder="跳过原因（必填，例如：今天没时间）" />
-            <button class="btn ghost" @click="skip">确认跳过</button>
-            <button class="btn text" @click="skipOpen = false">取消</button>
+          <div v-if="skipOpen" class="mt-2 flex flex-wrap items-center gap-2">
+            <input v-model="skipReason" class="h-8 min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-primary/40" placeholder="跳过原因（必填，例如：今天没时间）" />
+            <button class="rounded-md border border-line px-3 py-1.5 text-[13px] text-text hover:bg-surface-2" @click="skip">确认跳过</button>
+            <button class="px-2 text-[13px] text-primary hover:underline" @click="skipOpen = false">取消</button>
           </div>
         </template>
 
-        <div v-if="result || (done && task.verdict)" class="verdict-panel" :class="panelCls">
+        <div
+          v-if="result || (done && task.verdict)"
+          class="mt-3 rounded-md border p-3 text-[14px]"
+          :class="panelCls === 'pass' ? 'border-ok/30 bg-ok-weak' : panelCls === 'fail' ? 'border-warn/30 bg-warn-weak' : 'border-line bg-surface-2'"
+        >
           <template v-if="result">
             <b>{{ !result.graded ? '暂未判分（LLM 不可用，可自评对照参考答案）' : result.verdict === 'pass' ? '✓ 通过' : '✗ 未通过' }}</b>
-            <span v-if="result.score != null" style="margin-left: 8px; font-weight: 600;">得分 {{ (result.score * 100).toFixed(0) }}</span>
-            <p style="margin-top: 4px;">{{ result.reason }}</p>
-            <p v-if="result.coach_hint" class="coach-hint">💡 {{ result.coach_hint }}</p>
-            <p v-if="result.mastered" style="margin-top: 6px;"><span class="badge ok">连续通过，已达标</span></p>
-            <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
-            <div v-if="result.reference_answer" class="ref-answer"><b>参考答案</b>：{{ result.reference_answer }}</div>
+            <span v-if="result.score != null" class="ml-2 font-semibold">得分 {{ (result.score * 100).toFixed(0) }}</span>
+            <p class="mt-1">{{ result.reason }}</p>
+            <p v-if="result.coach_hint" class="mt-2.5 rounded-md border border-warn/30 bg-warn-weak p-2 text-[13px] text-text">💡 {{ result.coach_hint }}</p>
+            <p v-if="result.mastered" class="mt-2">
+              <span class="rounded-full border border-ok/30 bg-ok-weak px-2 py-0.5 text-xs text-ok">连续通过，已达标</span>
+            </p>
+            <div v-if="task.answer_text" class="mt-2 text-[13px] text-muted"><b class="text-text">我的作答</b>：{{ task.answer_text }}</div>
+            <div v-if="result.reference_answer" class="mt-2 text-[13px] text-muted"><b class="text-text">参考答案</b>：{{ result.reference_answer }}</div>
           </template>
           <template v-else>
             <b>{{ task.verdict === 'pass' ? '✓ 通过' : '✗ 未通过' }}</b>
-            <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
-            <div v-if="task.reference_answer" class="ref-answer"><b>参考答案</b>：{{ task.reference_answer }}</div>
+            <div v-if="task.answer_text" class="mt-2 text-[13px] text-muted"><b class="text-text">我的作答</b>：{{ task.answer_text }}</div>
+            <div v-if="task.reference_answer" class="mt-2 text-[13px] text-muted"><b class="text-text">参考答案</b>：{{ task.reference_answer }}</div>
           </template>
         </div>
-        <div v-else-if="done" class="verdict-panel none">
-          <div v-if="judging" style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-            <span class="spinner"></span>
+        <div v-else-if="done" class="mt-3 rounded-md border border-line bg-surface-2 p-3 text-[14px]">
+          <div v-if="judging" class="mb-2 flex items-center gap-2">
+            <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-line border-t-primary" />
             <b>大模型判分中…结果出来会自动更新</b>
           </div>
           <template v-if="question">
-            <div class="question-box">{{ question }}</div>
-            <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
-            <div v-if="questionMeta?.reference_answer" class="ref-answer"><b>参考答案</b>：{{ questionMeta.reference_answer }}</div>
+            <div class="whitespace-pre-wrap rounded-md bg-surface p-3 text-[14px] leading-relaxed">{{ question }}</div>
+            <div v-if="task.answer_text" class="mt-2 text-[13px] text-muted"><b class="text-text">我的作答</b>：{{ task.answer_text }}</div>
+            <div v-if="questionMeta?.reference_answer" class="mt-2 text-[13px] text-muted"><b class="text-text">参考答案</b>：{{ questionMeta.reference_answer }}</div>
           </template>
           <template v-else>
             该轮次没有存储题目（「只练不判」的记录不会自动出题）
-            <div style="margin-top: 8px;">
-              <button class="btn ghost" :disabled="loadingQ" @click="ensureQuestionLoaded">
+            <div class="mt-2">
+              <button class="rounded-md border border-line px-3 py-1.5 text-[13px] text-text hover:bg-surface" :disabled="loadingQ" @click="ensureQuestionLoaded">
                 {{ loadingQ ? '生成中…' : '生成题目查看' }}
               </button>
             </div>
           </template>
-          <div v-if="task.status === 'practiced' && !task.verdict && !judging && !reanswer" style="margin-top: 8px;">
-            <button class="btn ghost" @click="reanswer = true">重新作答并判分</button>
+          <div v-if="task.status === 'practiced' && !task.verdict && !judging && !reanswer" class="mt-2">
+            <button class="rounded-md border border-line px-3 py-1.5 text-[13px] text-text hover:bg-surface" @click="reanswer = true">重新作答并判分</button>
           </div>
         </div>
 
-        <div style="margin-top: 10px;">
-          <button class="btn text" :disabled="explaining" @click="loadExplanation">
+        <div class="mt-2.5">
+          <button class="text-[13px] text-primary hover:underline" :disabled="explaining" @click="loadExplanation">
             {{ explaining ? '解析生成中…' : '深度解析（对比我的历史作答）' }}
           </button>
         </div>
-        <div v-if="explanation" class="verdict-panel none" style="text-align: left;">
+        <div v-if="explanation" class="mt-2 rounded-md border border-line bg-surface-2 p-3 text-left text-[14px]">
           <b>深度解析<span v-if="explanation.attempts_used > 0">（基于最近 {{ explanation.attempts_used }} 次作答）</span></b>
-          <p style="margin-top: 6px; white-space: pre-wrap;">{{ explanation.text }}</p>
-          <p v-if="explanation.source_refs.length" style="margin-top: 4px; color: var(--faint); font-size: 12px;">
+          <p class="mt-1.5 whitespace-pre-wrap">{{ explanation.text }}</p>
+          <p v-if="explanation.source_refs.length" class="mt-1 text-xs text-faint">
             依据资料：{{ explanation.source_refs.join('；') }}
           </p>
         </div>
