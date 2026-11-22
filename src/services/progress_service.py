@@ -293,7 +293,38 @@ def get_p1_summary(training_id: int) -> P1Summary:
     )
 
 
+
+def daily_activity(days: int = 91, *, conn: Any | None = None) -> list[dict[str, Any]]:
+    """每日作答热力（GitHub 贡献图风格的数据源）：``[{date, count}]``。
+
+    口径：``practice_attempts`` 按**服务器本地日期**分组的逐日条数（一题一次判分
+    计 1）；返回覆盖近 ``days`` 天的连续区间（零天补 0），按日期升序。
+    纯 SQL，只读。
+    """
+    from src.db.sqlite import get_connection as _connect
+
+    active = conn or _connect()
+    own = conn is None
+    try:
+        rows = active.execute(
+            "SELECT date(created_at, 'localtime') AS d, COUNT(*) AS n "
+            "FROM practice_attempts GROUP BY d"
+        ).fetchall()
+    finally:
+        if own:
+            active.close()
+    counts = {str(r[0]): int(r[1]) for r in rows}
+    today = date.today()
+    start = today - timedelta(days=days - 1)
+    out: list[dict[str, Any]] = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).isoformat()
+        out.append({"date": d, "count": counts.get(d, 0)})
+    return out
+
+
 __all__ = [
+    "daily_activity",
     "TrainingProgress",
     "HomeDashboard",
     "P1Summary",

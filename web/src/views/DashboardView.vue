@@ -9,6 +9,40 @@ const router = useRouter();
 const data = ref<DashboardResponse | null>(null);
 const loading = ref(true);
 
+// ---- 每日训练热力（GitHub 贡献图风格）：近 13 周，列=周、行=周一~周日 ----
+const heatCells = computed(() => {
+  const act = data.value?.activity || [];
+  if (!act.length) return [];
+  const byDate = new Map(act.map((a) => [a.date, a.count]));
+  const today = new Date();
+  // 起点：13 周前的周一（对齐列）
+  const start = new Date(today);
+  start.setDate(today.getDate() - 90);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // 回退到周一
+  const cells: { date: string; count: number; level: number; future: boolean; label: string }[] = [];
+  const localIso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    const iso = localIso(d);
+    const count = byDate.get(iso) || 0;
+    const level = count === 0 ? 0 : count <= 2 ? 1 : count <= 5 ? 2 : count <= 9 ? 3 : 4;
+    cells.push({
+      date: iso,
+      count,
+      level,
+      future: false,
+      label: `${d.getMonth() + 1}月${d.getDate()}日：${count} 题`,
+    });
+  }
+  // 本周剩余天数补隐藏格（保持 7 行网格对齐）
+  const dow = (today.getDay() + 6) % 7;
+  for (let i = dow + 1; i <= 6; i++) {
+    cells.push({ date: "", count: 0, level: 0, future: true, label: "" });
+  }
+  return cells;
+});
+const heatTotal = computed(() => (data.value?.activity || []).reduce((s, a) => s + a.count, 0));
+
 const dateText = computed(() => {
   const d = new Date();
   const week = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
@@ -115,6 +149,28 @@ onMounted(load);
         <div class="card dash-metric">
           <div class="dash-num">{{ data.total_all }}</div>
           <div class="dash-label">全部训练</div>
+        </div>
+      </div>
+
+      <div class="card heat-card">
+        <div class="card-head" style="margin-bottom: 0;">
+          <div class="card-title">训练热力</div>
+          <span class="badge gray">近 13 周 · {{ heatTotal }} 题</span>
+        </div>
+        <div v-if="heatCells.length" class="heat-grid">
+          <div
+            v-for="(c, i) in heatCells"
+            :key="i"
+            class="heat-cell"
+            :class="[c.level ? 'l' + c.level : '', { future: c.future }]"
+            :title="c.label"
+          />
+        </div>
+        <div class="heat-legend">
+          少
+          <span class="heat-cell" /><span class="heat-cell l1" /><span class="heat-cell l2" />
+          <span class="heat-cell l3" /><span class="heat-cell l4" />
+          多
         </div>
       </div>
 

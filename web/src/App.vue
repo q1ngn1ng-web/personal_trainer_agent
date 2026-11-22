@@ -48,8 +48,15 @@ function closeMenu() {
 }
 
 import {
-  CircleDot, Plus, LayoutDashboard, GraduationCap, CircleUser,
+  CircleDot, Plus, LayoutDashboard, GraduationCap, CircleUser, Sun, Moon, SunMoon,
 } from "lucide-vue-next";
+import { cyclePref, prefLabel, getPref, type ThemePref } from "./theme";
+
+const themePref = ref<ThemePref>(getPref());
+function toggleTheme() {
+  themePref.value = cyclePref();
+  toast(`主题：${prefLabel[themePref.value]}`);
+}
 
 const navs = [
   { name: "today", ico: CircleDot, label: "今日训练" },
@@ -109,6 +116,15 @@ async function doLogout() {
     <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
       <header class="topbar">
         <div class="topbar-title">{{ route.name === 'wizard' ? '新建训练' : navs.find((n) => n.name === route.name)?.label || '' }}</div>
+        <button
+          class="collapse-btn theme-toggle"
+          :title="'主题：' + prefLabel[themePref] + '（点击切换）'"
+          @click="toggleTheme"
+        >
+          <Sun v-if="themePref === 'light'" class="ico-svg" style="width: 15px; height: 15px;" />
+          <Moon v-else-if="themePref === 'dark'" class="ico-svg" style="width: 15px; height: 15px;" />
+          <SunMoon v-else class="ico-svg" style="width: 15px; height: 15px;" />
+        </button>
         <div class="avatar-wrap" @click.stop>
           <button class="avatar" @click="toggleMenu">{{ initial }}</button>
           <div v-if="menuOpen" class="avatar-menu" @click="closeMenu">

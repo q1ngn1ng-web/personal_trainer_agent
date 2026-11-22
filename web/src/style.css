@@ -398,10 +398,12 @@ a { color: var(--brand); text-decoration: none; }
 .draft-box .k { color: var(--muted); flex-shrink: 0; width: 84px; }
 .tag-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
-/* ============ 深色模式（跟随系统） ============
+/* ============ 深色模式 ============
+ * 手动三态（web/src/theme.ts 写 <html data-theme>；index.html 内联脚本防白闪）。
  * 值为重新设计而非反转：深灰蓝底 + 提亮的青绿与状态色；weak 系改低透明度叠色 */
-@media (prefers-color-scheme: dark) {
-  :root {
+:root { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
     --bg: #0e1014;
     --surface: #15171c;
     --surface-2: #1b1e24;
@@ -436,3 +438,29 @@ a { color: var(--brand); text-decoration: none; }
   @keyframes verdict-glow-ok { 0% { box-shadow: 0 0 0 0 rgba(62, 207, 148, 0.20); } 100% { box-shadow: 0 0 0 8px rgba(62, 207, 148, 0); } }
   @keyframes verdict-glow-warn { 0% { box-shadow: 0 0 0 0 rgba(235, 157, 95, 0.18); } 100% { box-shadow: 0 0 0 8px rgba(235, 157, 95, 0); } }
 }
+
+/* ---- 每日训练热力图（GitHub 贡献图风格）：作答越多格色越深 ---- */
+:root {
+  --heat-1: #d3ece7; --heat-2: #9ed9cd; --heat-3: #4db59e; --heat-4: #0e7c6b;
+}
+:root[data-theme="dark"] .heat { --heat-1: rgba(23,181,151,0.18); --heat-2: rgba(23,181,151,0.38); --heat-3: rgba(23,181,151,0.62); --heat-4: rgba(44,199,170,0.9); }
+.heat-card { display: flex; flex-direction: column; gap: var(--space-2); }
+.heat-grid {
+  display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 12px);
+  grid-auto-columns: 12px; gap: 3px; overflow-x: auto; padding-bottom: 2px;
+}
+.heat-cell { width: 12px; height: 12px; border-radius: 3px; background: var(--surface-2); border: 1px solid var(--line); }
+.heat-cell.l1 { background: var(--heat-1); border-color: transparent; }
+.heat-cell.l2 { background: var(--heat-2); border-color: transparent; }
+.heat-cell.l3 { background: var(--heat-3); border-color: transparent; }
+.heat-cell.l4 { background: var(--heat-4); border-color: transparent; }
+.heat-cell.future { visibility: hidden; }
+.heat-legend { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--faint); }
+.heat-legend .heat-cell { width: 10px; height: 10px; }
+/* 顶栏主题切换钮（亮/暗/跟随三态循环） */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 50%; margin-right: 14px;
+  align-self: center; color: var(--muted);
+}
+.theme-toggle:hover { background: var(--surface-2); color: var(--text); }

@@ -118,6 +118,7 @@ export type DashboardResponse = {
   total_active: number;
   total_all: number;
   avg_baseline: number | null;
+  activity: { date: string; count: number }[];
 };
 
 export type WeeklyMetrics = {

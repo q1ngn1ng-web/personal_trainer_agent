@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0E7C6B" />
     <title>训练教练</title>
+    <script>
+      (function () {
+        try {
+          var p = localStorage.getItem("theme-pref") || "auto";
+          var d = p === "dark" || (p === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = d ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

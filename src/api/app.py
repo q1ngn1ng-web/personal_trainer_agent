@@ -47,7 +47,7 @@ from src.services import (
     source_service,
 )
 from src.services.calibration_service import CalibrationSuggestion
-from src.services.progress_service import compute_home_dashboard
+from src.services.progress_service import compute_home_dashboard, daily_activity
 
 logger = logging.getLogger("src.api.app")
 
@@ -400,6 +400,8 @@ def dashboard(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]
         "total_active": snap.total_active,
         "total_all": snap.total_all,
         "avg_baseline": snap.avg_baseline,
+        # 每日作答热力（近 91 天，零天补 0）：GitHub 贡献图风格
+        "activity": daily_activity(91),
     }
 
 
