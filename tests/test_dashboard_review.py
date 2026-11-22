@@ -99,6 +99,13 @@ class TestDashboardAndReview(unittest.TestCase):
         self.assertGreaterEqual(body["total_all"], 1)
         match = [t for t in body["trainings"] if t["training_id"] == self.training.id]
         self.assertTrue(match, "仪表盘应包含本次训练")
+        row = match[0]
+        # 知识点覆盖（2026-11-22 用户需求）：payload 必须携带，前端 chips 才有数据
+        self.assertIn("knowledge_points_total", row)
+        self.assertIn("knowledge_points_covered", row)
+        self.assertIn("item_count", row)
+        self.assertGreaterEqual(row["item_count"], 1, "有路径的训练必须有题量")
+        self.assertGreaterEqual(row["knowledge_points_total"], 1, "必须能看到知识点")
         self.assertIn("consecutive_days", match[0])
         self.assertIn("today_completion", match[0])
         self.assertEqual(match[0]["status"], "active")

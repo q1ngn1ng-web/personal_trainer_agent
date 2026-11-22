@@ -21,6 +21,10 @@ export function applyPref(pref: ThemePref) {
   document.documentElement.dataset.theme = resolve(pref);
 }
 
+export function setPref(pref: ThemePref) {
+  applyPref(pref);
+}
+
 export function cyclePref(): ThemePref {
   const order: ThemePref[] = ["auto", "light", "dark"];
   const next = order[(order.indexOf(getPref()) + 1) % order.length];

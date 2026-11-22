@@ -61,6 +61,7 @@ class ClarificationSession:
     history: list[dict[str, str]] = field(default_factory=list)
     confidence: float = 0.0
     fallback_used: bool = False
+    title: str = ""
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -187,6 +188,11 @@ def _build_session(
     elif action == "suggest":
         question = "以上建议值如有不合适的地方，直接告诉我即可。"
 
+    # AI 生成的训练标题（schema 顶层 title）；缺省回落描述前 12 字
+    suggested_title = str(output.get("title") or "").strip()
+    if not suggested_title and topic:
+        suggested_title = topic.strip()[:12]
+
     return ClarificationSession(
         training_id=training.id,
         topic=topic,
@@ -198,6 +204,7 @@ def _build_session(
         history=history,
         confidence=float(output.get("confidence") or 0.0),
         fallback_used=fallback_used,
+        title=suggested_title,
         notes=notes,
     )
 
@@ -513,6 +520,7 @@ def load_session(training_id: int) -> ClarificationSession | None:
         action=next_action(rounds, missing),
         question="",
         history=list(state.get("history") or []),
+        title=str(training.topic or ""),
     )
 
 

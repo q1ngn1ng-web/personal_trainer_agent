@@ -43,6 +43,13 @@ const heatCells = computed(() => {
 });
 const heatTotal = computed(() => (data.value?.activity || []).reduce((s, a) => s + a.count, 0));
 
+const knowledgeSummary = computed(() => {
+  const rows = data.value?.trainings || [];
+  const total = rows.reduce((s, t) => s + (t.knowledge_points_total ?? 0), 0);
+  const covered = rows.reduce((s, t) => s + (t.knowledge_points_covered ?? 0), 0);
+  return total ? { total, covered } : null;
+});
+
 const dateText = computed(() => {
   const d = new Date();
   const week = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
@@ -156,6 +163,7 @@ onMounted(load);
         <div class="card-head" style="margin-bottom: 0;">
           <div class="card-title">训练热力</div>
           <span class="badge gray">近 13 周 · {{ heatTotal }} 题</span>
+          <span class="badge info" v-if="knowledgeSummary">知识点 {{ knowledgeSummary.covered }}/{{ knowledgeSummary.total }} 已覆盖</span>
         </div>
         <div v-if="heatCells.length" class="heat-grid">
           <div
@@ -192,9 +200,21 @@ onMounted(load);
         <div class="dash-row-metrics">
           <span>坚持 <b>{{ t.consecutive_days }}</b> 天</span>
           <span>今日 <b>{{ t.today_completed }}</b>/{{ t.today_total }}（{{ pct(t) }}%）</span>
+          <span>题量 <b>{{ t.item_count ?? 0 }}</b></span>
+          <span>知识点覆盖 <b>{{ t.knowledge_points_covered ?? 0 }}/{{ t.knowledge_points_total ?? 0 }}</b></span>
           <span>第 <b>{{ t.current_week }}</b> 周</span>
           <span>基线 {{ (t.baseline_score * 100).toFixed(0) }} 分</span>
           <span>最近活跃 {{ relDay(t.last_active_at) }}</span>
+        </div>
+        <div v-if="(t.knowledge_points || []).length" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+          <span
+            v-for="kp in (t.knowledge_points || []).slice(0, 8)"
+            :key="kp.name"
+            class="badge"
+            :class="kp.covered ? 'ok' : 'gray'"
+            :title="kp.covered ? '已覆盖（有通过记录）' : '未覆盖'"
+          >{{ kp.covered ? '✓ ' : '' }}{{ kp.name }}</span>
+          <span v-if="(t.knowledge_points || []).length > 8" class="badge gray">+{{ (t.knowledge_points || []).length - 8 }}</span>
         </div>
         <div class="progress" style="margin-top: 8px;"><i :style="{ width: pct(t) + '%' }"></i></div>
         <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;" @click.stop>

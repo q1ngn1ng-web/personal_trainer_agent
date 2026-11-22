@@ -393,6 +393,11 @@ def dashboard(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]
                 "today_total": p.today_total,
                 "last_active_at": p.last_active_at.isoformat() if p.last_active_at else None,
                 "current_week": p.current_week,
+                # 知识点覆盖（2026-11-22 用户需求：仪表盘能看到知识点/题量/进度/覆盖）
+                "item_count": p.item_count,
+                "knowledge_points_total": p.knowledge_points_total,
+                "knowledge_points_covered": p.knowledge_points_covered,
+                "knowledge_points": p.knowledge_points,
             }
         )
     return {
@@ -1841,18 +1846,41 @@ def wizard_start(body: WizardStartBody, viewer: Viewer | None = Depends(current_
     from src.services import goal_clarification_service
 
     session = goal_clarification_service.start_session(topic)
+    # AI 生成的训练标题 + 同名去重（用户拍板：重复则 -02/-03 递增）
+    final_title = _dedup_training_title(int(viewer.user_id), session.title)
     with _tx() as active:  # 个人版：训练归属当前账号与所在组织（member-invite 后组织可为空）
         if viewer.org_id is not None:
             active.execute(
-                "UPDATE trainings SET owner_user_id = ?, org_id = ? WHERE id = ?",
-                (int(viewer.user_id), int(viewer.org_id), int(session.training_id)),
+                "UPDATE trainings SET owner_user_id = ?, org_id = ?, topic = ? WHERE id = ?",
+                (int(viewer.user_id), int(viewer.org_id), final_title, int(session.training_id)),
             )
         else:
             active.execute(
-                "UPDATE trainings SET owner_user_id = ? WHERE id = ?",
-                (int(viewer.user_id), int(session.training_id)),
+                "UPDATE trainings SET owner_user_id = ?, topic = ? WHERE id = ?",
+                (int(viewer.user_id), final_title, int(session.training_id)),
             )
-    return _clarify_payload(session)
+    payload = _clarify_payload(session)
+    payload["title"] = final_title
+    return payload
+
+
+def _dedup_training_title(owner_user_id: int, base_title: str) -> str:
+    """同 owner 下标题去重：重复则 -02/-03 递增（用户拍板）。"""
+    base = (base_title or "").strip() or "未命名训练"
+    conn = queries.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT topic FROM trainings WHERE owner_user_id = ?", (int(owner_user_id),)
+        ).fetchall()
+    finally:
+        conn.close()
+    taken = {str(r["topic"] or "") for r in rows}
+    if base not in taken:
+        return base
+    suffix = 2
+    while f"{base}-{suffix:02d}" in taken:
+        suffix += 1
+    return f"{base}-{suffix:02d}"
 
 
 @app.get("/api/wizard/{training_id}/clarify")

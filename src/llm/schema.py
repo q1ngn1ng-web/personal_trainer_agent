@@ -172,6 +172,7 @@ GOAL_CLARIFICATION_SCHEMA: dict[str, Any] = {
             "required": ["content", "level", "acceptance"],
             "additionalProperties": False,
         },
+        "title": {"type": "string"},
         "field_sources": {
             "type": "object",
             "properties": {

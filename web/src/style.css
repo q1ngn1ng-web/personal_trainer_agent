@@ -437,7 +437,6 @@ a { color: var(--brand); text-decoration: none; }
   /* 光环动画在深底上略收（避免大面积泛光） */
   @keyframes verdict-glow-ok { 0% { box-shadow: 0 0 0 0 rgba(62, 207, 148, 0.20); } 100% { box-shadow: 0 0 0 8px rgba(62, 207, 148, 0); } }
   @keyframes verdict-glow-warn { 0% { box-shadow: 0 0 0 0 rgba(235, 157, 95, 0.18); } 100% { box-shadow: 0 0 0 8px rgba(235, 157, 95, 0); } }
-}
 
 /* ---- 每日训练热力图（GitHub 贡献图风格）：作答越多格色越深 ---- */
 :root {

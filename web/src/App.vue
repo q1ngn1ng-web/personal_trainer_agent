@@ -116,18 +116,12 @@ async function doLogout() {
     <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
       <header class="topbar">
         <div class="topbar-title">{{ route.name === 'wizard' ? '新建训练' : navs.find((n) => n.name === route.name)?.label || '' }}</div>
-        <button
-          class="collapse-btn theme-toggle"
-          :title="'主题：' + prefLabel[themePref] + '（点击切换）'"
-          @click="toggleTheme"
-        >
-          <Sun v-if="themePref === 'light'" class="ico-svg" style="width: 15px; height: 15px;" />
-          <Moon v-else-if="themePref === 'dark'" class="ico-svg" style="width: 15px; height: 15px;" />
-          <SunMoon v-else class="ico-svg" style="width: 15px; height: 15px;" />
-        </button>
         <div class="avatar-wrap" @click.stop>
           <button class="avatar" @click="toggleMenu">{{ initial }}</button>
           <div v-if="menuOpen" class="avatar-menu" @click="closeMenu">
+            <button class="menu-item" :title="'主题：' + prefLabel[themePref] + '（点击切换）'" @click.stop="toggleTheme">
+              {{ themePref === 'light' ? '☀' : themePref === 'dark' ? '☾' : '◐' }} 主题：{{ prefLabel[themePref] }}
+            </button>
             <div class="menu-header">
               <div class="menu-name">{{ who }}</div>
               <div class="menu-sub">{{ authState.viewer ? '已登录' : '本地模式' }}</div>

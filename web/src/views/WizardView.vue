@@ -447,6 +447,12 @@ const STATE_LABEL: Record<string, string> = {
 
         <div class="draft-box">
           <div class="card-head" style="margin-bottom: 8px;">
+            <div class="card-title" style="font-size: 14px;">
+              训练标题：<span style="color: var(--brand);">{{ session.title || '（生成中…）' }}</span>
+            </div>
+            <div style="font-size: 12px; color: var(--faint);">AI 根据你的描述起的名字，会显示在「我的训练」列表里</div>
+          </div>
+          <div class="card-head" style="margin-bottom: 8px; margin-top: 10px;">
             <div class="card-title" style="font-size: 14px;">目标草案（可直接编辑，AI 不会覆盖你改过的字段）</div>
             <button class="btn sm" :disabled="draftBusy" @click="saveDraftFields">
               {{ draftBusy ? '保存中…' : '保存修改' }}

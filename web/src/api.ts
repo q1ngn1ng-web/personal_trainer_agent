@@ -111,6 +111,10 @@ export type DashboardProgress = {
   today_total: number;
   last_active_at: string | null;
   current_week: number;
+  item_count?: number;
+  knowledge_points_total?: number;
+  knowledge_points_covered?: number;
+  knowledge_points?: { name: string; covered: boolean }[];
 };
 
 export type DashboardResponse = {

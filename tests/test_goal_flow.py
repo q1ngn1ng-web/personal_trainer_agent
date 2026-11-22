@@ -257,5 +257,72 @@ class TestDraftFieldPersistence(unittest.TestCase):
         self.assertEqual(updated.action, "ask", "字段缺失仍会继续追问")
 
 
+class TestAiTitle(unittest.TestCase):
+    """AI 生成训练标题 + 同名去重（2026-11-22 用户需求）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old_db = os.environ.get("DB_PATH")
+        os.environ["DB_PATH"] = str(Path(self._tmp.name) / "title.db")
+        init_db()
+
+        from fastapi.testclient import TestClient
+
+        from src.llm import client as client_module
+
+        self._client = client_module
+        self._orig = client_module._call_api
+
+        def fake_call_api(messages, *args, **kwargs):  # noqa: ANN001, ANN003
+            return json.dumps(
+                {
+                    "draft": {
+                        "content": "我想要学习redis，准备agent开发和java后端面试",
+                        "level": "熟练",
+                        "acceptance": {
+                            "type": "quantitative", "metric": "accuracy",
+                            "target": 0.8, "statement": "redis 面试题正确率达标",
+                        },
+                    },
+                    "title": "redis 面试八股训练",
+                    "missing_fields": ["horizon_days", "session_count"],
+                    "follow_up_question": "",
+                    "confidence": 0.9,
+                    "field_sources": {},
+                },
+                ensure_ascii=False,
+            ), 10, 20
+
+        client_module._call_api = fake_call_api
+
+        self.client = TestClient(__import__("src.api.app", fromlist=["app"]).app)
+        self.client.post(
+            "/api/auth/register",
+            json={"email": "t@example.com", "password": "password8", "display_name": "T"},
+        )
+
+    def tearDown(self) -> None:
+        self._client._call_api = self._orig
+        if self._old_db is None:
+            os.environ.pop("DB_PATH", None)
+        else:
+            os.environ["DB_PATH"] = self._old_db
+        self._tmp.cleanup()
+
+    def test_title_generated_and_deduped(self) -> None:
+        first = self.client.post("/api/wizard/start", json={"topic": "我想要学习redis，准备agent开发和java后端面试"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["title"], "redis 面试八股训练", "AI 生成的标题作为训练名")
+        second = self.client.post("/api/wizard/start", json={"topic": "我想要学习redis，准备agent开发和java后端面试"})
+        self.assertEqual(second.json()["title"], "redis 面试八股训练-02", "重复计划 -02")
+        third = self.client.post("/api/wizard/start", json={"topic": "我想要学习redis，准备agent开发和java后端面试"})
+        self.assertEqual(third.json()["title"], "redis 面试八股训练-03", "-03 递增")
+        # fallback：stub 不给 title 时取描述前 12 字
+        from src.services import goal_clarification_service as svc
+        session = svc.start_session("这是一段超过十二个字的训练描述用于验证兜底标题")
+        self.assertTrue(session.title, "fallback 标题非空")
+        self.assertLessEqual(len(session.title), 12)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { authState, logout } from "../auth";
 import { api } from "../api";
+import { getPref, setPref, prefLabel, type ThemePref } from "../theme";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
@@ -34,6 +35,19 @@ const busy = ref(false);
 
 function toast(msg: string) {
   (window as any).__toast?.(msg);
+}
+
+// 外观（主题三态）：从顶栏迁移到个人中心 + 头像菜单（2026-11-22 用户要求）
+const themePref = ref<ThemePref>(getPref());
+const THEME_OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
+  { value: "auto", label: "跟随系统", hint: "与操作系统亮暗保持一致" },
+  { value: "light", label: "浅色", hint: "默认亮色主题" },
+  { value: "dark", label: "深色", hint: "深灰蓝底 + 提亮状态色" },
+];
+function applyTheme(value: ThemePref) {
+  themePref.value = value;
+  setPref(value);
+  toast(`主题：${prefLabel[value]}`);
 }
 
 async function loadOrg() {
@@ -156,6 +170,22 @@ onMounted(loadOrg);
         </div>
       </div>
       <button v-if="authState.authEnabled" class="btn ghost" @click="doLogout">退出登录</button>
+    </div>
+
+    <!-- 外观设置 -->
+    <div v-if="authState.viewer" class="card">
+      <div class="card-title" style="margin-bottom: 8px;">外观</div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button
+          v-for="opt in THEME_OPTIONS"
+          :key="opt.value"
+          class="btn sm"
+          :class="themePref === opt.value ? 'primary' : 'ghost'"
+          :title="opt.hint"
+          @click="applyTheme(opt.value)"
+        >{{ opt.label }}</button>
+      </div>
+      <div style="font-size: 12px; color: var(--faint); margin-top: 6px;">当前：{{ prefLabel[themePref] }}——右上角头像菜单里也可以快速切换</div>
     </div>
 
     <!-- 我的邀请（被邀请人侧） -->

@@ -38,6 +38,11 @@ class TrainingProgress:
     today_total: int
     last_active_at: datetime | None
     current_week: int
+    # 知识点覆盖（2026-11-22 用户需求：热力图/仪表盘能看到知识点、题量、进度、覆盖）
+    item_count: int = 0
+    knowledge_points_total: int = 0
+    knowledge_points_covered: int = 0
+    knowledge_points: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -185,6 +190,8 @@ def compute_training_progress(
 
     baseline_score = float(training.baseline_score or 0.0)
 
+    item_count, knowledge_points = _knowledge_coverage(training_id)
+
     return TrainingProgress(
         training_id=int(training.id),
         topic=str(training.topic or ""),
@@ -196,9 +203,45 @@ def compute_training_progress(
         today_completion=today_completion,
         today_completed=completed,
         today_total=total,
+        item_count=item_count,
+        knowledge_points_total=len(knowledge_points),
+        knowledge_points_covered=sum(1 for kp in knowledge_points if kp["covered"]),
+        knowledge_points=knowledge_points[:12],
         last_active_at=_parse_dt(training.last_active_at),
         current_week=int(training.current_week or 1),
     )
+
+
+def _knowledge_coverage(training_id: int) -> tuple[int, list[dict[str, Any]]]:
+    """当前路径的训练项聚合：题量（训练项数）+ 知识点覆盖（该知识点任一项 passed 即覆盖）。"""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT i.knowledge_point, i.title, i.status
+               FROM training_items i
+               JOIN path_stages s ON s.id = i.stage_id
+               JOIN training_paths p ON p.id = s.path_id
+               WHERE p.training_id = ?
+               ORDER BY (p.status = 'confirmed') DESC, p.version DESC, s.ordinal, i.ordinal, i.id""",
+            (int(training_id),),
+        ).fetchall()
+    finally:
+        conn.close()
+    item_count = len(rows)
+    points: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        name = str(row["knowledge_point"] or row["title"] or "").strip()
+        if not name:
+            continue
+        covered = str(row["status"]) == "passed"
+        if name in seen:
+            seen[name]["covered"] = seen[name]["covered"] or covered
+        else:
+            entry = {"name": name, "covered": covered}
+            seen[name] = entry
+            points.append(entry)
+    return item_count, points
 
 
 def compute_home_dashboard(*, today: date | None = None) -> HomeDashboard:

@@ -33,7 +33,7 @@ KEYWORD_GENERATION_PROMPT: str = """你是关键词白名单设计助手。请�
 
 KEYWORD_GENERATION_PROMPT_VERSION: str = "v1.0.0"
 
-BASELINE_Q_PROMPT: str = """你是基线诊断出题助手。请基于主题、描述与关键词白名单，生成 3 道前提性诊断题。
+BASELINE_Q_PROMPT: str = """你是一位基线诊断出题助手，需要出题来确认哟怒火的真实水平。请基于主题、描述与关键词白名单，生成 3 道前提性诊断题。
 
 主题: {topic}
 描述: {description}
@@ -133,7 +133,7 @@ PRETRAIN_CHECKLIST_PROMPT: str = """你是低基线预训练清单助手。请�
 
 PRETRAIN_CHECKLIST_PROMPT_VERSION: str = "v1.0.0"
 
-GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会用一句话描述想训练的内容，你的任务是把这句话补全成可执行的目标草案。
+GOAL_CLARIFICATION_PROMPT: str = """你是一位学习目标澄清助手，目的是帮助用户澄清自己想学习的内容。用户会用一句话描述想训练的内容，你的任务是把这句话补全成大模型可理解可执行的目标草案。
 
 用户描述: {description}
 已知信息: {known}
@@ -144,6 +144,7 @@ GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会�
 {schema}
 
 要求:
+0. title: 训练标题——根据用户描述起一个简短的名字（4-16 字，如「redis 面试八股训练」「MySQL 索引专项训练」），体现主题与用途，不要句号、不要"训练计划"这类泛称
 1. draft.content: 学习内容，保留用户原话的核心表述，不要摘要式改写
 2. draft.level: 目标等级，只能取「了解 / 会用 / 熟练 / 能讲清」之一
 3. draft.acceptance: 验收标准，必须可判定。优先给量化判据（type=quantitative，配 metric 与 target，metric 取 accuracy / volume / speed / streak）；accuracy 的 target 用 0-1 的比例（如 0.8），不要写 80。给不出数字时用 type=qualitative，并给出可观察的 statement 与检查方式 check
@@ -158,7 +159,7 @@ GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会�
 你只能输出 JSON。
 """
 
-GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.2.0"
+GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.3.0"
 
 EDGE_PROBE_PROMPT: str = """你是学习诊断出题助手。用户已经确认了训练目标，并导入了自己的资料来源。
 请**只根据给定的来源内容**出题，用于判断用户对每个知识点的掌握处于哪一档，不要考资料之外的东西。
