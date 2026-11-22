@@ -152,11 +152,13 @@ GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会�
 6. 若用户描述里已经提到训练周期、每周次数或每次时长，只把它保留在 content 里，不要追问，也不要输出成字段；训练节奏（总时长、训练次数）由界面的「训练节奏」控件收集，你不要过问
 7. 严禁在本阶段询问训练周期、每周训练次数、每次训练时长或训练总次数——这些由界面控件收集；你也 MUST NOT 在 draft 里输出这类字段
 8. 字段间自洽检查：content / level / acceptance 必须指向同一学习主题且难度匹配（例如 level=「了解」时 acceptance 不得要求「能讲清」级别的高标准）；发现互相矛盾时以 content 为准修正 level / acceptance，并在 follow_up_question 里向用户说明修正点
+9. **从第一轮起就给完整草案建议**：draft.level 与 draft.acceptance 基于用户描述直接给出你的最佳建议（MUST NOT 留空等待追问）——用户的界面卡片上会展示这些建议供其修改；已知信息里已有的值原样保留
+10. missing_fields 只列**真正缺失或不合格**的字段：有建议值的字段不算缺失（用户会在卡片上看到并自行修改）；没有缺失时 missing_fields 为空列表，follow_up_question 为空字符串
 
 你只能输出 JSON。
 """
 
-GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.1.0"
+GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.2.0"
 
 EDGE_PROBE_PROMPT: str = """你是学习诊断出题助手。用户已经确认了训练目标，并导入了自己的资料来源。
 请**只根据给定的来源内容**出题，用于判断用户对每个知识点的掌握处于哪一档，不要考资料之外的东西。

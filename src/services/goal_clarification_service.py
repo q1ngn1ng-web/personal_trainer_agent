@@ -350,6 +350,22 @@ def confirm(
     return updated
 
 
+def _draft_view_of_state(state: dict[str, Any]) -> dict[str, Any]:
+    """把持久化状态包成 merge_goal 认识的 LLM 输出形状（保住 inferred 字段）。
+
+    _build_session 只读 ``output["draft"]``——直接传 state 会让 AI 推断的
+    level/acceptance 被当作"无草案"清空（用户报"填完了还是不能确认"的根因）。
+    """
+    return {
+        "draft": {
+            name: state.get(name)
+            for name in ("content", "level", "acceptance")
+            if state.get(name) not in (None, "")
+        },
+        "field_sources": dict(state.get("field_sources") or {}),
+    }
+
+
 def set_pace(training_id: int, horizon_days: int, session_count: int) -> ClarificationSession:
     """UI 节奏卡片提交（change user-defined-training-plan 1.1/1.3）。
 
@@ -376,10 +392,13 @@ def set_pace(training_id: int, horizon_days: int, session_count: int) -> Clarifi
     sources["session_count"] = GoalFieldSource.USER_INPUT.value
     state["field_sources"] = sources
 
+    # 语义字段以 state 为「AI/既有草案」传入（保住 inferred 的 level/acceptance），
+    # 节奏以 locked 传入——此前直接传 state 会被 _build_session 当作无 draft 而清空
+    draft_view = _draft_view_of_state(state)
     session = _build_session(
         training,
         training.topic,
-        state,
+        draft_view,
         rounds=int(training.clarification_rounds or 0),
         history=list(state.get("history") or []),
         previous_missing=(),
@@ -448,10 +467,12 @@ def update_draft_fields(training_id: int, values: dict[str, Any]) -> Clarificati
     for name in updates:
         locked_sources[name] = GoalFieldSource.USER_INPUT.value
 
+    # 同 set_pace：语义字段走 draft 视图（inferred 不丢），编辑值走 locked
+    draft_view = _draft_view_of_state(state)
     session = _build_session(
         training,
         training.topic,
-        state,
+        draft_view,
         rounds=int(training.clarification_rounds or 0),
         history=list(state.get("history") or []),
         previous_missing=(),
