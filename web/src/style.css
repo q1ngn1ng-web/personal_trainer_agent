@@ -67,13 +67,19 @@ a { color: var(--brand); text-decoration: none; }
 .brand-sub { font-size: 11.5px; color: var(--faint); margin-top: -2px; }
 
 .nav-item {
-  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px 9px 15px;
   border-radius: var(--radius-sm); color: var(--muted); font-weight: 500;
   cursor: pointer; transition: background 0.15s, color 0.15s; border: none;
   background: transparent; font-size: 14.5px; font-family: inherit; width: 100%; text-align: left;
+  position: relative;
 }
 .nav-item:hover { background: var(--surface-2); color: var(--text); }
 .nav-item.active { background: var(--brand-weak); color: var(--brand-strong); font-weight: 600; }
+/* 当前导航项左侧指示条（Linear 风）：圆角短条，所有项统一左内距防文字跳动 */
+.nav-item.active::before {
+  content: ""; position: absolute; left: 2px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: 2px; background: var(--brand);
+}
 .nav-item .ico { width: 20px; text-align: center; flex-shrink: 0; }
 .sidebar-foot { margin-top: auto; padding: 10px 12px 0; border-top: 1px solid var(--line); }
 
@@ -103,9 +109,10 @@ a { color: var(--brand); text-decoration: none; }
 .tab-item .ico { font-size: 19px; }
 
 /* ---- 卡片与统计 ---- */
-.card-fade-enter-active { animation: cardIn 0.35s ease; }
+.card-fade-enter-active { animation: cardIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .card-fade-leave-active { transition: opacity 0.25s, transform 0.25s; }
 .card-fade-leave-to { opacity: 0; transform: translateY(8px); }
+.card-fade-move { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes cardIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .question-fill { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 12px; font-size: 14.5px; }
 .fill-seg { white-space: pre-wrap; }
@@ -149,9 +156,12 @@ a { color: var(--brand); text-decoration: none; }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   border-radius: var(--radius-sm); border: 1px solid transparent; cursor: pointer;
   font-family: inherit; font-size: 14px; font-weight: 600; padding: 8px 16px;
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s; line-height: 1.5;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s, transform 0.08s ease;
+  line-height: 1.5;
 }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-ring); }
 .btn.danger { background: #b3261e; color: #fff; }
 .btn.primary { background: var(--brand); color: #fff; }
 .btn.primary:hover:not(:disabled) { background: var(--brand-strong); }
@@ -211,10 +221,16 @@ a { color: var(--brand); text-decoration: none; }
 .option-row:hover { border-color: var(--brand); }
 .option-row.picked { border-color: var(--brand); background: var(--brand-weak); }
 .option-row .opt-key { font-weight: 700; color: var(--brand-strong); }
-.verdict-panel { border-radius: var(--radius-sm); padding: 12px 14px; font-size: 14px; margin-top: 12px; }
+.verdict-panel { border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); font-size: 14px; margin-top: var(--space-3); }
 .verdict-panel.pass { background: var(--ok-weak); border: 1px solid #b6e0c4; }
 .verdict-panel.fail { background: var(--warn-weak); border: 1px solid #f2d3ab; }
 .verdict-panel.none { background: var(--surface-2); border: 1px solid var(--line); }
+/* 判分结果出现：入场 + 一次性光环扩散消散（pass 绿 / fail 橙） */
+.verdict-panel.pass { animation: verdict-in 0.5s cubic-bezier(0.16, 1, 0.3, 1), verdict-glow-ok 0.8s ease 0.1s; }
+.verdict-panel.fail { animation: verdict-in 0.5s cubic-bezier(0.16, 1, 0.3, 1), verdict-glow-warn 0.8s ease 0.1s; }
+@keyframes verdict-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes verdict-glow-ok { 0% { box-shadow: 0 0 0 0 rgba(6, 118, 71, 0.25); } 100% { box-shadow: 0 0 0 10px rgba(6, 118, 71, 0); } }
+@keyframes verdict-glow-warn { 0% { box-shadow: 0 0 0 0 rgba(181, 71, 8, 0.22); } 100% { box-shadow: 0 0 0 10px rgba(181, 71, 8, 0); } }
 .ref-answer { color: var(--muted); font-size: 13.5px; margin-top: 8px; }
 .ref-answer b { color: var(--text); }
 /* 连败提示（coach-memory）：warn 底色的引导文案，与判分面板区分 */
@@ -228,6 +244,7 @@ a { color: var(--brand); text-decoration: none; }
   transition: all 0.15s;
 }
 .signal-btn:hover { border-color: var(--brand); color: var(--brand-strong); background: var(--brand-weak); }
+.signal-btn:active { transform: scale(0.96); }
 
 /* ---- 列表 ---- */
 .list-item {
@@ -308,6 +325,7 @@ a { color: var(--brand); text-decoration: none; }
   color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1;
 }
 .collapse-btn:hover { background: var(--surface-2); color: var(--text); }
+.collapse-btn:active { transform: scale(0.92); }
 .sidebar.collapsed .collapse-btn { align-self: center; margin-right: 0; }
 .foot-hint { font-size: 11.5px; color: var(--faint); }
 

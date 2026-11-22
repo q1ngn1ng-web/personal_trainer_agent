@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { TransitionGroup } from "vue";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api, type DashboardResponse } from "../api";
@@ -120,6 +121,7 @@ onMounted(load);
         <span class="ico">🧭</span>还没有训练——去「新建训练」开始第一课。
       </div>
 
+      <TransitionGroup name="card-fade">
       <div
         v-for="t in data.trainings"
         :key="t.training_id"
@@ -147,6 +149,7 @@ onMounted(load);
           </button>
         </div>
       </div>
+      </TransitionGroup>
     </template>
   </div>
 </template>
