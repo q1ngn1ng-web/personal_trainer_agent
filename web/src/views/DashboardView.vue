@@ -4,6 +4,9 @@ import { TransitionGroup } from "vue";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api, type DashboardResponse } from "../api";
+import Card from "../components/ui/Card.vue";
+import Badge from "../components/ui/Badge.vue";
+import Button from "../components/ui/Button.vue";
 
 const router = useRouter();
 const data = ref<DashboardResponse | null>(null);
@@ -132,38 +135,35 @@ onMounted(load);
 
 <template>
   <div>
-    <div class="page-head">
-      <h1 class="page-title">学习仪表盘</h1>
-      <p class="page-sub">{{ dateText }}·从已有出发，逐步扩大</p>
+    <div class="mb-5">
+      <h1 class="text-[28px] font-semibold leading-tight">学习仪表盘</h1>
+      <p class="mt-1 text-[13.5px] text-muted">{{ dateText }} · 从已有出发，逐步扩大</p>
     </div>
 
-    <div v-if="loading && !data" class="loading-center"><span class="spinner"></span></div>
+    <div v-if="loading && !data" class="flex h-40 items-center justify-center">
+      <span class="inline-block h-6 w-6 animate-spin rounded-full border-2 border-line border-t-primary" />
+    </div>
 
     <template v-else-if="data">
-      <div class="dash-metrics">
-        <div class="card dash-metric">
-          <div class="dash-num">{{ data.total_active }}</div>
-          <div class="dash-label">活跃训练</div>
-        </div>
-        <div class="card dash-metric">
-          <div class="dash-num">{{ totalPersistDays }}</div>
-          <div class="dash-label">累计坚持天数</div>
-        </div>
-        <div class="card dash-metric">
-          <div class="dash-num">{{ data.avg_baseline != null ? (data.avg_baseline * 100).toFixed(0) : "—" }}</div>
-          <div class="dash-label">平均基线分</div>
-        </div>
-        <div class="card dash-metric">
-          <div class="dash-num">{{ data.total_all }}</div>
-          <div class="dash-label">全部训练</div>
-        </div>
+      <!-- 指标卡（4 列网格） -->
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Card v-for="m in [
+          { num: data.total_active, label: '活跃训练' },
+          { num: totalPersistDays, label: '累计坚持天数' },
+          { num: data.avg_baseline != null ? (data.avg_baseline * 100).toFixed(0) : '—', label: '平均基线分' },
+          { num: data.total_all, label: '全部训练' },
+        ]" :key="m.label" padding="sm" class="py-4 text-center">
+          <div class="text-[22px] font-semibold tabular-nums">{{ m.num }}</div>
+          <div class="mt-1 text-xs text-muted">{{ m.label }}</div>
+        </Card>
       </div>
 
-      <div class="card heat-card">
-        <div class="card-head" style="margin-bottom: 0;">
-          <div class="card-title">训练热力</div>
-          <span class="badge gray">近 13 周 · {{ heatTotal }} 题</span>
-          <span class="badge info" v-if="knowledgeSummary">知识点 {{ knowledgeSummary.covered }}/{{ knowledgeSummary.total }} 已覆盖</span>
+      <!-- 训练热力 -->
+      <Card class="mt-4">
+        <div class="mb-3 flex items-center gap-2">
+          <div class="text-[15px] font-semibold">训练热力</div>
+          <Badge>近 13 周 · {{ heatTotal }} 题</Badge>
+          <Badge v-if="knowledgeSummary" tone="info">知识点 {{ knowledgeSummary.covered }}/{{ knowledgeSummary.total }} 已覆盖</Badge>
         </div>
         <div v-if="heatCells.length" class="heat-grid">
           <div
@@ -174,59 +174,78 @@ onMounted(load);
             :title="c.label"
           />
         </div>
-        <div class="heat-legend">
+        <div class="mt-2 flex items-center gap-1 text-xs text-faint">
           少
           <span class="heat-cell" /><span class="heat-cell l1" /><span class="heat-cell l2" />
           <span class="heat-cell l3" /><span class="heat-cell l4" />
           多
         </div>
+      </Card>
+
+      <div v-if="!data.trainings.length" class="mt-4 rounded-lg border border-line bg-surface p-8 text-center text-muted">
+        <Compass class="mx-auto mb-2 h-6 w-6" /> 还没有训练——去「新建训练」开始第一课。
       </div>
 
-      <div v-if="!data.trainings.length" class="card empty">
-        <Compass class="ico-svg ico-svg-lg empty-ico" /> 还没有训练——去「新建训练」开始第一课。
-      </div>
-
-      <TransitionGroup name="card-fade">
-      <div
-        v-for="t in data.trainings"
-        :key="t.training_id"
-        class="card dash-row"
-        @click="openTraining(t.training_id)"
-      >
-        <div class="card-head" style="margin-bottom: 8px;">
-          <div class="card-title" style="min-width: 0;">{{ t.topic }}</div>
-          <span class="badge" :class="t.status === 'active' ? 'ok' : 'gray'">{{ statusLabel[t.status] || t.status }}</span>
+      <TransitionGroup name="card-fade" tag="div" class="mt-4 flex flex-col gap-3">
+        <div
+          v-for="t in data.trainings"
+          :key="t.training_id"
+          class="cursor-pointer rounded-lg border border-line bg-surface p-5 transition-colors hover:bg-surface-2"
+          @click="openTraining(t.training_id)"
+        >
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <div class="min-w-0 text-[15px] font-semibold">{{ t.topic }}</div>
+            <Badge :tone="t.status === 'active' ? 'ok' : 'default'">{{ statusLabel[t.status] || t.status }}</Badge>
+          </div>
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted">
+            <span>坚持 <b class="font-semibold text-text">{{ t.consecutive_days }}</b> 天</span>
+            <span>今日 <b class="font-semibold text-text">{{ t.today_completed }}</b>/{{ t.today_total }}（{{ pct(t) }}%）</span>
+            <span>题量 <b class="font-semibold text-text">{{ t.item_count ?? 0 }}</b></span>
+            <span>知识点覆盖 <b class="font-semibold text-text">{{ t.knowledge_points_covered ?? 0 }}/{{ t.knowledge_points_total ?? 0 }}</b></span>
+            <span>第 <b class="font-semibold text-text">{{ t.current_week }}</b> 周</span>
+            <span>基线 {{ (t.baseline_score * 100).toFixed(0) }} 分</span>
+            <span>最近活跃 {{ relDay(t.last_active_at) }}</span>
+          </div>
+          <div v-if="(t.knowledge_points || []).length" class="mt-2 flex flex-wrap gap-1.5">
+            <Badge
+              v-for="kp in (t.knowledge_points || []).slice(0, 8)"
+              :key="kp.name"
+              :tone="kp.covered ? 'ok' : 'default'"
+              :title="kp.covered ? '已覆盖（有通过记录）' : '未覆盖'"
+            >{{ kp.covered ? '✓ ' : '' }}{{ kp.name }}</Badge>
+            <Badge v-if="(t.knowledge_points || []).length > 8">+{{ (t.knowledge_points || []).length - 8 }}</Badge>
+          </div>
+          <div class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
+            <i class="block h-full rounded-full bg-primary transition-all" :style="{ width: pct(t) + '%' }" />
+          </div>
+          <div class="mt-2.5 flex flex-wrap gap-2" @click.stop>
+            <Button
+              v-if="t.status === 'completed'"
+              variant="ghost" size="sm"
+              :disabled="archivingId === t.training_id"
+              @click="archiveTrainingRow(t.training_id)"
+            >{{ archivingId === t.training_id ? '归档中…' : '归档' }}</Button>
+            <Button variant="danger" size="sm" :disabled="deletingId === t.training_id" @click="deleteTrainingRow(t.training_id)">
+              {{ deletingId === t.training_id ? '删除中…' : '删除训练' }}
+            </Button>
+          </div>
         </div>
-        <div class="dash-row-metrics">
-          <span>坚持 <b>{{ t.consecutive_days }}</b> 天</span>
-          <span>今日 <b>{{ t.today_completed }}</b>/{{ t.today_total }}（{{ pct(t) }}%）</span>
-          <span>题量 <b>{{ t.item_count ?? 0 }}</b></span>
-          <span>知识点覆盖 <b>{{ t.knowledge_points_covered ?? 0 }}/{{ t.knowledge_points_total ?? 0 }}</b></span>
-          <span>第 <b>{{ t.current_week }}</b> 周</span>
-          <span>基线 {{ (t.baseline_score * 100).toFixed(0) }} 分</span>
-          <span>最近活跃 {{ relDay(t.last_active_at) }}</span>
-        </div>
-        <div v-if="(t.knowledge_points || []).length" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
-          <span
-            v-for="kp in (t.knowledge_points || []).slice(0, 8)"
-            :key="kp.name"
-            class="badge"
-            :class="kp.covered ? 'ok' : 'gray'"
-            :title="kp.covered ? '已覆盖（有通过记录）' : '未覆盖'"
-          >{{ kp.covered ? '✓ ' : '' }}{{ kp.name }}</span>
-          <span v-if="(t.knowledge_points || []).length > 8" class="badge gray">+{{ (t.knowledge_points || []).length - 8 }}</span>
-        </div>
-        <div class="progress" style="margin-top: 8px;"><i :style="{ width: pct(t) + '%' }"></i></div>
-        <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;" @click.stop>
-          <button v-if="t.status === 'completed'" class="btn sm ghost" :disabled="archivingId === t.training_id" @click="archiveTrainingRow(t.training_id)">
-            {{ archivingId === t.training_id ? '归档中…' : '归档' }}
-          </button>
-          <button class="btn sm danger" :disabled="deletingId === t.training_id" @click="deleteTrainingRow(t.training_id)">
-            {{ deletingId === t.training_id ? '删除中…' : '删除训练' }}
-          </button>
-        </div>
-      </div>
       </TransitionGroup>
     </template>
   </div>
 </template>
+
+<style scoped>
+/* 热力档位（页内局部样式；暗色走 .dark 的 ok 色提亮，design D2） */
+.heat-grid { display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; gap: 3px; }
+.heat-cell { width: 11px; height: 11px; border-radius: 2px; background: var(--color-surface-2); }
+.heat-cell.l1 { background: rgba(14, 124, 107, 0.30); }
+.heat-cell.l2 { background: rgba(14, 124, 107, 0.55); }
+.heat-cell.l3 { background: rgba(14, 124, 107, 0.80); }
+.heat-cell.l4 { background: var(--color-primary); }
+.dark .heat-cell.l1 { background: rgba(23, 181, 151, 0.18); }
+.dark .heat-cell.l2 { background: rgba(23, 181, 151, 0.38); }
+.dark .heat-cell.l3 { background: rgba(23, 181, 151, 0.62); }
+.dark .heat-cell.l4 { background: rgba(44, 199, 170, 0.9); }
+.heat-cell.future { visibility: hidden; }
+</style>

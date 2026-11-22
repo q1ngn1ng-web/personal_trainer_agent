@@ -18,7 +18,10 @@ function resolve(pref: ThemePref): "light" | "dark" {
 
 export function applyPref(pref: ThemePref) {
   localStorage.setItem(KEY, pref);
-  document.documentElement.dataset.theme = resolve(pref);
+  const resolved = resolve(pref);
+  document.documentElement.dataset.theme = resolved;
+  // Tailwind dark: 变体走 .dark 类（ui-redesign D3）：与 data-theme 同步维护
+  document.documentElement.classList.toggle("dark", resolved === "dark");
 }
 
 export function setPref(pref: ThemePref) {

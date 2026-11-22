@@ -11,6 +11,7 @@
           var p = localStorage.getItem("theme-pref") || "auto";
           var d = p === "dark" || (p === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
           document.documentElement.dataset.theme = d ? "dark" : "light";
+          document.documentElement.classList.toggle("dark", d);
         } catch (e) {}
       })();
     </script>
