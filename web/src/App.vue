@@ -47,12 +47,16 @@ function closeMenu() {
   menuOpen.value = false;
 }
 
+import {
+  CircleDot, Plus, LayoutDashboard, GraduationCap, CircleUser,
+} from "lucide-vue-next";
+
 const navs = [
-  { name: "today", ico: "◎", label: "今日训练" },
-  { name: "wizard", ico: "✚", label: "新建训练" },
-  { name: "dashboard", ico: "▦", label: "仪表盘" },
-  { name: "trainings", ico: "◈", label: "我的训练" },
-  { name: "me", ico: "◍", label: "我的" },
+  { name: "today", ico: CircleDot, label: "今日训练" },
+  { name: "wizard", ico: Plus, label: "新建训练" },
+  { name: "dashboard", ico: LayoutDashboard, label: "仪表盘" },
+  { name: "trainings", ico: GraduationCap, label: "我的训练" },
+  { name: "me", ico: CircleUser, label: "我的" },
 ];
 
 const who = computed(() => {
@@ -94,7 +98,7 @@ async function doLogout() {
         class="nav-item" :class="{ active: route.name === n.name }"
         :title="collapsed ? n.label : undefined"
       >
-        <span class="ico">{{ n.ico }}</span>
+        <component :is="n.ico" class="ico-svg" />
         <span v-if="!collapsed">{{ n.label }}</span>
       </router-link>
       <div class="sidebar-foot" v-if="!collapsed">
@@ -125,7 +129,7 @@ async function doLogout() {
       <nav class="tabbar">
         <router-link v-for="n in navs" :key="n.name" :to="{ name: n.name }" class="tab-item"
           :class="{ active: route.name === n.name }">
-          <span class="ico">{{ n.ico }}</span>{{ shortLabel(n.label) }}
+          <component :is="n.ico" class="ico-svg ico-svg-sm" />{{ shortLabel(n.label) }}
         </router-link>
       </nav>
     </div>

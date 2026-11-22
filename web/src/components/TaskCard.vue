@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { PenLine, Search, FileText } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { api, type AnswerResult, type PointSpec, type TodayTask } from "../api";
 
@@ -308,7 +309,7 @@ async function skip() {
             <span v-if="result.score != null" style="margin-left: 8px; font-weight: 600;">得分 {{ (result.score * 100).toFixed(0) }}</span>
             <p style="margin-top: 4px;">{{ result.reason }}</p>
             <p v-if="result.coach_hint" class="coach-hint">💡 {{ result.coach_hint }}</p>
-            <p v-if="result.mastered" style="margin-top: 6px;"><span class="badge ok">🎉 连续通过，已达标</span></p>
+            <p v-if="result.mastered" style="margin-top: 6px;"><span class="badge ok">连续通过，已达标</span></p>
             <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
             <div v-if="result.reference_answer" class="ref-answer"><b>参考答案</b>：{{ result.reference_answer }}</div>
           </template>
@@ -332,18 +333,18 @@ async function skip() {
             该轮次没有存储题目（「只练不判」的记录不会自动出题）
             <div style="margin-top: 8px;">
               <button class="btn ghost" :disabled="loadingQ" @click="ensureQuestionLoaded">
-                {{ loadingQ ? '生成中…' : '📝 生成题目查看' }}
+                {{ loadingQ ? '生成中…' : '生成题目查看' }}
               </button>
             </div>
           </template>
           <div v-if="task.status === 'practiced' && !task.verdict && !judging && !reanswer" style="margin-top: 8px;">
-            <button class="btn ghost" @click="reanswer = true">✍️ 重新作答并判分</button>
+            <button class="btn ghost" @click="reanswer = true">重新作答并判分</button>
           </div>
         </div>
 
         <div style="margin-top: 10px;">
           <button class="btn text" :disabled="explaining" @click="loadExplanation">
-            {{ explaining ? '解析生成中…' : '🔍 深度解析（对比我的历史作答）' }}
+            {{ explaining ? '解析生成中…' : '深度解析（对比我的历史作答）' }}
           </button>
         </div>
         <div v-if="explanation" class="verdict-panel none" style="text-align: left;">

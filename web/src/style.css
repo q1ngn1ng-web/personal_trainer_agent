@@ -81,6 +81,10 @@ a { color: var(--brand); text-decoration: none; }
   width: 3px; height: 16px; border-radius: 2px; background: var(--brand);
 }
 .nav-item .ico { width: 20px; text-align: center; flex-shrink: 0; }
+/* Lucide 线性图标：继承 currentColor，与文字同色系 */
+.ico-svg { width: 18px; height: 18px; flex-shrink: 0; }
+.ico-svg-sm { width: 16px; height: 16px; }
+.ico-svg-lg { width: 30px; height: 30px; }
 .sidebar-foot { margin-top: auto; padding: 10px 12px 0; border-top: 1px solid var(--line); }
 
 .main { flex: 1; min-width: 980px; padding: var(--space-8) 36px 56px; max-width: 980px; margin: 0 auto; }

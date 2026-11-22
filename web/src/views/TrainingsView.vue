@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Compass } from "lucide-vue-next";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api, type TrainingSummary } from "../api";
@@ -65,7 +66,7 @@ onMounted(async () => {
     <div v-if="loading" class="loading-center"><span class="spinner"></span></div>
 
     <div v-else-if="!trainings.length" class="card empty">
-      <span class="ico">🧭</span>还没有训练<br />
+      <Compass class="ico-svg ico-svg-lg" style="margin: 0 auto 8px;" />还没有训练<br />
       <span style="font-size: 13px;">新建训练请前往桌面版或 Streamlit 入口</span>
     </div>
 

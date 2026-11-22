@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Compass } from "lucide-vue-next";
 import { TransitionGroup } from "vue";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -118,7 +119,7 @@ onMounted(load);
       </div>
 
       <div v-if="!data.trainings.length" class="card empty">
-        <span class="ico">🧭</span>还没有训练——去「新建训练」开始第一课。
+        <Compass class="ico-svg ico-svg-lg empty-ico" /> 还没有训练——去「新建训练」开始第一课。
       </div>
 
       <TransitionGroup name="card-fade">
@@ -142,10 +143,10 @@ onMounted(load);
         <div class="progress" style="margin-top: 8px;"><i :style="{ width: pct(t) + '%' }"></i></div>
         <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;" @click.stop>
           <button v-if="t.status === 'completed'" class="btn sm ghost" :disabled="archivingId === t.training_id" @click="archiveTrainingRow(t.training_id)">
-            {{ archivingId === t.training_id ? '归档中…' : '📦 归档' }}
+            {{ archivingId === t.training_id ? '归档中…' : '归档' }}
           </button>
           <button class="btn sm danger" :disabled="deletingId === t.training_id" @click="deleteTrainingRow(t.training_id)">
-            {{ deletingId === t.training_id ? '删除中…' : '🗑 删除训练' }}
+            {{ deletingId === t.training_id ? '删除中…' : '删除训练' }}
           </button>
         </div>
       </div>

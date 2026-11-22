@@ -519,7 +519,7 @@ const STATE_LABEL: Record<string, string> = {
       <div v-if="sources.length" style="margin-top: 18px;">
         <div style="font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px;">已添加 {{ sources.length }} 份</div>
         <div v-for="s in sources" :key="s.id" class="list-item" style="cursor: default;">
-          <span>{{ s.type === 'user_paste' ? '📝' : s.type === 'web_url' ? '🔗' : s.type === 'user_upload' ? '📄' : '📘' }}</span>
+          <span>{{ s.type === 'user_paste' ? '粘贴' : s.type === 'web_url' ? '链接' : s.type === 'user_upload' ? '文件' : 'AI 生成' }}</span>
           <div style="flex: 1; min-width: 0;">
             <div style="font-size: 14px;">{{ s.title }}</div>
             <div style="font-size: 12px; color: var(--faint);">{{ s.type }} · {{ s.parse_status }}</div>
@@ -587,7 +587,7 @@ const STATE_LABEL: Record<string, string> = {
     <!-- 第 4 步：开始训练 -->
     <div v-else class="card">
       <div style="text-align: center; padding: 16px 0;">
-        <div style="font-size: 44px;">🎉</div>
+        <div style="font-size: 44px;">✓</div>
         <h2 style="margin: 8px 0 4px;">训练已就绪</h2>
         <p style="color: var(--muted); font-size: 14px;">
           {{ probeSkipped ? '你跳过了探测：训练项按中位难度起步，会在训练中用实际表现修正。' : '训练路径将根据探测结果分层生成。' }}
@@ -596,7 +596,7 @@ const STATE_LABEL: Record<string, string> = {
 
       <div v-if="!pathResult" style="text-align: center; padding: 8px 0 20px;">
         <button class="btn primary" :disabled="busy" @click="generatePath">
-          {{ busy ? 'AI 生成路径中（约 30 秒）…' : '🧭 生成训练路径' }}
+          {{ busy ? 'AI 生成路径中（约 30 秒）…' : '生成训练路径' }}
         </button>
       </div>
       <div v-else style="text-align: center; padding: 8px 0 20px;">

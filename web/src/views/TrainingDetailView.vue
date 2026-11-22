@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { BookOpen, ChevronDown, ChevronRight, Compass } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -452,7 +453,7 @@ const typeLabel: Record<string, string> = {
         <div v-if="pathData && pathData.progress" class="card">
           <div class="card-head">
             <div class="card-title">整体进度</div>
-            <span v-if="pathData.progress.mastered" class="badge ok">🏆 已达标</span>
+            <span v-if="pathData.progress.mastered" class="badge ok">已达标</span>
             <span v-else-if="pathData.progress.quiz_passed" class="badge brand">测验已过 · 补齐剩余项</span>
             <span v-else class="badge gray">进行中</span>
           </div>
@@ -476,7 +477,8 @@ const typeLabel: Record<string, string> = {
                 <div v-if="st.goal" style="font-size: 12.5px; color: var(--muted);">{{ st.goal }}</div>
               </div>
               <span style="color: var(--faint); font-size: 12.5px;">{{ st.estimated_minutes }}′ · {{ st.items.length }} 项</span>
-              <span style="color: var(--faint);">{{ openStages.has(st.id) ? '▾' : '▸' }}</span>
+              <ChevronDown v-if="openStages.has(st.id)" class="ico-svg" style="color: var(--faint);" />
+              <ChevronRight v-else class="ico-svg" style="color: var(--faint);" />
             </div>
             <div v-if="openStages.has(st.id)" style="padding: 0 20px 14px;">
               <div v-for="it in st.items" :key="it.id" class="list-item" @click="openItemInPlan(it.item_key)">
@@ -494,7 +496,7 @@ const typeLabel: Record<string, string> = {
             </div>
           </div>
         </div>
-        <div v-else class="card empty"><span class="ico">🧭</span>路径尚未生成</div>
+        <div v-else class="card empty"><Compass class="ico-svg ico-svg-lg" style="margin: 0 auto 8px;" />路径尚未生成</div>
       </template>
 
       <!-- ============ 周复盘 ============ -->
@@ -593,11 +595,11 @@ const typeLabel: Record<string, string> = {
           </div>
         </div>
 
-        <div v-if="!sources.length" class="card empty"><span class="ico">📚</span>暂无资料来源</div>
+        <div v-if="!sources.length" class="card empty"><BookOpen class="ico-svg ico-svg-lg" style="margin: 0 auto 8px;" />暂无资料来源</div>
         <div v-for="s in sources" :key="s.id" class="card">
           <div class="card-head" style="margin-bottom: 6px;">
             <div class="card-title" style="min-width: 0;">
-              {{ s.type === 'url' ? '🔗' : s.type === 'file' ? '📄' : '📝' }} {{ s.title }}
+              {{ s.type === 'url' ? '链接' : s.type === 'file' ? '文件' : '粘贴' }} · {{ s.title }}
             </div>
             <span class="badge" :class="s.enabled ? 'ok' : 'gray'">{{ s.enabled ? '启用' : '停用' }}</span>
           </div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Moon } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
 import { api, type TodayResponse, type TodayTask } from "../api";
 import TaskCard from "../components/TaskCard.vue";
@@ -108,7 +109,7 @@ async function sendSignal(trainingId: number, type: string) {
       </div>
 
       <div v-if="!data.tasks.length" class="card empty">
-        <span class="ico">🌙</span>
+        <Moon class="ico-svg ico-svg-lg" style="margin: 0 auto 8px;" />
         今天没有安排任务<br />
         <span style="font-size: 13px;">去「训练」页看看你的路径，或休息一下</span>
       </div>
