@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import {
   api, type AssessmentStart, type AssessmentSubmit, type PathResponse,
-  type WeeklyReviewResponse,
+  type SessionSummary, type WeeklyReviewResponse,
   type QuizOutcome, type QuizState, type SourceSummary, type TodayTask, type TrainingSummary,
 } from "../api";
 import { authState } from "../auth";
@@ -75,6 +75,21 @@ function syncSourceVisibilityState() {
   for (const s of sources.value) next[s.id] = s.scope || "private";
   sourceVisibility.value = next;
 }
+
+// 今日小结（coach-memory）：进入复盘区时懒加载，读时聚合零新表
+const summary = ref<SessionSummary | null>(null);
+const summaryLoading = ref(false);
+watch(section, async (name) => {
+  if (name !== "review" || summary.value || summaryLoading.value) return;
+  summaryLoading.value = true;
+  try {
+    summary.value = await api.sessionSummary(trainingId);
+  } catch (e: any) {
+    toast(e.message || "小结加载失败");
+  } finally {
+    summaryLoading.value = false;
+  }
+});
 const quiz = ref<QuizState | null>(null);
 const planRounds = ref<TodayTask[]>([]);
 const planLoading = ref(false);
@@ -396,6 +411,27 @@ const typeLabel: Record<string, string> = {
 
       <!-- ============ 周复盘 ============ -->
       <template v-else-if="section === 'review'">
+        <div class="card" style="margin-bottom: 14px;">
+          <div class="card-head">
+            <div class="card-title">今日小结（coach-memory）</div>
+            <span v-if="summary" class="badge" :class="summary.question_count && (summary.pass_rate ?? 0) >= 0.8 ? 'ok' : 'gray'">
+              {{ summary.question_count ? `通过率 ${((summary.pass_rate ?? 0) * 100).toFixed(0)}%` : '今天还没有判分作答' }}
+            </span>
+          </div>
+          <div v-if="summaryLoading" class="loading-center" style="padding: 14px 0;"><span class="spinner"></span></div>
+          <template v-else-if="summary">
+            <p style="font-size: 14px; margin-top: 6px;">{{ summary.narrative }}</p>
+            <div v-if="summary.mistake_points.length" style="font-size: 13px; color: var(--muted); margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+              高频错点：
+              <span v-for="m in summary.mistake_points.slice(0, 3)" :key="m.point" class="badge warn">{{ m.point }} ×{{ m.count }}</span>
+            </div>
+            <div v-if="summary.items.length" style="font-size: 12.5px; color: var(--faint); margin-top: 8px;">
+              各题连败：<span v-for="it in summary.items" :key="it.item_key" style="margin-right: 12px;">
+                {{ it.knowledge_point || it.item_key }}（连败 {{ it.failure_streak }} / {{ it.attempts }} 次）
+              </span>
+            </div>
+          </template>
+        </div>
         <div class="card">
           <div class="card-head">
             <div class="card-title">周复盘</div>

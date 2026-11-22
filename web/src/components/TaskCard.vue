@@ -307,6 +307,7 @@ async function skip() {
             <b>{{ !result.graded ? '暂未判分（LLM 不可用，可自评对照参考答案）' : result.verdict === 'pass' ? '✓ 通过' : '✗ 未通过' }}</b>
             <span v-if="result.score != null" style="margin-left: 8px; font-weight: 600;">得分 {{ (result.score * 100).toFixed(0) }}</span>
             <p style="margin-top: 4px;">{{ result.reason }}</p>
+            <p v-if="result.coach_hint" class="coach-hint">💡 {{ result.coach_hint }}</p>
             <p v-if="result.mastered" style="margin-top: 6px;"><span class="badge ok">🎉 连续通过，已达标</span></p>
             <div v-if="task.answer_text" class="ref-answer"><b>我的作答</b>：{{ task.answer_text }}</div>
             <div v-if="result.reference_answer" class="ref-answer"><b>参考答案</b>：{{ result.reference_answer }}</div>

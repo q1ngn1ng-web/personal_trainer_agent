@@ -38,8 +38,10 @@ from src.services import (
     mastery_service,
     path_service,
     plan_service,
+    preferences_service,
     quiz_service,
     review_service,
+    session_summary,
     signal_service,
     source_service,
 )
@@ -1842,6 +1844,53 @@ def wizard_generate_path(
         "stages": len(skeleton.stages),
         "items": sum(len(stage.items) for stage in skeleton.stages),
     }
+
+
+# ---------------------------------------------------------------- coach-memory（会话小结 / 连败反馈 / 偏好）
+
+
+@app.get("/api/trainings/{training_id}/session-summary")
+def training_session_summary(
+    training_id: int,
+    date: str | None = None,
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """训练日会话小结（coach-memory）：读时聚合当天判分作答，零新表。
+
+    ``date`` 缺省取当地今天；格式必须 YYYY-MM-DD。
+    """
+    _load_training_for(viewer, training_id)
+    if date is not None and not session_summary.is_valid_summary_date(date):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="date 格式应为 YYYY-MM-DD")
+    return session_summary.summarize_day(int(training_id), date or None)
+
+
+class PreferenceBody(BaseModel):
+    values: dict[str, Any]
+
+
+@app.get("/api/preferences")
+def get_preferences_view(
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """用户偏好（coach-memory）：app_settings 三键，未设置的键回落默认值。
+
+    偏好只影响呈现与节奏，MUST NOT 影响学习内容与判分（合意困难边界）。
+    """
+    return {"preferences": preferences_service.get_preferences()}
+
+
+@app.put("/api/preferences")
+def put_preferences_view(
+    body: PreferenceBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """批量写偏好：键白名单 + 值校验，非法键/值整批拒绝（400）。"""
+    try:
+        preferences = preferences_service.set_preferences(body.values)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"ok": True, "preferences": preferences}
+
 
 # 【必须放在文件最后】FastAPI 按注册顺序匹配路由：SPA 回退用的是 `/{full_path:path}` 通配，
 # 一旦注册在 API 之前，就会把后面注册的接口全部吞掉（第一次部署时 `/api/org/*` 就是这样 404 的）。

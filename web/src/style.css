@@ -211,6 +211,8 @@ a { color: var(--brand); text-decoration: none; }
 .verdict-panel.none { background: var(--surface-2); border: 1px solid var(--line); }
 .ref-answer { color: var(--muted); font-size: 13.5px; margin-top: 8px; }
 .ref-answer b { color: var(--text); }
+/* 连败提示（coach-memory）：warn 底色的引导文案，与判分面板区分 */
+.coach-hint { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--warn-weak); border: 1px solid #f2d3ab; font-size: 13.5px; color: var(--text); }
 
 /* ---- 四失反馈 ---- */
 .signal-row { display: flex; gap: 8px; flex-wrap: wrap; }

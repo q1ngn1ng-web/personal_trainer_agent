@@ -33,6 +33,13 @@ _SAMPLE_CHARS: int = 600
 #: 5 轮的轮次总数（题目难度随轮次递进）
 _TOTAL_ROUNDS: int = 5
 
+#: 连败计数的判分来源（coach-memory）：llm/quiz/rule 都是系统判分（有客观信号）；
+#: self=自评（无客观信号）不计，practice-only 不落 attempts 天然不计。
+GRADED_STREAK_SOURCES: tuple[str, ...] = ("llm", "quiz", "rule")
+
+#: 连败提示触发阈值（用户原案：前三次不理想、第四次再错即提示）
+COACH_HINT_STREAK_THRESHOLD: int = 3
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -493,6 +500,54 @@ def update_points(
         if own:
             active.close()
 
+def failure_streak(
+    training_id: int,
+    item_key: str,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[int, list[float | None]]:
+    """连败纯函数（coach-memory）：最近判分作答按 id 倒序数前导 fail，pass 即止。
+
+    口径与判分阈值天然统一（verdict=fail ⟺ score<0.8 或必答缺失，无新标准）；
+    只数系统判分（source ∈ GRADED_STREAK_SOURCES）——自评无客观信号不计，
+    practice-only 不落 attempts 天然不计。返回 (连续 fail 次数, 连败内历次
+    score 时间正序)。该数据同时供回炉/调度 backlog 消费（本 change 只产出）。
+    """
+    active = conn if conn is not None else get_connection()
+    own = conn is None
+    try:
+        placeholders = ", ".join("?" for _ in GRADED_STREAK_SOURCES)
+        rows = active.execute(
+            f"SELECT result, score FROM practice_attempts "
+            f"WHERE training_id = ? AND item_key = ? AND source IN ({placeholders}) "
+            f"ORDER BY id DESC",
+            (int(training_id), str(item_key), *GRADED_STREAK_SOURCES),
+        ).fetchall()
+    finally:
+        if own:
+            active.close()
+    streak = 0
+    scores: list[float | None] = []
+    for row in rows:
+        if str(row["result"]) != "fail":
+            break
+        streak += 1
+        scores.append(float(row["score"]) if row["score"] is not None else None)
+    scores.reverse()
+    return streak, scores
+
+
+def coach_hint_text(streak: int, scores: list[float | None]) -> str:
+    """连败提示模板文案（纯规则，零 LLM）。未达阈值返回空串。"""
+    if streak < COACH_HINT_STREAK_THRESHOLD:
+        return ""
+    shown = "、".join(f"{s:.2f}" if s is not None else "—" for s in scores) or "—"
+    return (
+        f"这道题已连续 {streak} 次未通过（历次得分：{shown}）。"
+        "这更像理解有偏差而不是手生——建议打开深度解析，看看几次错误的共同错因。"
+    )
+
+
 def submit_answer(
     plan_id: int,
     answer: str,
@@ -561,6 +616,16 @@ def submit_answer(
                 "UPDATE plan_items SET graded_by = 'unavailable' WHERE id = ?", (int(plan_id),)
             )
 
+        # 连败反馈（coach-memory）：响应附加字段，只加键不改键。
+        # streak 读同事务内的最新作答；提示只在本次判分成功时给（未判分无新信号）。
+        from src.services import preferences_service
+
+        streak_value, streak_scores = failure_streak(training_id, item_key, conn=active)
+        coach_hint = ""
+        if graded and streak_value >= COACH_HINT_STREAK_THRESHOLD:
+            if preferences_service.is_coach_hint_enabled(conn=active):
+                coach_hint = coach_hint_text(streak_value, streak_scores)
+
         # 不论判分是否成功，"练过"都成立（用户确实做了这道题），题库也随之登记
         plan_service.complete_tasks(
             [int(plan_id)], completed=True, today=today or local_today(), conn=active
@@ -580,6 +645,9 @@ def submit_answer(
         "reference_answer": question["reference_answer"],
         "question_source": question.get("source"),
         "mastered": mastered,
+        # 附加字段（coach-memory）：连败次数与提示；既有键一个不动
+        "failure_streak": streak_value,
+        "coach_hint": coach_hint,
     }
 
 
@@ -592,4 +660,12 @@ def mark_practiced_only(
     )
 
 
-__all__ = ["ensure_question", "mark_practiced_only", "submit_answer"]
+__all__ = [
+    "COACH_HINT_STREAK_THRESHOLD",
+    "GRADED_STREAK_SOURCES",
+    "coach_hint_text",
+    "ensure_question",
+    "failure_streak",
+    "mark_practiced_only",
+    "submit_answer",
+]

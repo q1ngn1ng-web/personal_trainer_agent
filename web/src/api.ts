@@ -211,6 +211,28 @@ export type AnswerResult = {
   question_source?: string;
   mastered: boolean;
   score?: number | null;
+  failure_streak?: number;
+  coach_hint?: string;
+};
+
+export type SessionSummary = {
+  training_id: number;
+  date: string;
+  question_count: number;
+  item_count: number;
+  pass_rate: number | null;
+  mistake_points: { point: string; count: number }[];
+  weakest_knowledge_point: { knowledge_point: string; fail_count: number } | null;
+  items: {
+    item_key: string;
+    knowledge_point: string;
+    attempts: number;
+    fails: number;
+    failure_streak: number;
+    scores: (number | null)[];
+  }[];
+  narrative: string;
+  llm_narrative_enabled: boolean;
 };
 
 export type SignalResult = {
@@ -416,6 +438,14 @@ export const api = {
       training_shared_user_ids: number[];
       sources: SourceSummary[];
     }>("/api/trainings/" + trainingId + "/sources"),
+  sessionSummary: (trainingId: number, date?: string) =>
+    request<SessionSummary>("/api/trainings/" + trainingId + "/session-summary" + (date ? "?date=" + date : "")),
+  getPreferences: () => request<{ preferences: Record<string, string> }>("/api/preferences"),
+  putPreferences: (values: Record<string, string>) =>
+    request<{ ok: boolean; preferences: Record<string, string> }>("/api/preferences", {
+      method: "PUT",
+      body: JSON.stringify({ values }),
+    }),
   setVisibility: (trainingId: number, body: { visibility: string; shared_emails?: string[] }) =>
     request<{ ok: boolean; visibility: string; shared_user_ids: number[] }>(
       "/api/trainings/" + trainingId + "/visibility",
