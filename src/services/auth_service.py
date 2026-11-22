@@ -98,13 +98,16 @@ def issue_login_code(
 
 def create_session(
     user_id: int,
-    org_id: int = org_service.DEFAULT_ORG_ID,
+    org_id: int | None = None,
     *,
     ttl_days: int = SESSION_TTL_DAYS,
     user_agent: str | None = None,
     conn: Connection | None = None,
 ) -> dict[str, Any]:
-    """建服务端会话，返回明文令牌（只此一次）。"""
+    """建服务端会话，返回明文令牌（只此一次）。
+
+    ``org_id=None`` = 个人模式登录（member-invite：无组织成员资格的新注册用户）。
+    """
     token = _new_token()
     expires = _now() + timedelta(days=max(1, int(ttl_days)))
     with transaction(conn) as active:
@@ -113,7 +116,7 @@ def create_session(
             "user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 int(user_id),
-                int(org_id),
+                int(org_id) if org_id is not None else None,
                 _hash(token),
                 _iso(_now()),
                 _iso(expires),
@@ -191,11 +194,19 @@ def viewer_from_session(
             (_iso(_now()), _iso(renewed), int(row["id"])),
         )
         try:
+            session_org = row["org_id"]
             return org_service.resolve_viewer(
-                int(row["user_id"]), org_id=int(row["org_id"]), conn=active
+                int(row["user_id"]),
+                org_id=int(session_org) if session_org is not None else None,
+                conn=active,
             )
         except PermissionError:
-            # 成员关系被移除（例如员工被调离）→ 会话视为失效
+            # 成员关系不存在：可能是无组织个人模式登录（member-invite），也可能被移除
+            viewer = org_service.resolve_personal_viewer(int(row["user_id"]))
+            session_org = row["org_id"]
+            if session_org is None:
+                return viewer
+            # 会话挂了组织但成员资格已失效（例如被调离）→ 会话视为失效
             return None
 
 
@@ -285,7 +296,11 @@ def register_account(
     *,
     user_agent: str | None = None,
 ) -> dict[str, Any]:
-    """个人版注册：users 行（含密码哈希）+ 名单激活 + 开号 + 建会话。"""
+    """个人版注册：users 行（含密码哈希）+ 建会话。
+
+    change member-invite 拍板 1：**取消注册自动进默认组织**——新用户不带任何
+    memberships，viewer 解析为个人模式（org_id=None）；进组完全靠邀请。
+    """
     address = str(email or "").strip().lower()
     if "@" not in address or len(str(password or "")) < 8:
         raise ValueError("邮箱格式不正确，或密码少于 8 位")
@@ -295,25 +310,19 @@ def register_account(
         ).fetchone()
         if row is not None:
             raise ValueError("该邮箱已注册")
-        roster = org_service.upsert_roster_entry(
-            address, status="active", conn=active
+        cursor = active.execute(
+            "INSERT INTO users (email, display_name, created_at) VALUES (?, ?, ?)",
+            (address, str(display_name).strip() or address.split("@")[0], _iso(_now())),
         )
-        provisioned = org_service.provision_user_from_roster(address, conn=active)
+        user_id = int(cursor.lastrowid)
         active.execute(
-            "UPDATE users SET password_hash = ?, display_name = ?, last_login_at = ? WHERE id = ?",
-            (
-                _hash_password(password),
-                str(display_name).strip() or address.split("@")[0],
-                _iso(_now()),
-                int(provisioned["user"]["id"]),
-            ),
+            "UPDATE users SET password_hash = ?, last_login_at = ? WHERE id = ?",
+            (_hash_password(password), _iso(_now()), user_id),
         )
-        viewer = org_service.resolve_viewer(
-            int(provisioned["user"]["id"]), conn=active
-        )
-        session = create_session(viewer.user_id, viewer.org_id, user_agent=user_agent, conn=active)
-    logger.info("register_account: %s 注册成功（会话 #%s）", address, session["session_id"])
-    return {"session": session, "viewer": viewer, "user": provisioned["user"]}
+        viewer = org_service.resolve_personal_viewer(user_id)
+        session = create_session(viewer.user_id, None, user_agent=user_agent, conn=active)
+    logger.info("register_account: %s 注册成功（个人模式，会话 #%s）", address, session["session_id"])
+    return {"session": session, "viewer": viewer, "user": {"id": user_id, "email": address}}
 
 
 def login_password(
@@ -340,8 +349,10 @@ def login_password(
         active.execute(
             "UPDATE users SET last_login_at = ? WHERE id = ?", (_iso(_now()), int(row["id"]))
         )
-        viewer = org_service.resolve_viewer(int(row["id"]), conn=active)
-        session = create_session(viewer.user_id, viewer.org_id, user_agent=user_agent, conn=active)
+        viewer = org_service.resolve_viewer_or_personal(int(row["id"]), conn=active)
+        session = create_session(
+            viewer.user_id, viewer.org_id, user_agent=user_agent, conn=active
+        )
     logger.info("login_password: %s 登录成功（会话 #%s）", address, session["session_id"])
     return {"session": session, "viewer": viewer}
 

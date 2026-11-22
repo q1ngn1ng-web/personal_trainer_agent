@@ -228,6 +228,54 @@ CREATE TABLE assessments (
 )
 """
 
+_SHARE_LINKS_DDL = """
+CREATE TABLE share_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_by INTEGER NOT NULL,
+    open_level TEXT NOT NULL DEFAULT 'org' CHECK (open_level IN ('org', 'anyone')),
+    created_at DATETIME NOT NULL,
+    revoked_at DATETIME,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+"""
+
+_MEMBERSHIPS_DDL = """
+CREATE TABLE memberships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    org_id INTEGER NOT NULL,
+    department_id INTEGER,
+    role TEXT NOT NULL CHECK (role IN ('org_admin', 'admin', 'member')),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'invited', 'disabled')),
+    invited_by INTEGER,
+    admin_quota INTEGER,
+    admin_can_remove INTEGER DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    UNIQUE (user_id, org_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (org_id) REFERENCES organizations(id),
+    FOREIGN KEY (department_id) REFERENCES departments(id)
+)
+"""
+
+_SESSIONS_DDL = """
+CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    org_id INTEGER,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    last_seen_at DATETIME,
+    revoked_at DATETIME,
+    user_agent TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (org_id) REFERENCES organizations(id)
+)
+"""
+
 
 _VISIBILITY_MIGRATION_DDL = {
     "share-links-table": """
@@ -236,6 +284,7 @@ CREATE TABLE IF NOT EXISTS share_links (
     training_id INTEGER NOT NULL,
     token TEXT NOT NULL UNIQUE,
     created_by INTEGER NOT NULL,
+    open_level TEXT NOT NULL DEFAULT 'org' CHECK (open_level IN ('org', 'anyone')),
     created_at DATETIME NOT NULL,
     revoked_at DATETIME,
     FOREIGN KEY (training_id) REFERENCES trainings(id)
@@ -315,19 +364,6 @@ def _apply_visibility_migration(conn: sqlite3.Connection) -> list[str]:
     return applied
 
 
-_SHARE_LINKS_DDL = """
-CREATE TABLE share_links (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    training_id INTEGER NOT NULL,
-    token TEXT NOT NULL UNIQUE,
-    created_by INTEGER NOT NULL,
-    created_at DATETIME NOT NULL,
-    revoked_at DATETIME,
-    FOREIGN KEY (training_id) REFERENCES trainings(id)
-)
-"""
-
-
 def _ensure_share_links_table(conn: sqlite3.Connection) -> bool:
     """建 ``share_links``（训练计划分享链接）表。返回是否新建。"""
     if _column_names(conn, "share_links"):
@@ -354,6 +390,74 @@ def _rebuild_assessments(conn: sqlite3.Connection) -> None:
     )
     conn.execute("DROP TABLE assessments_old")
     logger.info("migrate: rebuilt assessments (trigger enum + final)")
+
+
+def _rebuild_memberships(conn: sqlite3.Connection) -> None:
+    """memberships 迁移（change member-invite）：三档角色 + 邀请托管三列。
+
+    角色映射在**复制时用 CASE 归一**（旧表 CHECK 仍含旧值，先 UPDATE 会撞约束）：
+    employee→member、dept_manager→admin、org_admin 原样；数据零丢失。
+    """
+    conn.execute("ALTER TABLE memberships RENAME TO memberships_old")
+    conn.execute(_MEMBERSHIPS_DDL)
+    shared = [
+        name
+        for name in _column_names(conn, "memberships_old")
+        if name in _column_names(conn, "memberships")
+    ]
+    select_cols = ", ".join(
+        (
+            "CASE role WHEN 'employee' THEN 'member' WHEN 'dept_manager' THEN 'admin' ELSE role END"
+            if name == "role"
+            else name
+        )
+        for name in shared
+    )
+    conn.execute(
+        f"INSERT INTO memberships ({', '.join(shared)}) SELECT {select_cols} "
+        f"FROM memberships_old"
+    )
+    conn.execute(
+        "UPDATE memberships SET admin_can_remove = 0 WHERE admin_can_remove IS NULL"
+    )
+    conn.execute("DROP TABLE memberships_old")
+    logger.info("migrate: rebuilt memberships (role three-tier + invite columns)")
+
+
+def _rebuild_sessions_org_nullable(conn: sqlite3.Connection) -> None:
+    """sessions.org_id 放宽为可空（member-invite：个人模式登录不挂组织）。"""
+    conn.execute("ALTER TABLE sessions RENAME TO sessions_old")
+    conn.execute(_SESSIONS_DDL)
+    shared = [
+        name
+        for name in _column_names(conn, "sessions_old")
+        if name in _column_names(conn, "sessions")
+    ]
+    conn.execute(
+        f"INSERT INTO sessions ({', '.join(shared)}) SELECT {', '.join(shared)} FROM sessions_old"
+    )
+    conn.execute("DROP TABLE sessions_old")
+    logger.info("migrate: rebuilt sessions (org_id nullable)")
+
+
+def _rebuild_share_links(conn: sqlite3.Connection) -> None:
+    """share_links 加 ``open_level``（change share-gate）：CHECK 列无法 ADD COLUMN，重建。
+
+    存量链接全部落默认 'org'——行为不变（design D1）。
+    """
+    conn.execute("ALTER TABLE share_links RENAME TO share_links_old")
+    conn.execute(_SHARE_LINKS_DDL)
+    shared = [
+        name
+        for name in _column_names(conn, "share_links_old")
+        if name in _column_names(conn, "share_links")
+    ]
+    conn.execute(
+        f"INSERT INTO share_links ({', '.join(shared)}) "
+        f"SELECT {', '.join(shared)} FROM share_links_old"
+    )
+    conn.execute("DROP TABLE share_links_old")
+    logger.info("migrate: rebuilt share_links (open_level)")
 
 
 def _rebuild_practice_attempts(conn: sqlite3.Connection) -> None:
@@ -658,6 +762,21 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     assessments_sql = _table_sql(conn, "assessments")
     needs_assessment_final = bool(assessments_sql) and "'final'" not in assessments_sql
 
+    # 开放级别（change share-gate）：老库 share_links 缺 open_level 列 → 重建
+    needs_share_open_level = bool(_column_names(conn, "share_links")) and (
+        "open_level" not in _column_names(conn, "share_links")
+    )
+
+    # 三档角色与邀请托管（change member-invite）：CHECK 枚举/新列 → 重建
+    memberships_sql = _table_sql(conn, "memberships")
+    needs_memberships = bool(memberships_sql) and (
+        "role IN ('org_admin', 'admin', 'member')" not in memberships_sql
+        or "invited_by" not in _column_names(conn, "memberships")
+    )
+    # 个人模式登录（member-invite）：sessions.org_id 放宽为可空
+    sessions_sql = _table_sql(conn, "sessions")
+    needs_sessions_org_null = bool(sessions_sql) and "org_id INTEGER NOT NULL" in sessions_sql
+
     account_columns = {
         table: cols for table, cols in _ACCOUNT_COLUMNS.items() if _column_names(conn, table)
     }
@@ -681,6 +800,9 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_visibility
         or needs_schedule_mode
         or needs_assessment_final
+        or needs_share_open_level
+        or needs_memberships
+        or needs_sessions_org_null
     ):
         return applied
 
@@ -751,6 +873,15 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
             if needs_assessment_final:
                 _rebuild_assessments(conn)
                 applied.append("assessments:trigger_final")
+            if needs_share_open_level:
+                _rebuild_share_links(conn)
+                applied.append("share_links:open_level")
+            if needs_memberships:
+                _rebuild_memberships(conn)
+                applied.append("memberships:role_three_tier+invite_columns")
+            if needs_sessions_org_null:
+                _rebuild_sessions_org_nullable(conn)
+                applied.append("sessions:org_id_nullable")
             if needs_account:
                 for table, cols in account_columns.items():
                     added = _add_missing_columns(conn, table, cols)

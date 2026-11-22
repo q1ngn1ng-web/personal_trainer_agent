@@ -80,7 +80,7 @@ class TestPlanSharing(unittest.TestCase):
             )
             conn.execute(
                 "INSERT INTO memberships (user_id, org_id, role, status, created_at) "
-                "VALUES (11, 1, 'employee', 'active', '2026-11-01T00:00:00')"
+                "VALUES (11, 1, 'member', 'active', '2026-11-01T00:00:00')"
             )
             conn.commit()
         finally:
@@ -280,9 +280,9 @@ class TestShareEndpoints(unittest.TestCase):
         finally:
             conn.close()
         pull = self.client.post(f"/api/share/{token}/pull")
-        # 会话登录时已绑定组织；成员资格被移走后 viewer 解析为 None → 401（等同未登录）
-        # 跨组织成员的 403 场景由服务级测试（test_non_member_pull_rejected）覆盖
-        self.assertEqual(pull.status_code, 401)
+        # member-invite 后 viewer 解析为个人模式（不再 401）；org 链接拉取被服务级
+        # 组织校验拒绝（403）——org 链接仍拒非成员（share-gate R1 回归口径）
+        self.assertEqual(pull.status_code, 403)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -14,15 +14,15 @@ from typing import Any, Iterable
 
 
 class Role(str, Enum):
-    """第一版三种角色（ADR-0022）：组织管理员 / 部门主管 / 员工。
+    """个人版三档角色（change member-invite 拍板 2，2026-11-22）：组织管理员 / 小组管理员 / 成员。
 
-    ``ADMIN`` 是 ``ORG_ADMIN`` 的别名，兼容企业版第一刀写下的代码与数据。
+    兼容映射（老数据/老代码）：``employee``→member、``dept_manager``→admin、
+    企业版第一刀的 ``admin``（彼时=org_admin）在迁移中归一为 org_admin。
     """
 
     ORG_ADMIN = "org_admin"
-    DEPT_MANAGER = "dept_manager"
-    EMPLOYEE = "employee"
-    ADMIN = "org_admin"
+    ADMIN = "admin"
+    MEMBER = "member"
 
 
 class SourceScope(str, Enum):
@@ -49,7 +49,7 @@ class Action(str, Enum):
     VIEW_ORG_REPORT = "view_org_report"
 
 
-_EMPLOYEE_ACTIONS: frozenset[Action] = frozenset(
+_MEMBER_ACTIONS: frozenset[Action] = frozenset(
     {
         Action.TRAIN_SELF,
         Action.VIEW_OWN_PROGRESS,
@@ -58,31 +58,32 @@ _EMPLOYEE_ACTIONS: frozenset[Action] = frozenset(
     }
 )
 
-_DEPT_MANAGER_ACTIONS: frozenset[Action] = _EMPLOYEE_ACTIONS | frozenset(
+_ADMIN_ACTIONS: frozenset[Action] = _MEMBER_ACTIONS | frozenset(
     {
         Action.MANAGE_DEPARTMENT,
         Action.MANAGE_DEPARTMENT_SOURCES,
         Action.VIEW_DEPT_REPORT,
+        Action.PUBLISH_ASSIGNMENT,
+        Action.MANAGE_MEMBERS,
     }
 )
 
-#: 权限矩阵：主管是员工的超集 + 本部门管理；组织管理员是主管的超集 + 全组织管理
+#: 权限矩阵（member-invite 三档）：admin 是 member 的超集 + 邀请/管理/推送；
+#: 组织管理员是 admin 的超集 + 全组织管理
 PERMISSIONS: dict[Role, frozenset[Action]] = {
-    Role.EMPLOYEE: _EMPLOYEE_ACTIONS,
-    Role.DEPT_MANAGER: _DEPT_MANAGER_ACTIONS,
-    Role.ORG_ADMIN: _DEPT_MANAGER_ACTIONS
+    Role.MEMBER: _MEMBER_ACTIONS,
+    Role.ADMIN: _ADMIN_ACTIONS,
+    Role.ORG_ADMIN: _ADMIN_ACTIONS
     | frozenset(
         {
             Action.MANAGE_ORG_SOURCES,
-            Action.PUBLISH_ASSIGNMENT,
-            Action.MANAGE_MEMBERS,
             Action.VIEW_ORG_REPORT,
         }
     ),
 }
 
-#: 角色值的兼容映射（企业版第一刀写的 'admin' → 'org_admin'）
-_ROLE_MIGRATION: dict[str, str] = {"admin": "org_admin"}
+#: 角色值的兼容映射（老数据/老代码 → 三档；企业版第一刀的 'admin' 由迁移归一为 org_admin）
+_ROLE_MIGRATION: dict[str, str] = {"employee": "member", "dept_manager": "admin"}
 
 
 class PermissionDenied(PermissionError):
@@ -91,10 +92,14 @@ class PermissionDenied(PermissionError):
 
 @dataclass(frozen=True)
 class Viewer:
-    """当前请求的身份上下文（登录后注入）。"""
+    """当前请求的身份上下文（登录后注入）。
+
+    ``org_id=None`` = 无组织成员资格（member-invite：取消注册自动进组后的
+    个人模式登录态）——只见自己的训练，组织类端点按无资格处理。
+    """
 
     user_id: int
-    org_id: int
+    org_id: int | None
     role: Role
     department_ids: frozenset[int] = frozenset()
 
@@ -149,10 +154,13 @@ def can_view_training(
     """
     if viewer is None:
         return True
-    if int(training.get("org_id") or 1) != int(viewer.org_id):
-        return False
     uid = int(viewer.user_id)
     owner = training.get("owner_user_id")
+    if viewer.org_id is None:
+        # 无组织成员资格（member-invite 个人模式）：只看得见自己的训练
+        return owner not in (None, "") and int(owner) == uid
+    if int(training.get("org_id") or 1) != int(viewer.org_id):
+        return False
     if owner in (None, ""):
         return True
     if int(owner) == uid:
@@ -184,10 +192,13 @@ def can_view_source(
     """
     if viewer is None:
         return True
-    if int(source.get("org_id") or 1) != int(viewer.org_id):
-        return False
     uid = int(viewer.user_id)
     owner = source.get("owner_user_id")
+    if viewer.org_id is None:
+        # 无组织成员资格：只看得见自己（训练）的资料
+        return owner not in (None, "") and int(owner) == uid
+    if int(source.get("org_id") or 1) != int(viewer.org_id):
+        return False
     if owner not in (None, "") and int(owner) == uid:
         return True
     scope = str(source.get("scope") or SourceScope.PRIVATE.value)
@@ -199,12 +210,12 @@ def can_view_source(
 
 
 def can_manage_department(viewer: Viewer | None, department_id: int) -> bool:
-    """主管只能管自己的部门；组织管理员可管本组织任意部门（ADR-0022 配套硬规则）。"""
+    """admin 只能管自己的部门；组织管理员可管本组织任意部门（ADR-0022 配套硬规则）。"""
     if viewer is None:
         return True
     if viewer.role is Role.ORG_ADMIN:
         return True
-    if viewer.role is Role.DEPT_MANAGER:
+    if viewer.role is Role.ADMIN:
         return int(department_id) in viewer.department_ids
     return False
 

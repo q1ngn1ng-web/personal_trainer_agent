@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS share_links (
     training_id INTEGER NOT NULL,
     token TEXT NOT NULL UNIQUE,
     created_by INTEGER NOT NULL,
+    -- 开放级别（change share-gate）：org=本组织在册成员（默认，存量行为不变）；
+    -- anyone=任何登录用户（含跨组织与无组织个人）可预览并导入
+    open_level TEXT NOT NULL DEFAULT 'org' CHECK (open_level IN ('org', 'anyone')),
     created_at DATETIME NOT NULL,
     revoked_at DATETIME,
     FOREIGN KEY (training_id) REFERENCES trainings(id)
@@ -529,8 +532,15 @@ CREATE TABLE IF NOT EXISTS memberships (
     user_id INTEGER NOT NULL,
     org_id INTEGER NOT NULL,
     department_id INTEGER,
-    role TEXT NOT NULL CHECK (role IN ('org_admin', 'dept_manager', 'employee')),
+    -- 三档角色（change member-invite）：org_admin=组织管理员 / admin=小组管理员 / member=成员
+    -- （老值 employee/dept_manager 由迁移映射 member/admin）
+    role TEXT NOT NULL CHECK (role IN ('org_admin', 'admin', 'member')),
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'invited', 'disabled')),
+    -- 邀请托管：invited_by=邀请人（配额归属）；admin_quota=该管理员配额（NULL=非管理员）；
+    -- admin_can_remove=该管理员是否可移除成员（默认 0）
+    invited_by INTEGER,
+    admin_quota INTEGER,
+    admin_can_remove INTEGER DEFAULT 0,
     created_at DATETIME NOT NULL,
     UNIQUE (user_id, org_id),
     FOREIGN KEY (user_id) REFERENCES users(id),
@@ -541,7 +551,8 @@ CREATE TABLE IF NOT EXISTS memberships (
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
-    org_id INTEGER NOT NULL,
+    -- NULL = 个人模式登录（无组织成员资格，member-invite 取消自动进组后）
+    org_id INTEGER,
     token_hash TEXT NOT NULL UNIQUE,
     created_at DATETIME NOT NULL,
     expires_at DATETIME NOT NULL,

@@ -2,11 +2,19 @@
 
 export type Viewer = {
   user_id: number;
-  org_id: number;
-  role: "org_admin" | "dept_manager" | "employee";
+  org_id: number | null; // member-invite：null = 个人模式（无组织成员资格）
+  role: "org_admin" | "admin" | "member";
   department_ids: number[];
   email?: string;
   display_name?: string | null;
+};
+
+// share-gate：门禁清单条目
+export type BlockedSource = {
+  source_id: number;
+  title: string;
+  visibility: string;
+  uncovered_targets?: boolean;
 };
 
 export class ApiError extends Error {
@@ -34,7 +42,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     }
   }
   if (!response.ok) {
-    throw new ApiError(response.status, data?.detail || "请求失败 " + response.status);
+    const detail = data?.detail;
+    const message =
+      typeof detail === "string" ? detail : (detail?.message ?? "请求失败 " + response.status);
+    throw Object.assign(new ApiError(response.status, message), { detail });
   }
   return data as T;
 }
@@ -323,10 +334,24 @@ export const api = {
       "/api/plan-items/" + planId + "/question",
       { method: "POST" }
     ),
-  createShareLink: (trainingId: number) =>
-    request<{ token: string; created: boolean; url: string }>(
+  createShareLink: (
+    trainingId: number,
+    body?: { open_level?: "org" | "anyone"; confirm_source_ids?: number[] }
+  ) =>
+    request<{
+      token: string;
+      created: boolean;
+      url: string;
+      open_level?: string;
+      upgraded?: { source_id: number; title: string }[];
+    }>(
       "/api/trainings/" + trainingId + "/share/link",
-      { method: "POST" }
+      { method: "POST", body: body ? JSON.stringify(body) : undefined }
+    ),
+  shareGate: (trainingId: number, action: string, openLevel?: string) =>
+    request<{ ready: boolean; blocked: BlockedSource[]; action: string; audience: string }>(
+      "/api/trainings/" + trainingId + "/share/gate",
+      { method: "POST", body: JSON.stringify({ action, open_level: openLevel }) }
     ),
   sharePreview: (token: string) =>
     request<{
@@ -346,6 +371,65 @@ export const api = {
       "/api/trainings/" + trainingId + "/plan/regenerate",
       { method: "POST" }
     ),
+  createOrg: (name: string) =>
+    request<{ org_id: number; name: string; role: string }>("/api/org/create", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  listCandidates: (orgId: number, q = "") =>
+    request<{ candidates: { user_id: number; email: string; display_name: string | null }[] }>(
+      "/api/org/" + orgId + "/candidates?q=" + encodeURIComponent(q)
+    ),
+  inviteMember: (orgId: number, email: string) =>
+    request<{ membership: { status: string }; email: string }>("/api/org/" + orgId + "/invite", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  removeMember: (orgId: number, userId: number) =>
+    request<{ removed: number; status: string }>(
+      "/api/org/" + orgId + "/members/" + userId,
+      { method: "DELETE" }
+    ),
+  setMemberRole: (
+    orgId: number,
+    userId: number,
+    body: { role: string; admin_quota?: number; admin_can_remove?: boolean }
+  ) =>
+    request<{ role: string; admin_quota: number | null }>(
+      "/api/org/" + orgId + "/members/" + userId + "/role",
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
+  orgMembers: (departmentId?: number) =>
+    request<{
+      members: {
+        user_id: number;
+        email: string;
+        display_name: string | null;
+        role: string;
+        status: string;
+      }[];
+    }>("/api/org/members" + (departmentId ? "?department_id=" + departmentId : "")),
+  myInvites: () =>
+    request<{
+      invites: {
+        membership_id: number;
+        org_id: number;
+        org_name: string;
+        inviter_name: string | null;
+      }[];
+    }>("/api/my/invites"),
+  acceptInvite: (membershipId: number) =>
+    request<{ org_id: number; role: string; status: string }>(
+      "/api/my/invites/" + membershipId + "/accept",
+      { method: "POST" }
+    ),
+  memberProgress: (orgId: number, userId: number) =>
+    request<{
+      display_name: string;
+      trainings: { training_id: number; topic: string; status: string; completion: number | null }[];
+      avg_quiz_score: number | null;
+      passed_quiz_count: number;
+    }>("/api/org/" + orgId + "/members/" + userId + "/progress"),
   sourcesOverview: () =>
     request<{
       sources: {
@@ -447,7 +531,10 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ values }),
     }),
-  setVisibility: (trainingId: number, body: { visibility: string; shared_emails?: string[] }) =>
+  setVisibility: (
+    trainingId: number,
+    body: { visibility: string; shared_emails?: string[]; confirm_source_ids?: number[] }
+  ) =>
     request<{ ok: boolean; visibility: string; shared_user_ids: number[] }>(
       "/api/trainings/" + trainingId + "/visibility",
       { method: "PUT", body: JSON.stringify(body) }

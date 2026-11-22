@@ -1,0 +1,2 @@
+- 2026-11-22T12:10:53+00:00｜training 1｜action=link_anyone｜owner=1｜confirmed=[1, 2]｜outcome={"token": "d_HXATT1m2-rhZwEUKA5eg", "created": true, "open_level": "anyone"}
+- 2026-11-22T12:10:54+00:00｜training 1｜action=push｜owner=1｜confirmed=[1, 2]｜outcome={"delivered": [2], "skipped": []}

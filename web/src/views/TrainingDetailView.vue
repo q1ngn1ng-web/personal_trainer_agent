@@ -4,7 +4,7 @@ import { useRoute } from "vue-router";
 import {
   api, type AssessmentStart, type AssessmentSubmit, type PathResponse,
   type SessionSummary, type WeeklyReviewResponse,
-  type QuizOutcome, type QuizState, type SourceSummary, type TodayTask, type TrainingSummary,
+  type BlockedSource, type QuizOutcome, type QuizState, type SourceSummary, type TodayTask, type TrainingSummary,
 } from "../api";
 import { authState } from "../auth";
 import TaskCard from "../components/TaskCard.vue";
@@ -43,12 +43,24 @@ async function saveTrainingVisibility() {
     await api.setVisibility(trainingId, {
       visibility: trainingVisibility.value,
       shared_emails: trainingVisibility.value === "specific" ? splitEmails(trainingVisEmails.value) : [],
+      confirm_source_ids: shareChecked.value,
     });
-    toast("可见性已更新");
+    toast("可见性已更新" + (shareBlocked.value.length ? ` · ${shareBlocked.value.length} 份文档已确认升级` : ""));
+    shareDialog.value = false;
+    shareBlocked.value = [];
+    shareChecked.value = [];
     const ss = await api.sources(trainingId);
     trainingVisibility.value = ss.training_visibility;
+    sources.value = ss.sources;
   } catch (e: any) {
-    toast(e.message || "保存失败");
+    if (e.status === 409 && e.detail?.blocked) {
+      gateMode.value = "publish";
+      shareBlocked.value = e.detail.blocked;
+      shareChecked.value = e.detail.blocked.map((b: BlockedSource) => b.source_id);
+      shareDialog.value = true;
+    } else {
+      toast(e.message || "保存失败");
+    }
   } finally {
     savingVisibility.value = false;
   }
@@ -183,15 +195,42 @@ async function loadPlan() {
 
 const shareUrl = ref("");
 const sharing = ref(false);
+// share-gate：生成链接被 409 阻止时，弹清单逐件确认（全选是纯前端行为）
+const shareDialog = ref(false);
+const shareLevel = ref<"org" | "anyone">("org");
+const shareBlocked = ref<BlockedSource[]>([]);
+const shareChecked = ref<number[]>([]);
+// 门禁对话框复用：'link' = 生成链接；'publish' = 训练设公开
+const gateMode = ref<"link" | "publish">("link");
+
 async function createShare() {
   sharing.value = true;
   try {
-    const res = await api.createShareLink(trainingId);
+    const res = await api.createShareLink(trainingId, {
+      open_level: shareLevel.value,
+      confirm_source_ids: shareChecked.value,
+    });
     shareUrl.value = location.origin + res.url;
+    shareDialog.value = false;
+    shareBlocked.value = [];
+    shareChecked.value = [];
     await navigator.clipboard.writeText(shareUrl.value);
-    toast("分享链接已复制，发给组织内成员即可");
+    const upgradedCount = res.upgraded?.length || 0;
+    toast(
+      (shareLevel.value === "anyone" ? "公开导入链接已复制（任何登录用户可导入）" : "分享链接已复制") +
+        (upgradedCount ? ` · ${upgradedCount} 份文档已按确认升级` : "")
+    );
+    const ss = await api.sources(trainingId);
+    sources.value = ss.sources;
   } catch (e: any) {
-    toast(e.message || "分享失败");
+    if (e.status === 409 && e.detail?.blocked) {
+      gateMode.value = "link";
+      shareBlocked.value = e.detail.blocked;
+      shareChecked.value = e.detail.blocked.map((b: BlockedSource) => b.source_id);
+      shareDialog.value = true;
+    } else {
+      toast(e.message || "分享失败");
+    }
   } finally {
     sharing.value = false;
   }
@@ -331,6 +370,41 @@ const typeLabel: Record<string, string> = {
             <span class="badge gray">{{ planRounds.length }} 项</span>
             <button class="btn sm ghost" :disabled="regenerating" @click="regeneratePlan">
               {{ regenerating ? '补齐中…' : '补齐缺失轮次' }}
+            </button>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
+            <select v-model="shareLevel" class="input" style="width: auto; padding: 4px 8px; font-size: 12.5px;">
+              <option value="org">组织内链接</option>
+              <option value="anyone">公开导入链接（任何登录用户）</option>
+            </select>
+            <button class="btn sm" :disabled="sharing" @click="gateMode = 'link'; createShare()">
+              {{ sharing ? '生成中…' : '生成分享链接' }}
+            </button>
+          </div>
+          <div
+            v-if="shareDialog"
+            style="margin-top: 10px; padding: 12px; border: 1px solid #f2d3ab; border-radius: var(--radius-sm); background: var(--warn-weak);"
+          >
+            <div class="card-head" style="margin-bottom: 6px;">
+              <div class="card-title" style="font-size: 14px;">以下文档未达分享受众级——逐件确认后升级</div>
+              <button class="btn sm ghost" @click="shareChecked = shareBlocked.map((b) => b.source_id)">全选</button>
+            </div>
+            <div v-for="b in shareBlocked" :key="b.source_id" class="list-item">
+              <input type="checkbox" :value="b.source_id" v-model="shareChecked" />
+              <div style="flex: 1; min-width: 0;">
+                {{ b.title }}
+                <span class="badge gray" style="margin-left: 6px;">当前：{{ b.visibility }}</span>
+              </div>
+            </div>
+            <p style="font-size: 12px; color: var(--faint); margin-top: 6px;">
+              确认即把这些文档升级到「组织公开（public）」，升级持久且写入审计账，可随时改回。
+            </p>
+            <button
+              class="btn primary sm"
+              :disabled="sharing || !shareChecked.length"
+              @click="gateMode === 'link' ? createShare() : saveTrainingVisibility()"
+            >
+              确认（{{ shareChecked.length }}/{{ shareBlocked.length }}）并继续
             </button>
           </div>
           <p style="font-size: 13px; color: var(--muted); margin-top: 6px;">

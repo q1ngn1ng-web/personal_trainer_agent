@@ -45,7 +45,14 @@ class TestRegisterAndLogin(unittest.TestCase):
         result = auth_service.register_account("a@example.com", "password8", "用户A")
         viewer = _viewer_of(result)
         self.assertGreater(int(viewer.user_id), 0)
-        self.assertEqual(viewer.org_id, 1)  # 默认组织
+        self.assertIsNone(viewer.org_id)  # member-invite：注册不再自动进组（个人模式）
+        import sqlite3 as _sq
+        _conn = _sq.connect(os.environ["DB_PATH"])
+        _n = _conn.execute(
+            "SELECT COUNT(*) FROM memberships WHERE user_id = ?", (viewer.user_id,)
+        ).fetchone()[0]
+        _conn.close()
+        self.assertEqual(_n, 0, "新注册用户不带任何组织成员资格")
 
         import sqlite3
 
@@ -142,15 +149,15 @@ class TestSessionLifecycle(unittest.TestCase):
 
 class TestPermissionsMatrix(unittest.TestCase):
     def test_employee_self_actions_only(self) -> None:
-        self.assertTrue(permissions.can("employee", "train_self"))
-        self.assertTrue(permissions.can("employee", "submit_signal"))
-        self.assertFalse(permissions.can("employee", "publish_assignment"))
-        self.assertFalse(permissions.can("employee", "manage_members"))
+        self.assertTrue(permissions.can("member", "train_self"))
+        self.assertTrue(permissions.can("member", "submit_signal"))
+        self.assertFalse(permissions.can("member", "publish_assignment"))
+        self.assertFalse(permissions.can("member", "manage_members"))
 
     def test_superset_chain(self) -> None:
         # DEPT_MANAGER ⊃ EMPLOYEE；ORG_ADMIN ⊃ DEPT_MANAGER
-        self.assertTrue(permissions.can("dept_manager", "manage_department"))
-        self.assertFalse(permissions.can("dept_manager", "manage_org_sources"))
+        self.assertTrue(permissions.can("admin", "manage_department"))
+        self.assertFalse(permissions.can("admin", "manage_org_sources"))
         self.assertTrue(permissions.can("org_admin", "manage_org_sources"))
         self.assertTrue(permissions.can("org_admin", "publish_assignment"))
         self.assertTrue(permissions.can("org_admin", "train_self"))  # 超集链含自用动作
@@ -161,7 +168,7 @@ class TestPermissionsMatrix(unittest.TestCase):
         self.assertTrue(permissions.can_view_training(None, {"org_id": 99, "owner_user_id": 7}))
 
     def test_view_training_rules(self) -> None:
-        viewer = permissions.Viewer(user_id=2, org_id=1, role=permissions.Role.EMPLOYEE, department_ids=frozenset({5}))
+        viewer = permissions.Viewer(user_id=2, org_id=1, role=permissions.Role.MEMBER, department_ids=frozenset({5}))
         self.assertTrue(permissions.can_view_training(viewer, {"org_id": 1, "owner_user_id": 2}))
         self.assertFalse(permissions.can_view_training(viewer, {"org_id": 1, "owner_user_id": 3}))
         self.assertFalse(permissions.can_view_training(viewer, {"org_id": 2, "owner_user_id": 2}))
@@ -169,7 +176,7 @@ class TestPermissionsMatrix(unittest.TestCase):
 
     def test_view_source_scopes(self) -> None:
         # 三档可见性（change content-visibility）：private / specific / public
-        viewer = permissions.Viewer(user_id=2, org_id=1, role=permissions.Role.EMPLOYEE, department_ids=frozenset({5}))
+        viewer = permissions.Viewer(user_id=2, org_id=1, role=permissions.Role.MEMBER, department_ids=frozenset({5}))
         self.assertTrue(permissions.can_view_source(viewer, {"scope": "private", "owner_user_id": 2}))
         self.assertFalse(permissions.can_view_source(viewer, {"scope": "private", "owner_user_id": 3}))
         self.assertTrue(permissions.can_view_source(viewer, {"scope": "public", "org_id": 1}))

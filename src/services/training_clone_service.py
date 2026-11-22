@@ -43,9 +43,19 @@ def _is_org_member(user_id: int, org_id: int, conn: sqlite3.Connection) -> bool:
 
 
 def create_share_link(
-    training_id: int, created_by: int, *, conn: sqlite3.Connection | None = None
+    training_id: int,
+    created_by: int,
+    *,
+    open_level: str = "org",
+    conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """为训练生成/返回分享链接（幂等：同人同训练一条有效链接）。"""
+    """为训练生成/返回分享链接（幂等：同人同训练同开放级别一条有效链接）。
+
+    ``open_level``（change share-gate）：``org``（默认，存量行为不变）/ ``anyone``
+    （任何登录用户可预览并导入）；org 与 anyone 链接可并存。
+    """
+    if open_level not in ("org", "anyone"):
+        raise ValueError(f"invalid open_level: {open_level!r}")
     with transaction(conn) as active:
         training = active.execute(
             "SELECT id, org_id, owner_user_id FROM trainings WHERE id = ?", (int(training_id),)
@@ -54,18 +64,18 @@ def create_share_link(
             raise ValueError(f"训练不存在: {training_id}")
         existing = active.execute(
             "SELECT token FROM share_links WHERE training_id = ? AND created_by = ? "
-            "AND revoked_at IS NULL ORDER BY id DESC LIMIT 1",
-            (int(training_id), int(created_by)),
+            "AND open_level = ? AND revoked_at IS NULL ORDER BY id DESC LIMIT 1",
+            (int(training_id), int(created_by), open_level),
         ).fetchone()
         if existing is not None:
-            return {"token": str(existing["token"]), "created": False}
+            return {"token": str(existing["token"]), "created": False, "open_level": open_level}
         token = secrets.token_urlsafe(TOKEN_BYTES)
         active.execute(
-            "INSERT INTO share_links (training_id, token, created_by, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (int(training_id), token, int(created_by), _now()),
+            "INSERT INTO share_links (training_id, token, created_by, open_level, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (int(training_id), token, int(created_by), open_level, _now()),
         )
-    return {"token": token, "created": True}
+    return {"token": token, "created": True, "open_level": open_level}
 
 
 def get_share_preview(token: str, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
@@ -133,18 +143,26 @@ def get_share_preview(token: str, *, conn: sqlite3.Connection | None = None) -> 
 
 
 def pull_by_token(token: str, user_id: int, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
-    """组织内成员凭链接拉取独立副本（幂等：同用户同链接返回已有副本）。"""
+    """凭链接拉取独立副本（幂等：同用户同链接返回已有副本）。
+
+    开放级别（change share-gate design D1）：
+    * ``org``（默认）：本组织在册成员（存量行为不变）；
+    * ``anyone``：任何登录用户（跨组织、无组织个人均可用）。
+    """
     with transaction(conn) as active:
         link = active.execute(
-            "SELECT training_id, created_by FROM share_links "
+            "SELECT training_id, created_by, open_level FROM share_links "
             "WHERE token = ? AND revoked_at IS NULL",
             (str(token),),
         ).fetchone()
         if link is None:
             raise ValueError("分享链接不存在或已撤销")
+        open_level = str(link["open_level"] or "org")
         return clone_for_user(
             int(link["training_id"]), int(user_id),
-            shared_by_user_id=int(link["created_by"]), conn=active,
+            shared_by_user_id=int(link["created_by"]),
+            require_same_org=open_level != "anyone",
+            conn=active,
         )
 
 
@@ -153,12 +171,15 @@ def clone_for_user(
     target_user_id: int,
     *,
     shared_by_user_id: int | None = None,
+    require_same_org: bool = True,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """把一份训练完整克隆为 ``target_user_id`` 名下的独立副本（change plan-sharing）。
 
     幂等：该用户已拥有该来源的副本时直接返回，不再创建。
-    权限：接收者必须是来源训练所属组织的在册成员（个人版组队的边界）。
+    权限：接收者必须是来源训练所属组织的在册成员（个人版组队的边界）；
+    ``require_same_org=False`` 供 anyone 链接的公开导入（share-gate：链接开放级
+    已在 pull_by_token 判定，这里放行跨组织/无组织用户）。
     """
     with transaction(conn) as active:
         src = active.execute("SELECT * FROM trainings WHERE id = ?", (int(training_id),)).fetchone()
@@ -175,7 +196,7 @@ def clone_for_user(
 
         # 接收者必须是来源训练组织的在册成员（个人版组队边界）
         org_id = int(src["org_id"] or 1)
-        if not _is_org_member(target_user_id, org_id, active):
+        if require_same_org and not _is_org_member(target_user_id, org_id, active):
             raise PermissionError("接收者不是该组织的在册成员")
 
         # 幂等去重哨兵：先插入占位行拿到新 training_id，再逐步填充内容
@@ -364,7 +385,12 @@ def push_to_members(
     for uid in target_user_ids:
         try:
             result = clone_for_user(
-                int(training_id), int(uid), shared_by_user_id=int(owner_user_id)
+                int(training_id),
+                int(uid),
+                shared_by_user_id=int(owner_user_id),
+                # share-gate：确认升级与推送必须同一事务（conn=调用方事务连接；
+                # 独立连接会在升级未提交时撞写锁，也破坏原子性）
+                conn=conn,
             )
             delivered.append(result["training_id"])
         except PermissionError as exc:

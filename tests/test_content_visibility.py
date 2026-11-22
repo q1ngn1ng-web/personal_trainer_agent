@@ -77,6 +77,12 @@ class TestVisibilityTiers(unittest.TestCase):
         path_service.save_skeleton(_skeleton(self.training.id))
         plan_service.generate_plan(self.training.id)
 
+        # member-invite：注册不再自动进组——三账号显式入组织 1（可见性按组织口径判定）
+        from src.services.org_service import add_membership
+
+        add_membership(self.owner_uid, 1, role="member")
+        add_membership(self.member_uid, 1, role="member")
+        add_membership(self.outsider_uid, 1, role="member")
         self.owner = TestClient(app)
         self._login(self.owner, "owner@example.com")
         self.member = TestClient(app)
@@ -155,7 +161,7 @@ class TestVisibilityTiers(unittest.TestCase):
         base = {"org_id": 1, "owner_user_id": self.owner_uid}
 
         def viewer(uid: int, org_id: int = 1):
-            return SimpleNamespace(user_id=uid, org_id=org_id, role="employee", department_ids=frozenset())
+            return SimpleNamespace(user_id=uid, org_id=org_id, role="member", department_ids=frozenset())
 
         self.assertTrue(can_view_training(viewer(self.owner_uid), base))
         self.assertFalse(can_view_training(viewer(99), base), "private 默认他人不可见")

@@ -36,6 +36,7 @@ from src.services import (
     attempt_service,
     auth_service,
     mastery_service,
+    org_service,
     path_service,
     plan_service,
     preferences_service,
@@ -152,7 +153,7 @@ class DepartmentBody(BaseModel):
 class RosterBody(BaseModel):
     email: str
     department_id: int | None = None
-    role: str = "employee"
+    role: str = "member"
     status: str = "invited"
 
 
@@ -476,6 +477,7 @@ class VisibilityBody(BaseModel):
     visibility: str  # private / specific / public
     shared_user_ids: list[int] = []
     shared_emails: list[str] = []  # 指定成员按邮箱输入，服务端解析为本组织 user_id
+    confirm_source_ids: list[int] = []  # share-gate：目标为 public 时的文档门禁确认集
 
 
 @app.put("/api/trainings/{training_id}/visibility")
@@ -491,8 +493,32 @@ def set_training_visibility(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有创建者可以修改可见性")
     if body.visibility not in ("private", "specific", "public"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="visibility 取值非法")
+    if body.visibility == "public" and viewer is not None:
+        # share-gate（design D4）：训练公开 = 受众级 public，引用文档不达标需逐件确认
+        from src.services import share_gate_service
+
+        try:
+            share_gate_service.confirm_and_execute(
+                int(training_id),
+                "publish",
+                int(viewer.user_id),
+                confirm_source_ids=body.confirm_source_ids,
+                conn=None,
+            )
+        except share_gate_service.GateIncompleteError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "message": str(exc),
+                "blocked": exc.blocked,
+                "action": "publish",
+            }) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # publish 动作已在 confirm 事务里把训练置为 public 并升级文档，直接返回
+        return {"ok": True, "visibility": "public", "shared_user_ids": [], "upgraded": True}
     if body.visibility == "specific":
-        org_for_check = int(viewer.org_id) if viewer else 1
+        org_for_check = int(viewer.org_id) if viewer is not None and viewer.org_id is not None else None
+        if org_for_check is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前账号没有组织成员资格，无法使用指定人分享")
         resolved_uids = set(body.shared_user_ids) | set(
             _resolve_shared_uids(org_for_check, body.shared_emails)
         )
@@ -549,7 +575,9 @@ def set_source_visibility(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="visibility 取值非法")
     resolved_uids: set[int] = set(body.shared_user_ids)
     if body.visibility == "specific":
-        org_for_check = int(viewer.org_id) if viewer else 1
+        org_for_check = int(viewer.org_id) if viewer is not None and viewer.org_id is not None else None
+        if org_for_check is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前账号没有组织成员资格，无法使用指定人分享")
         resolved_uids |= set(_resolve_shared_uids(org_for_check, body.shared_emails))
         for uid in sorted(resolved_uids):
             member = queries.get_connection().execute(
@@ -1090,11 +1118,24 @@ def _assert_action(viewer: Viewer, action: Any) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
+class ShareLinkBody(BaseModel):
+    """分享链接参数（share-gate）：open_level 开放级别 + 可选一次性确认集。"""
+
+    open_level: str = "org"  # org | anyone
+    confirm_source_ids: list[int] = []
+
+
 @app.post("/api/trainings/{training_id}/share/link")
 def create_share_link(
-    training_id: int, viewer: Viewer | None = Depends(current_viewer)
+    training_id: int,
+    body: ShareLinkBody | None = None,
+    viewer: Viewer | None = Depends(current_viewer),
 ) -> dict[str, Any]:
-    """生成/返回该训练的分享链接（幂等；仅 owner 或组织管理员）。"""
+    """生成/返回该训练的分享链接（幂等；仅 owner 或组织管理员）。
+
+    share-gate：未过文档门禁且确认集不齐 → 409 带缺失清单；确认集齐全 →
+    升级与生成同一事务完成（一步式，design D4）。
+    """
     training = _load_training_for(viewer, training_id)
     if viewer is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要登录")
@@ -1102,11 +1143,35 @@ def create_share_link(
         viewer.role, "publish_assignment"
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有训练创建者可以分享")
-    from src.services.training_clone_service import create_share_link
+    payload = body or ShareLinkBody()
+    if payload.open_level not in ("org", "anyone"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="open_level 取值非法")
+    from src.services import share_gate_service, training_clone_service
 
-    result = create_share_link(int(training_id), int(viewer.user_id))
-    return {"token": result["token"], "created": result["created"],
-            "url": f"/share/{result['token']}"}
+    action = "link_anyone" if payload.open_level == "anyone" else "link_org"
+    try:
+        result = share_gate_service.confirm_and_execute(
+            int(training_id),
+            action,
+            int(viewer.user_id),
+            open_level=payload.open_level,
+            confirm_source_ids=payload.confirm_source_ids,
+        )
+    except share_gate_service.GateIncompleteError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "message": str(exc),
+            "blocked": exc.blocked,
+            "action": action,
+        }) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "token": result["token"],
+        "created": result["created"],
+        "open_level": payload.open_level,
+        "upgraded": result.get("upgraded", []),
+        "url": f"/share/{result['token']}",
+    }
 
 
 @app.get("/api/share/{token}")
@@ -1138,13 +1203,18 @@ def share_pull(token: str, viewer: Viewer | None = Depends(current_viewer)) -> d
 
 class ShareMembersBody(BaseModel):
     user_ids: list[int]
+    confirm_source_ids: list[int] = []  # share-gate：文档门禁一次性确认集
 
 
 @app.post("/api/trainings/{training_id}/share/members")
 def share_to_members(
     training_id: int, body: ShareMembersBody, viewer: Viewer | None = Depends(current_viewer)
 ) -> dict[str, Any]:
-    """把计划（连题库）直接复制推送给指定成员（分享即复制）。"""
+    """把计划（连题库）直接复制推送给指定成员（分享即复制）。
+
+    share-gate：推送受众级 = specific(目标成员)；引用文档不达标且确认集不齐 →
+    409 带清单；齐全则升级 + 推送同一事务完成（design D4）。
+    """
     training = _load_training_for(viewer, training_id)
     if viewer is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要登录")
@@ -1152,9 +1222,129 @@ def share_to_members(
         viewer.role, "publish_assignment"
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有训练创建者可以推送")
-    from src.services.training_clone_service import push_to_members
+    from src.services import share_gate_service
 
-    return push_to_members(int(training_id), int(viewer.user_id), body.user_ids)
+    if not body.user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="至少选择一个推送目标")
+    try:
+        result = share_gate_service.confirm_and_execute(
+            int(training_id),
+            "push",
+            int(viewer.user_id),
+            target_uids=body.user_ids,
+            confirm_source_ids=body.confirm_source_ids,
+        )
+    except share_gate_service.GateIncompleteError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "message": str(exc),
+            "blocked": exc.blocked,
+            "action": "push",
+        }) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "delivered": result.get("delivered", []),
+        "skipped": result.get("skipped", []),
+        "upgraded": result.get("upgraded", []),
+    }
+
+
+class ShareGateBody(BaseModel):
+    """门禁两步协议（share-gate design D3）：gate 查询 / confirm 事务共用参数。"""
+
+    action: str  # publish | link_org | link_anyone | push
+    target_emails: list[str] = []  # 仅 push：复用邮箱解析
+    user_ids: list[int] = []  # 仅 push：也可直接给 user_id
+    open_level: str | None = None  # link_* 时冗余校验
+    confirm_source_ids: list[int] = []  # confirm 专用
+
+
+def _gate_targets(training_id: int, body: ShareGateBody, viewer: Viewer) -> list[int]:
+    """解析 push 目标：user_ids 直传或 target_emails 邮箱解析（复用 content-visibility 规则）。"""
+    if body.user_ids:
+        return [int(uid) for uid in body.user_ids]
+    training = queries.get_training(int(training_id))
+    org_id = int(training.org_id) if training is not None and training.org_id else (
+        int(viewer.org_id) if viewer is not None and viewer.org_id else None
+    )
+    from src.services import share_gate_service
+
+    try:
+        return share_gate_service.resolve_member_uids(org_id, body.target_emails)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/api/trainings/{training_id}/share/gate")
+def share_gate_query(
+    training_id: int, body: ShareGateBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """门禁第一步（只读）：返回不达标文档清单；不产生任何副作用。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要登录")
+    from src.services import share_gate_service
+
+    try:
+        targets = _gate_targets(training_id, body, viewer) if body.action == "push" else []
+        return share_gate_service.gate_check(int(training_id), body.action, target_uids=targets)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/api/trainings/{training_id}/share/confirm")
+def share_gate_confirm(
+    training_id: int, body: ShareGateBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """门禁第二步（单事务）：定向升级确认的文档 + 执行分享动作，无部分生效。"""
+    training = _load_training_for(viewer, training_id)
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要登录")
+    if int(training.owner_user_id or 0) != int(viewer.user_id) and not can(
+        viewer.role, "publish_assignment"
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有训练创建者可以分享")
+    from src.services import share_gate_service
+
+    try:
+        targets = _gate_targets(training_id, body, viewer) if body.action == "push" else []
+        result = share_gate_service.confirm_and_execute(
+            int(training_id),
+            body.action,
+            int(viewer.user_id),
+            target_uids=targets,
+            open_level=body.open_level,
+            confirm_source_ids=body.confirm_source_ids,
+        )
+    except share_gate_service.GateIncompleteError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "message": str(exc),
+            "blocked": exc.blocked,
+            "action": body.action,
+        }) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    payload = {"upgraded": result.get("upgraded", [])}
+    if body.action in ("link_org", "link_anyone"):
+        payload.update(
+            {
+                "token": result.get("token"),
+                "created": result.get("created"),
+                "open_level": body.open_level or ("anyone" if body.action == "link_anyone" else "org"),
+                "url": f"/share/{result.get('token')}",
+            }
+        )
+    elif body.action == "push":
+        payload.update(
+            {
+                "delivered": result.get("delivered", []),
+                "skipped": result.get("skipped", []),
+            }
+        )
+    else:
+        payload["ok"] = True
+        payload["visibility"] = "public"
+    return payload
 
 
 @app.get("/api/trainings/{training_id}/review/weekly")
@@ -1269,10 +1459,10 @@ def upsert_roster(
     current = _require_admin_viewer(viewer)
     _assert_action(current, Action.MANAGE_DEPARTMENT)
     # 部门主管只能往自己部门加人，且只能给员工角色（不能自己造管理员）
-    if current.role is Role.DEPT_MANAGER:
+    if current.role is Role.ADMIN:
         if body.department_id is None or not can_manage_department(current, body.department_id):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能管理本部门")
-        if body.role != Role.EMPLOYEE.value:
+        if body.role != Role.MEMBER.value:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="部门主管只能添加员工"
             )
@@ -1320,7 +1510,7 @@ def list_org_members(
 
     current = _require_admin_viewer(viewer)
     _assert_action(current, Action.MANAGE_DEPARTMENT)
-    if current.role is Role.DEPT_MANAGER:
+    if current.role is Role.ADMIN:
         # 主管只能看本部门成员；未指定部门时取他第一个部门
         target = department_id or next(iter(sorted(current.department_ids)), None)
         if target is None:
@@ -1412,7 +1602,7 @@ def create_assignment(
     """创建任务草案：四要素缺一不可；部门主管只能发给自己部门。"""
     current = _require_admin_viewer(viewer)
     _assert_action(current, Action.MANAGE_DEPARTMENT)
-    if current.role is Role.DEPT_MANAGER:
+    if current.role is Role.ADMIN:
         if body.target_type != "department" or body.target_value in (None, ""):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="主管只能按本部门发布任务"
@@ -1438,7 +1628,7 @@ def create_assignment(
 
 
 def _load_assignment_for(viewer: Viewer, assignment_id: int) -> dict[str, Any]:
-    rows = assignment_service.list_assignments(viewer.org_id)
+    rows = assignment_service.list_assignments(viewer.org_id or -1)
     match = next((row for row in rows if int(row["id"]) == int(assignment_id)), None)
     if match is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
@@ -1649,11 +1839,17 @@ def wizard_start(body: WizardStartBody, viewer: Viewer | None = Depends(current_
     from src.services import goal_clarification_service
 
     session = goal_clarification_service.start_session(topic)
-    with _tx() as active:  # 个人版：训练归属当前账号
-        active.execute(
-            "UPDATE trainings SET owner_user_id = ? WHERE id = ?",
-            (int(viewer.user_id), int(session.training_id)),
-        )
+    with _tx() as active:  # 个人版：训练归属当前账号与所在组织（member-invite 后组织可为空）
+        if viewer.org_id is not None:
+            active.execute(
+                "UPDATE trainings SET owner_user_id = ?, org_id = ? WHERE id = ?",
+                (int(viewer.user_id), int(viewer.org_id), int(session.training_id)),
+            )
+        else:
+            active.execute(
+                "UPDATE trainings SET owner_user_id = ? WHERE id = ?",
+                (int(viewer.user_id), int(session.training_id)),
+            )
     return _clarify_payload(session)
 
 
@@ -1894,6 +2090,140 @@ def wizard_generate_path(
         "stages": len(skeleton.stages),
         "items": sum(len(stage.items) for stage in skeleton.stages),
     }
+
+
+# ---------------------------------------------------------------- 成员邀请（change member-invite）
+
+
+def _org_viewer(viewer: Viewer | None, org_id: int) -> Viewer:
+    """组织类端点的登录守卫：必须登录且属于该组织（org-and-roles 语义沿用）。"""
+    if viewer is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="需要登录")
+    if viewer.org_id is None or int(viewer.org_id) != int(org_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能操作自己所在的组织")
+    return viewer
+
+
+class OrgCreateBody(BaseModel):
+    name: str
+
+
+@app.post("/api/org/create")
+def create_organization_view(
+    body: OrgCreateBody, viewer: Viewer = Depends(require_viewer)
+) -> dict[str, Any]:
+    """建组（member-invite）：个人模式用户创建组织并成为其组织管理员。"""
+    from src.db.connection import transaction as _tx
+    from src.services.org_service import add_membership, create_organization
+
+    if viewer.org_id is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="你已经在组织中——建新组请先退出当前组织")
+    if len(body.name.strip()) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="组织名至少 2 个字符")
+    with _tx() as active:
+        org = create_organization(body.name.strip(), conn=active)
+        membership = add_membership(
+            int(viewer.user_id), int(org["id"]), role="org_admin", status="active", conn=active
+        )
+    return {"org_id": int(org["id"]), "name": org["name"], "role": membership["role"]}
+
+
+@app.get("/api/org/{org_id}/candidates")
+def list_candidates_view(
+    org_id: int,
+    q: str = "",
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """候选列表（已注册 ∧ 非本组织成员）；仅 admin+/本组织成员。"""
+    v = _org_viewer(viewer, org_id)
+    _assert_action(v, "manage_members")
+    return {"candidates": org_service.list_candidates(org_id, query=q)}
+
+
+class InviteBody(BaseModel):
+    email: str
+
+
+@app.post("/api/org/{org_id}/invite")
+def invite_member_view(
+    org_id: int, body: InviteBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """站内邀请（拍板 3：站外邮箱后置）：admin 受配额，org_admin 不受限。"""
+    v = _org_viewer(viewer, org_id)
+    _assert_action(v, "manage_members")
+    try:
+        return org_service.invite_member(org_id, v, body.email)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get("/api/org/{org_id}/members/{user_id}/progress")
+def member_progress_view(
+    org_id: int, user_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """成员互看进度（拍板 4：完成状态 + 分数聚合，不暴露作答明细）。"""
+    v = _org_viewer(viewer, org_id)
+    try:
+        return org_service.member_progress(org_id, v, user_id)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+class MemberRoleBody(BaseModel):
+    role: str  # member | admin
+    admin_quota: int | None = None
+    admin_can_remove: bool | None = None
+
+
+@app.put("/api/org/{org_id}/members/{user_id}/role")
+def set_member_role_view(
+    org_id: int,
+    user_id: int,
+    body: MemberRoleBody,
+    viewer: Viewer | None = Depends(current_viewer),
+) -> dict[str, Any]:
+    """org_admin 专属：升降 admin / 逐人配额与删除开关。"""
+    v = _org_viewer(viewer, org_id)
+    try:
+        return org_service.set_member_role(
+            org_id,
+            v,
+            user_id,
+            role=body.role,
+            admin_quota=body.admin_quota,
+            admin_can_remove=body.admin_can_remove,
+        )
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.delete("/api/org/{org_id}/members/{user_id}")
+def remove_member_view(
+    org_id: int, user_id: int, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """移除成员（资格置 disabled）：admin 受开关且只能移 member；org_admin 总可。"""
+    v = _org_viewer(viewer, org_id)
+    try:
+        return org_service.remove_member(org_id, v, user_id)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@app.get("/api/my/invites")
+def my_invites_view(viewer: Viewer = Depends(require_viewer)) -> dict[str, Any]:
+    """被邀请人侧：我的待接受邀请。"""
+    return {"invites": org_service.list_my_invites(int(viewer.user_id))}
+
+
+@app.post("/api/my/invites/{membership_id}/accept")
+def accept_invite_view(
+    membership_id: int, viewer: Viewer = Depends(require_viewer)
+) -> dict[str, Any]:
+    """接受邀请：invited → active（进组后共享计划拉取自动可用）。"""
+    try:
+        return org_service.accept_invite(int(viewer.user_id), membership_id)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------- coach-memory（会话小结 / 连败反馈 / 偏好）

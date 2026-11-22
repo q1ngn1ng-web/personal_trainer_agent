@@ -79,6 +79,10 @@ class TestDashboardAndReview(unittest.TestCase):
             json={"email": "o@example.com", "password": "password8", "display_name": "O"},
         )
         self.assertEqual(reg.status_code, 200)
+        # member-invite：注册不再自动进组——显式入默认组织（本测试依赖组织可见性口径）
+        from src.services.org_service import add_membership
+
+        add_membership(reg.json()["viewer"]["user_id"], 1, role="member")
 
     def tearDown(self) -> None:
         self._client._call_api = self._orig_call_api
