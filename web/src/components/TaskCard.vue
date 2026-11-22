@@ -3,7 +3,7 @@ import { PenLine, Search, FileText } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { api, type AnswerResult, type PointSpec, type TodayTask } from "../api";
 
-const props = defineProps<{ task: TodayTask; autoOpen?: boolean; judging?: boolean; sessionMode?: boolean }>();
+const props = defineProps<{ task: TodayTask; autoOpen?: boolean; judging?: boolean; sessionMode?: boolean; compact?: boolean }>();
 const emit = defineEmits<{
   refresh: [];
   answered: [task: TodayTask];
@@ -77,6 +77,7 @@ const panelCls = computed(() => {
 
 const typeLabel: Record<string, string> = {
   memory: "记忆", comprehension: "理解", application: "应用", analysis: "分析",
+  practice: "练习", prerequisite: "前置",
 };
 
 function toast(msg: string) {
@@ -227,11 +228,12 @@ async function skip() {
     <div class="task-head" @click="expand">
       <span class="t-title">{{ task.title }}</span>
       <span class="t-meta">
-        <span v-if="isFuture" class="badge gray">未到期 · 可提前练</span>
-        <span v-if="task.is_overdue" class="badge danger">逾期</span>
+        <span v-if="isFuture && !compact" class="badge gray">未到期 · 可提前练</span>
+        <!-- 逾期红墙降噪：compact（今日待办组）不逐行挂红标，由组级聚合条承担 -->
+        <span v-if="task.is_overdue && !compact" class="badge danger">逾期</span>
         <span class="badge gray">{{ sessionMode ? `第${task.round_index}次会话` : `第${task.round_index}轮` }}</span>
-        <span v-if="task.item_type" class="badge gray">{{ typeLabel[task.item_type] || task.item_type }}</span>
-        <span class="badge" :class="verdictBadge.cls">{{ verdictBadge.text }}</span>
+        <span v-if="task.item_type && !compact" class="badge gray">{{ typeLabel[task.item_type] || task.item_type }}</span>
+        <span v-if="task.verdict || !compact" class="badge" :class="verdictBadge.cls">{{ verdictBadge.text }}</span>
         <span style="color: var(--faint); font-size: 12px;">{{ task.planned_minutes }}′</span>
       </span>
     </div>

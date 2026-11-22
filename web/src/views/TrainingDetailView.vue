@@ -337,6 +337,7 @@ const itemStatus: Record<string, { ico: string; cls: string }> = {
 };
 const typeLabel: Record<string, string> = {
   memory: "记忆", comprehension: "理解", application: "应用", analysis: "分析",
+  practice: "练习", prerequisite: "前置",
 };
 </script>
 
@@ -346,8 +347,13 @@ const typeLabel: Record<string, string> = {
     <div class="page-head">
       <h1 class="page-title">{{ training ? training.topic : '训练详情' }}</h1>
       <p class="page-sub" v-if="pathData && pathData.path">
-        路径 v{{ pathData.path.version }} · {{ pathData.path.horizon_weeks || '-' }} 周 ·
-        每周 {{ pathData.path.weekly_frequency || '-' }} 次 · 每次 {{ pathData.path.daily_budget_minutes || '-' }} 分钟
+        <span v-if="isSessionMode">会话制排期 · 按你设定的节奏分配 · 终测把关完成</span>
+        <template v-else>
+          路径 v{{ pathData.path.version }}
+          <template v-if="pathData.path.horizon_weeks"> · {{ pathData.path.horizon_weeks }} 周</template>
+          <template v-if="pathData.path.weekly_frequency"> · 每周 {{ pathData.path.weekly_frequency }} 次</template>
+          <template v-if="pathData.path.daily_budget_minutes"> · 每次 {{ pathData.path.daily_budget_minutes }} 分钟</template>
+        </template>
       </p>
     </div>
 
@@ -459,9 +465,8 @@ const typeLabel: Record<string, string> = {
           </div>
           <div class="progress" style="margin: 10px 0 8px;"><i :style="{ width: progressPct + '%' }"></i></div>
           <div style="display: flex; gap: 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap;">
-            <span>要点通过 {{ pathData.progress.passed_items }}/{{ pathData.progress.total_items }}</span>
-            <span>已练 {{ pathData.progress.practiced_items }}</span>
-            <span>覆盖 {{ pathData.progress.coverage_done ? '完成' : '未完成' }}</span>
+            <span>达标 <b>{{ pathData.progress.passed_items }}/{{ pathData.progress.total_items }}</b> 项</span>
+            <span>已练 {{ pathData.progress.practiced_items }} 项</span>
           </div>
           <p v-if="pathData.progress.reason" style="font-size: 13px; color: var(--faint); margin-top: 8px;">
             {{ pathData.progress.reason }}

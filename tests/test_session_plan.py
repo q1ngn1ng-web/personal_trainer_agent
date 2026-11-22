@@ -242,6 +242,33 @@ class TestSessionPlanLifecycle(unittest.TestCase):
             os.environ["DB_PATH"] = self._old_db
         self._tmp.cleanup()
 
+    def test_list_payload_has_next_due_and_final_due(self) -> None:
+        """列表 payload 必须带 next_due/final_due（训练列表页展示口径）。"""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(__import__("src.api.app", fromlist=["app"]).app)
+        client.post(
+            "/api/auth/register",
+            json={"email": f"list-{self.training_id}@example.com", "password": "password8", "display_name": "L"},
+        )
+        conn = queries.get_connection()
+        try:
+            conn.execute(
+                "UPDATE trainings SET owner_user_id = (SELECT id FROM users WHERE email = ?) "
+                "WHERE id = ?",
+                (f"list-{self.training_id}@example.com", self.training_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.get("/api/trainings")
+        self.assertEqual(resp.status_code, 200)
+        row = next(t for t in resp.json()["trainings"] if t["id"] == self.training_id)
+        self.assertIn("next_due", row)
+        self.assertIn("final_due", row)
+        self.assertIsNotNone(row["next_due"], "有计划项的训练必须能给出下次到期")
+        self.assertIsNotNone(row["final_due"], "session_ratio 训练必须能给出终测日")
+
     def test_sessions_and_union_and_idempotency(self) -> None:
         conn = _conn()
         try:

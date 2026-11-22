@@ -420,6 +420,24 @@ def list_trainings_endpoint(viewer: Viewer | None = Depends(current_viewer)) -> 
             for row in rows
             if can_view_training(viewer, row, shares_by_training.get(int(row["id"])))
         ]
+    # 列表页展示口径：下次到期任务 + 终测日（2026-11-22 用户需求——替换六卡重复占位文案）
+    conn = queries.get_connection()
+    try:
+        for row in rows:
+            try:
+                next_due = plan_service.next_due_date(int(row["id"]), conn=conn)
+                row["next_due"] = next_due.isoformat() if next_due else None
+                final = conn.execute(
+                    "SELECT MIN(due_date) AS d FROM plan_items "
+                    "WHERE training_id = ? AND kind = 'assessment' AND item_key LIKE 'final-%'",
+                    (int(row["id"]),),
+                ).fetchone()
+                row["final_due"] = str(final["d"]) if final and final["d"] else None
+            except Exception:
+                row["next_due"] = None
+                row["final_due"] = None
+    finally:
+        conn.close()
     return {"trainings": rows}
 
 

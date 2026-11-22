@@ -4,9 +4,26 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api, type TrainingSummary } from "../api";
 
+type DashRow = {
+  training_id: number;
+  today_completed: number;
+  today_total: number;
+  item_count?: number;
+  knowledge_points_total?: number;
+  knowledge_points_covered?: number;
+};
+
 const router = useRouter();
 const trainings = ref<TrainingSummary[]>([]);
+const dashById = ref<Record<number, DashRow>>({});
 const loading = ref(true);
+
+const todayIso = new Date().toLocaleDateString("sv-SE"); // 本地 YYYY-MM-DD
+function daysFromToday(iso: string | null): number | null {
+  if (!iso) return null;
+  const diff = Math.round((new Date(iso + "T00:00:00").getTime() - new Date(todayIso + "T00:00:00").getTime()) / 86400000);
+  return diff;
+}
 
 // 资料总览（按内容指纹聚合）：同文档被几个训练计划引用，从桌面迁到训练页
 const sourcesOverview = ref<
@@ -45,8 +62,11 @@ async function loadSources() {
 
 onMounted(async () => {
   try {
-    const res = await api.trainings();
+    const [res, dash] = await Promise.all([api.trainings(), api.dashboard().catch(() => null)]);
     trainings.value = res.trainings;
+    const map: Record<number, DashRow> = {};
+    for (const row of dash?.trainings || []) map[row.training_id] = row;
+    dashById.value = map;
   } catch (e: any) {
     (window as any).__toast?.(e.message || "加载失败");
   } finally {
@@ -76,9 +96,20 @@ onMounted(async () => {
           <div class="card-title" style="min-width: 0;">{{ t.topic }}</div>
           <span class="badge" :class="(statusLabel[t.status] || statusLabel.draft).cls">{{ (statusLabel[t.status] || statusLabel.draft).text }}</span>
         </div>
-        <div style="display: flex; gap: 14px; color: var(--muted); font-size: 13px;">
-          <span v-if="t.baseline_score">基线 {{ (t.baseline_score * 100).toFixed(0) }}</span>
-          <span>点击查看路径 · 资料 · 测验 →</span>
+        <div style="display: flex; gap: 12px; color: var(--muted); font-size: 13px; flex-wrap: wrap;">
+          <span v-if="dashById[t.id]?.knowledge_points_total">
+            知识点覆盖 <b>{{ dashById[t.id].knowledge_points_covered }}/{{ dashById[t.id].knowledge_points_total }}</b> · 题量 <b>{{ dashById[t.id].item_count }}</b>
+          </span>
+          <span v-if="t.next_due">
+            下次任务 <b :style="daysFromToday(t.next_due)! < 0 ? 'color: var(--danger);' : ''">
+              {{ t.next_due.slice(5) }}{{ (daysFromToday(t.next_due) ?? 0) < 0 ? `（逾期 ${-(daysFromToday(t.next_due) ?? 0)} 天）` : "" }}
+            </b>
+          </span>
+          <span v-if="t.final_due">
+            终测 <b>{{ t.final_due.slice(5) }}</b>（{{ (daysFromToday(t.final_due) ?? 0) < 0 ? "已到期" : `还有 ${daysFromToday(t.final_due)} 天` }}）
+          </span>
+          <span v-if="(dashById[t.id]?.today_total ?? 0) > 0">今日 {{ dashById[t.id]?.today_completed }}/{{ dashById[t.id]?.today_total }}</span>
+          <span v-if="t.baseline_score">基线分 {{ (t.baseline_score * 100).toFixed(0) }}</span>
         </div>
       </div>
     </div>

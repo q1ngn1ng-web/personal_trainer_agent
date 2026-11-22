@@ -163,6 +163,8 @@ export type TrainingSummary = {
   owner_user_id?: number | null;
   schedule_mode?: string;
   baseline_score: number;
+  next_due?: string | null;
+  final_due?: string | null;
 };
 
 export type PathItem = {

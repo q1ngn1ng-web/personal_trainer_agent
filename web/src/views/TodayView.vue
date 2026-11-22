@@ -74,11 +74,19 @@ function onSubmitFailed(planId: number) {
 
 const groups = computed(() => {
   if (!data.value) return [];
-  return data.value.groups.map((g) => ({
-    ...g,
-    pct: g.total ? Math.round((g.practiced / g.total) * 100) : 0,
-    tasks: data.value!.tasks.filter((t) => t.training_id === g.training_id),
-  }));
+  return data.value.groups.map((g) => {
+    const tasks = data.value!.tasks.filter((t) => t.training_id === g.training_id);
+    // 红墙降噪：逾期不逐行挂标，聚合到组级一条（最早到期日提示先做哪道）
+    const overdue = tasks.filter((t) => t.is_overdue);
+    const earliestOverdue = overdue.length ? overdue.map((t) => t.due_date).sort()[0] : null;
+    return {
+      ...g,
+      pct: g.total ? Math.round((g.practiced / g.total) * 100) : 0,
+      tasks,
+      overdueCount: overdue.length,
+      earliestOverdue,
+    };
+  });
 });
 
 async function sendSignal(trainingId: number, type: string) {
@@ -120,17 +128,26 @@ async function sendSignal(trainingId: number, type: string) {
             <div style="min-width: 0;">
               <div class="card-title">{{ g.topic }}</div>
               <div style="font-size: 12.5px; color: var(--muted); margin-top: 2px;">
-                {{ g.practiced }}/{{ g.total }} 完成 · 约 {{ g.minutes }} 分钟
+                <template v-if="g.total">{{ g.practiced }}/{{ g.total }} 完成 · 约 {{ g.minutes }} 分钟</template>
+                <template v-else>今天已完成 {{ g.practiced }} 题 · 无待办</template>
               </div>
             </div>
-            <span class="badge" :class="g.pct === 100 ? 'ok' : 'brand'">{{ g.pct }}%</span>
+            <span v-if="g.total" class="badge" :class="g.pct === 100 ? 'ok' : 'brand'">{{ g.pct }}%</span>
           </div>
-          <div class="progress" style="margin-bottom: 14px;"><i :style="{ width: g.pct + '%' }"></i></div>
+          <div v-if="g.total" class="progress" style="margin-bottom: 14px;"><i :style="{ width: g.pct + '%' }"></i></div>
 
+          <div
+            v-if="g.overdueCount"
+            class="badge danger"
+            style="display: block; width: 100%; text-align: left; padding: 7px 12px; margin-bottom: 10px; border-radius: var(--radius-sm); font-weight: 500;"
+          >
+            ⚠ 以下 {{ g.overdueCount }} 题均逾期（最早 {{ g.earliestOverdue }}）——按顺序从最早的一道开始即可，不用一次还清
+          </div>
           <TaskCard
             v-for="t in g.tasks.filter((t) => !hiddenPlanIds.has(t.plan_id))"
             :key="t.plan_id"
             :task="t"
+            compact
             :auto-open="autoOpenId === t.plan_id"
             @answered="onAnswered"
             @submit-failed="onSubmitFailed"
