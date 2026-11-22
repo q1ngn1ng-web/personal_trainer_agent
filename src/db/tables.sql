@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS trainings (
     shared_by_user_id INTEGER,
     -- 可见性三档（change content-visibility）：private 仅自己 / specific 指定成员 / public 组织内全部
     visibility TEXT DEFAULT 'private',
+    -- 排期模式（change user-defined-training-plan）：legacy_v21=ADR-0021 固定五轮（存量默认，不迁移）；
+    -- session_ratio=用户自定义节奏（horizon×session_count，配比控制器组会话）
+    schedule_mode TEXT NOT NULL DEFAULT 'legacy_v21',
     created_at DATETIME NOT NULL,
     last_active_at DATETIME
 );
@@ -428,7 +431,8 @@ CREATE TABLE IF NOT EXISTS assessments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     training_id INTEGER NOT NULL,
     plan_id INTEGER,
-    trigger TEXT DEFAULT 'scheduled' CHECK (trigger IN ('scheduled', 'manual', 'stage_end')),
+    -- trigger 'final' = 终测（user-defined-training-plan）：覆盖全部必修项的完成门
+    trigger TEXT DEFAULT 'scheduled' CHECK (trigger IN ('scheduled', 'manual', 'stage_end', 'final')),
     status TEXT DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed')),
     question_count INTEGER DEFAULT 0,
     score REAL,

@@ -212,6 +212,22 @@ _PRACTICE_ATTEMPTS_COLUMNS = (
     "score, point_results, mistake_reasons, source, note, created_at"
 )
 
+_ASSESSMENTS_DDL = """
+CREATE TABLE assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    training_id INTEGER NOT NULL,
+    plan_id INTEGER,
+    trigger TEXT DEFAULT 'scheduled' CHECK (trigger IN ('scheduled', 'manual', 'stage_end', 'final')),
+    status TEXT DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed')),
+    question_count INTEGER DEFAULT 0,
+    score REAL,
+    passed INTEGER,
+    created_at DATETIME NOT NULL,
+    completed_at DATETIME,
+    FOREIGN KEY (training_id) REFERENCES trainings(id)
+)
+"""
+
 
 _VISIBILITY_MIGRATION_DDL = {
     "share-links-table": """
@@ -318,6 +334,26 @@ def _ensure_share_links_table(conn: sqlite3.Connection) -> bool:
         return False
     conn.execute(_SHARE_LINKS_DDL)
     return True
+
+
+def _rebuild_assessments(conn: sqlite3.Connection) -> None:
+    """放宽 ``trigger`` 枚举：新增 ``final``（终测完成门，change user-defined-training-plan）。
+
+    只复制共有列；assessments 无需索引重建。
+    """
+    conn.execute("ALTER TABLE assessments RENAME TO assessments_old")
+    conn.execute(_ASSESSMENTS_DDL)
+    shared = [
+        name
+        for name in _column_names(conn, "assessments_old")
+        if name in _column_names(conn, "assessments")
+    ]
+    conn.execute(
+        f"INSERT INTO assessments ({', '.join(shared)}) "
+        f"SELECT {', '.join(shared)} FROM assessments_old"
+    )
+    conn.execute("DROP TABLE assessments_old")
+    logger.info("migrate: rebuilt assessments (trigger enum + final)")
 
 
 def _rebuild_practice_attempts(conn: sqlite3.Connection) -> None:
@@ -613,9 +649,14 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         "shared_from_training_id" not in training_columns
         or "shared_by_user_id" not in training_columns
     )
+    # 排期模式（change user-defined-training-plan）：存量默认 legacy_v21，不迁移数据
+    needs_schedule_mode = bool(training_columns) and "schedule_mode" not in training_columns
 
     practice_sql = _table_sql(conn, "practice_attempts")
     needs_practice_source = bool(practice_sql) and "source IN ('self', 'quiz', 'llm')" in practice_sql
+
+    assessments_sql = _table_sql(conn, "assessments")
+    needs_assessment_final = bool(assessments_sql) and "'final'" not in assessments_sql
 
     account_columns = {
         table: cols for table, cols in _ACCOUNT_COLUMNS.items() if _column_names(conn, table)
@@ -638,6 +679,8 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
         or needs_share_links
         or needs_shared_from
         or needs_visibility
+        or needs_schedule_mode
+        or needs_assessment_final
     ):
         return applied
 
@@ -699,6 +742,15 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
                 )
                 if added:
                     applied.append("trainings:shared_from")
+            if needs_schedule_mode:
+                added = _add_missing_columns(
+                    conn, "trainings", {"schedule_mode": "TEXT NOT NULL DEFAULT 'legacy_v21'"}
+                )
+                if added:
+                    applied.append("trainings:schedule_mode")
+            if needs_assessment_final:
+                _rebuild_assessments(conn)
+                applied.append("assessments:trigger_final")
             if needs_account:
                 for table, cols in account_columns.items():
                     added = _add_missing_columns(conn, table, cols)

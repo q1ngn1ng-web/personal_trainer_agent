@@ -63,6 +63,8 @@ class QuizResult:
     failed_items: list[dict[str, Any]] = field(default_factory=list)
     extra_rounds: int = 0
     graded_by: str = "llm"
+    #: 终测未通过时追加的会话周期信息（user-defined-training-plan 2.4；None=非终测或未追加）
+    cycle_appended: dict[str, Any] | None = None
 
 
 def question_pool(
@@ -165,15 +167,25 @@ def start_assessment(
     today: date | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> Assessment:
-    """生成一次测验批次（题目落库，等待作答）。"""
-    if trigger not in ("scheduled", "manual", "stage_end"):
+    """生成一次测验批次（题目落库，等待作答）。
+
+    ``trigger='final'`` 为终测（user-defined-training-plan 2.4）：覆盖题库内全部必修项
+    （不受冷却期与默认题量限制，design D4——终测单独把关完成）。
+    """
+    if trigger not in ("scheduled", "manual", "stage_end", "final"):
         raise ValueError(f"invalid trigger: {trigger!r}")
     effective_today = today or local_today()
     active = _connect(conn)
     own = conn is None
     try:
-        pool = question_pool(training_id, today=effective_today, conn=active)
-        blueprints = pick_blueprints(pool, size=size)
+        if trigger == "final":
+            pool = plan_service.drawable_questions(
+                training_id, today=effective_today, conn=active, include_cooldown=True
+            )
+            blueprints = pick_blueprints(pool, size=max(len(pool), 1))
+        else:
+            pool = question_pool(training_id, today=effective_today, conn=active)
+            blueprints = pick_blueprints(pool, size=size)
         if not blueprints:
             raise ValueError(
                 "题库里还没有可抽的题：练过的题要过 14 天冷却期才能进入测验（ADR-0016）"
@@ -609,9 +621,28 @@ def finish_assessment(
                 attempt_service.mark_mastered_if_ready(training_id, item.item_key, conn=active)
 
         extra = 0
-        for item in failed_items:
-            if _extra_round(active, training_id, item.item_key, today=effective_today):
-                extra += 1
+        cycle_appended: dict[str, Any] | None = None
+        trigger = str(assessment_row["trigger"] or "")
+        mode_row = active.execute(
+            "SELECT schedule_mode FROM trainings WHERE id = ?", (training_id,)
+        ).fetchone()
+        is_session_mode = bool(mode_row) and str(mode_row["schedule_mode"] or "") == "session_ratio"
+        if trigger == "final" and is_session_mode:
+            # 终测完成门（user-defined-training-plan 2.4 / design D4）：
+            # 通过 → completed；不通过 → 追加一轮同规格会话周期（已稳定项进已知巩固池）
+            if passed:
+                active.execute(
+                    "UPDATE trainings SET status = 'completed', last_active_at = ? "
+                    "WHERE id = ? AND status IN ('confirmed', 'active', 'paused')",
+                    (_now(), training_id),
+                )
+                logger.info("finish_assessment: final passed → training %s completed", training_id)
+            else:
+                cycle_appended = plan_service.append_session_cycle(training_id, conn=active)
+        else:
+            for item in failed_items:
+                if _extra_round(active, training_id, item.item_key, today=effective_today):
+                    extra += 1
         if assessment_row["plan_id"]:
             plan_service.complete_tasks(
                 [int(assessment_row["plan_id"])], completed=True, today=effective_today, conn=active
@@ -634,6 +665,7 @@ def finish_assessment(
         ],
         extra_rounds=extra,
         graded_by=graded_by,
+        cycle_appended=cycle_appended,
     )
 
 

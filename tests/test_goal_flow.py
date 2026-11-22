@@ -98,12 +98,15 @@ class TestGoalClarificationFlow(unittest.TestCase):
         self.assertTrue(is_generation_ready(training.status))
         self.assertIsNotNone(training.goal_confirmed_at)
         snapshot = training.goal_json
-        self.assertEqual(snapshot["schema_version"], "1.0.0")
+        self.assertEqual(snapshot["schema_version"], "1.1.0")
         self.assertIn("field_sources", snapshot)
         self.assertTrue(snapshot["confirmed"])
         # 三个字段是值，不是布尔标记
         self.assertIsInstance(snapshot["content"], str)
         self.assertTrue(snapshot["level"])
+        # 节奏字段在建议阶段已由系统默认补全（无 UI 流程可确认）
+        self.assertGreaterEqual(snapshot["horizon_days"], 1)
+        self.assertGreaterEqual(snapshot["session_count"], 2)
 
     def test_confirm_rejects_incomplete_goal(self) -> None:
         session = svc.start_session("我想学英语虚拟语气")

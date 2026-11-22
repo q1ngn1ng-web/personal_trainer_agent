@@ -76,6 +76,9 @@ function syncSourceVisibilityState() {
   sourceVisibility.value = next;
 }
 
+// 会话制排期（user-defined-training-plan）：标签显示「第 N 次会话」
+const isSessionMode = computed(() => training.value?.schedule_mode === "session_ratio");
+
 // 今日小结（coach-memory）：进入复盘区时懒加载，读时聚合零新表
 const summary = ref<SessionSummary | null>(null);
 const summaryLoading = ref(false);
@@ -324,21 +327,23 @@ const typeLabel: Record<string, string> = {
       <template v-if="section === 'plan'">
         <div class="card">
           <div class="card-head">
-            <div class="card-title">训练计划（全部轮次）</div>
+            <div class="card-title">{{ isSessionMode ? '训练计划（会话制）' : '训练计划（全部轮次）' }}</div>
             <span class="badge gray">{{ planRounds.length }} 项</span>
             <button class="btn sm ghost" :disabled="regenerating" @click="regeneratePlan">
               {{ regenerating ? '补齐中…' : '补齐缺失轮次' }}
             </button>
           </div>
           <p style="font-size: 13px; color: var(--muted); margin-top: 6px;">
-            按到期日排序。未到期的轮次也可以提前练——展开即可作答。
+            {{ isSessionMode
+              ? '按你设定的节奏分次安排：每次覆盖部分知识点，复习与错题回炉按近期表现动态配比；终测通过即完成。未到期的会话可以提前练。'
+              : '按到期日排序。未到期的轮次也可以提前练——展开即可作答。' }}
           </p>
         </div>
         <div v-if="planLoading" class="loading-center" style="padding: 18px 0;"><span class="spinner"></span></div>
         <div v-else-if="!planRounds.length" class="card" style="color: var(--muted);">还没有训练轮次——完成向导后这里会显示五轮计划。</div>
         <div v-else>
           <div v-for="round in planRounds" :key="round.plan_id">
-            <TaskCard :task="round" @refresh="loadPlan" />
+            <TaskCard :task="round" :session-mode="isSessionMode" @refresh="loadPlan" />
           </div>
         </div>
 

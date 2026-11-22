@@ -13,15 +13,21 @@ from typing import Any
 from src.core.goal import (
     CLARIFY_HARD_LIMIT,
     CLARIFY_SOFT_LIMIT,
+    DEFAULT_HORIZON_DAYS,
+    DEFAULT_SESSION_COUNT,
     GOAL_SCHEMA_VERSION,
     GoalDraft,
     GoalFieldSource,
+    SESSION_COUNT_MAX,
     TrainingStatus,
     assert_transition,
     build_inferred_acceptance,
     merge_goal,
     next_action,
+    normalize_status,
     suggested_level,
+    validate_horizon_days,
+    validate_session_count,
 )
 from src.db import queries
 from src.db.models import Training
@@ -32,6 +38,13 @@ from src.llm.schema import SCHEMA_REGISTRY
 logger = logging.getLogger("src.services.goal_clarification_service")
 
 _PURPOSE = "goal_clarification"
+
+#: 用户自定义节奏的训练排期模式（user-defined-training-plan 2.5；存量默认 legacy_v21）
+SESSION_SCHEDULE_MODE: str = "session_ratio"
+
+#: 等级 → 节奏推荐【待校准】：澄清步知识点未知，先按等级给建议
+_LEVEL_SESSION_RECOMMEND: dict[str, int] = {"了解": 2, "会用": 3, "熟练": 3, "能讲清": 4}
+_LEVEL_HORIZON_RECOMMEND: dict[str, int] = {"了解": 14, "会用": 14, "熟练": 21, "能讲清": 21}
 
 
 @dataclass
@@ -108,6 +121,15 @@ def _apply_suggestions(draft: GoalDraft, missing: tuple[str, ...]) -> list[str]:
             draft.acceptance = build_inferred_acceptance(draft.content)
             draft.field_sources["acceptance"] = GoalFieldSource.INFERRED.value
             filled.append(name)
+        elif name == "horizon_days":
+            # 节奏默认值（UI 卡片预填同一组）：无 UI 的流程在建议阶段自动补全
+            draft.horizon_days = DEFAULT_HORIZON_DAYS
+            draft.field_sources["horizon_days"] = GoalFieldSource.INFERRED.value
+            filled.append(name)
+        elif name == "session_count":
+            draft.session_count = DEFAULT_SESSION_COUNT
+            draft.field_sources["session_count"] = GoalFieldSource.INFERRED.value
+            filled.append(name)
     return filled
 
 
@@ -119,9 +141,15 @@ def _build_session(
     history: list[dict[str, str]],
     previous_missing: tuple[str, ...],
     fallback_used: bool,
+    locked: dict[str, Any] | None = None,
+    locked_sources: dict[str, str] | None = None,
 ) -> ClarificationSession:
     llm_draft = output.get("draft") if isinstance(output.get("draft"), dict) else {}
-    merged = merge_goal(llm_draft, locked={"content": topic}, locked_sources={"content": GoalFieldSource.USER_INPUT.value})
+    merged = merge_goal(
+        llm_draft,
+        locked={"content": topic, **(locked or {})},
+        locked_sources={"content": GoalFieldSource.USER_INPUT.value, **(locked_sources or {})},
+    )
 
     # 用户回答过的字段：LLM 未标 inferred 时视为 user_reply
     if rounds > 0:
@@ -176,6 +204,9 @@ def _default_question(field_name: str) -> str:
         "content": "你想训练的具体内容是什么？",
         "level": "你希望达到什么程度？（了解 / 会用 / 熟练 / 能讲清）",
         "acceptance": "怎样才算学会？给一个能验证的说法，比如正确率、完成量或能讲出来。",
+        # 节奏字段由 UI 控件收集（提示词第 6/7 条），对话不追问——兜底文案引导卡片
+        "horizon_days": "请在「训练节奏」卡片选择训练总时长（无需文字回答）。",
+        "session_count": "请在「训练节奏」卡片选择训练次数（无需文字回答）。",
     }.get(field_name, "请补充这一项。")
 
 
@@ -256,7 +287,11 @@ def confirm(
     state = _load_state(training)
     rounds = int(training.clarification_rounds or 0)
 
-    locked = {name: state.get(name) for name in ("content", "level", "acceptance") if state.get(name)}
+    locked = {
+        name: state.get(name)
+        for name in ("content", "level", "acceptance", "horizon_days", "session_count")
+        if state.get(name) not in (None, "")
+    }
     locked_sources = dict(state.get("field_sources") or {})
     if override:
         for name, value in override.items():
@@ -281,6 +316,60 @@ def confirm(
     if updated is None:  # pragma: no cover - update returns None only when row missing
         raise ValueError(f"training not found: {training_id}")
     return updated
+
+
+def set_pace(training_id: int, horizon_days: int, session_count: int) -> ClarificationSession:
+    """UI 节奏卡片提交（change user-defined-training-plan 1.1/1.3）。
+
+    值以 user_input 来源写入草案并落库；同时把训练标记为 session_ratio 排期模式。
+    重建会话但不调 LLM（state 即草案输入）。
+    """
+    training = queries.get_training(training_id)
+    if training is None:
+        raise ValueError(f"training not found: {training_id}")
+    if str(normalize_status(training.status)) not in (
+        TrainingStatus.DRAFT.value,
+        TrainingStatus.PENDING_CONFIRM.value,
+    ):
+        raise ValueError("澄清会话已结束，不能再修改训练节奏")
+
+    days = validate_horizon_days(horizon_days)
+    count = validate_session_count(session_count)
+
+    state = _load_state(training)
+    state["horizon_days"] = days
+    state["session_count"] = count
+    sources = dict(state.get("field_sources") or {})
+    sources["horizon_days"] = GoalFieldSource.USER_INPUT.value
+    sources["session_count"] = GoalFieldSource.USER_INPUT.value
+    state["field_sources"] = sources
+
+    session = _build_session(
+        training,
+        training.topic,
+        state,
+        rounds=int(training.clarification_rounds or 0),
+        history=list(state.get("history") or []),
+        previous_missing=(),
+        fallback_used=False,
+        locked={"horizon_days": days, "session_count": count},
+        locked_sources={
+            "horizon_days": GoalFieldSource.USER_INPUT.value,
+            "session_count": GoalFieldSource.USER_INPUT.value,
+        },
+    )
+    _persist(training_id, session)
+    queries.update_training(training_id, schedule_mode=SESSION_SCHEDULE_MODE)
+    return session
+
+
+def recommend_pace(level: str, knowledge_point_count: int | None = None) -> dict[str, int]:
+    """按等级（与可选的知识点数量）给节奏推荐值【待校准】：澄清步知识点未知，先按等级。"""
+    sessions = _LEVEL_SESSION_RECOMMEND.get(str(level or "").strip(), DEFAULT_SESSION_COUNT)
+    horizon = _LEVEL_HORIZON_RECOMMEND.get(str(level or "").strip(), DEFAULT_HORIZON_DAYS)
+    if knowledge_point_count and knowledge_point_count > 10:
+        sessions = min(sessions + 1, SESSION_COUNT_MAX)
+    return {"horizon_days": horizon, "session_count": sessions}
 
 
 def load_session(training_id: int) -> ClarificationSession | None:
@@ -310,9 +399,12 @@ __all__ = [
     "CLARIFY_HARD_LIMIT",
     "CLARIFY_SOFT_LIMIT",
     "GOAL_SCHEMA_VERSION",
+    "SESSION_SCHEDULE_MODE",
     "ClarificationSession",
     "confirm",
     "continue_session",
     "load_session",
+    "recommend_pace",
+    "set_pace",
     "start_session",
 ]

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { api, type AnswerResult, type PointSpec, type TodayTask } from "../api";
 
-const props = defineProps<{ task: TodayTask; autoOpen?: boolean; judging?: boolean }>();
+const props = defineProps<{ task: TodayTask; autoOpen?: boolean; judging?: boolean; sessionMode?: boolean }>();
 const emit = defineEmits<{
   refresh: [];
   answered: [task: TodayTask];
@@ -228,7 +228,7 @@ async function skip() {
       <span class="t-meta">
         <span v-if="isFuture" class="badge gray">未到期 · 可提前练</span>
         <span v-if="task.is_overdue" class="badge danger">逾期</span>
-        <span class="badge gray">第{{ task.round_index }}轮</span>
+        <span class="badge gray">{{ sessionMode ? `第${task.round_index}次会话` : `第${task.round_index}轮` }}</span>
         <span v-if="task.item_type" class="badge gray">{{ typeLabel[task.item_type] || task.item_type }}</span>
         <span class="badge" :class="verdictBadge.cls">{{ verdictBadge.text }}</span>
         <span style="color: var(--faint); font-size: 12px;">{{ task.planned_minutes }}′</span>

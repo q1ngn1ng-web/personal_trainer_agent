@@ -15,6 +15,46 @@ const topic = ref("");
 const session = ref<ClarifySession | null>(null);
 const answer = ref("");
 
+// 训练节奏（user-defined-training-plan）：UI 控件收集，非对话；变更即提交
+const paceWeeks = ref(2);
+const paceSessions = ref(3);
+const paceBusy = ref(false);
+const paceRecommended = computed(() => session.value?.pace?.recommended ?? null);
+
+async function onPaceChange() {
+  if (!tid.value || paceBusy.value) return;
+  paceBusy.value = true;
+  try {
+    session.value = await wizardApi.setPace(tid.value, paceWeeks.value, paceSessions.value);
+  } catch (e: any) {
+    error.value = e.message || "节奏保存失败";
+  } finally {
+    paceBusy.value = false;
+  }
+}
+
+// 会话响应后同步节奏控件：未设置时用推荐值并自动以 user_input 落快照（默认节奏）
+function syncPaceControls() {
+  const pace = session.value?.pace;
+  if (!pace) return;
+  if (pace.horizon_weeks == null || pace.session_count == null) {
+    const rec = pace.recommended;
+    paceWeeks.value = Math.max(1, Math.round((rec?.horizon_days ?? 14) / 7));
+    paceSessions.value = rec?.session_count ?? 3;
+    if (tid.value) onPaceChange();
+  } else {
+    paceWeeks.value = pace.horizon_weeks;
+    paceSessions.value = pace.session_count;
+  }
+}
+
+function applyRecommendedPace() {
+  if (!paceRecommended.value) return;
+  paceWeeks.value = Math.max(1, Math.round(paceRecommended.value.horizon_days / 7));
+  paceSessions.value = paceRecommended.value.session_count;
+  onPaceChange();
+}
+
 // 第 2 步：资料
 const sourceTab = ref<"text" | "url" | "file">("text");
 const srcTitle = ref("");
@@ -48,6 +88,7 @@ async function startClarify() {
   error.value = "";
   try {
     session.value = await wizardApi.start(topic.value.trim());
+    syncPaceControls();
   } catch (e: any) {
     error.value = e.message || "启动失败";
   } finally {
@@ -62,6 +103,7 @@ async function sendAnswer() {
   try {
     session.value = await wizardApi.answer(tid.value, answer.value.trim());
     answer.value = "";
+    syncPaceControls();
   } catch (e: any) {
     error.value = e.message || "提交失败";
   } finally {
@@ -88,6 +130,8 @@ const FIELD_LABEL: Record<string, string> = {
   content: "学习内容",
   level: "目标等级",
   acceptance: "验收标准",
+  horizon_days: "训练总时长",
+  session_count: "训练次数",
 };
 
 // 第 2 步：资料来源操作
@@ -246,6 +290,31 @@ const STATE_LABEL: Record<string, string> = {
           <div v-for="(h, i) in session.history.filter((x) => x.role === 'user') " :key="i" class="chat-line user">
             <div class="who">你</div>
             <div class="bubble">{{ h.content }}</div>
+          </div>
+        </div>
+
+        <div class="draft-box">
+          <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">训练节奏</div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13.5px;">
+            <label>总时长
+              <select v-model.number="paceWeeks" class="input" style="width: auto; padding: 5px 8px; margin-left: 4px;" :disabled="paceBusy" @change="onPaceChange">
+                <option v-for="w in 8" :key="w" :value="w">{{ w }} 周</option>
+              </select>
+            </label>
+            <label>训练次数
+              <select v-model.number="paceSessions" class="input" style="width: auto; padding: 5px 8px; margin-left: 4px;" :disabled="paceBusy" @change="onPaceChange">
+                <option v-for="c in 5" :key="c + 1" :value="c + 1">{{ c + 1 }} 次</option>
+              </select>
+            </label>
+            <button
+              v-if="paceRecommended && (paceWeeks !== Math.round(paceRecommended.horizon_days / 7) || paceSessions !== paceRecommended.session_count)"
+              class="btn ghost sm" :disabled="paceBusy" @click="applyRecommendedPace"
+            >
+              用推荐（{{ Math.round(paceRecommended.horizon_days / 7) }} 周 × {{ paceRecommended.session_count }} 次）
+            </button>
+          </div>
+          <div style="font-size: 12px; color: var(--faint); margin-top: 6px;">
+            系统按此节奏安排会话：每次覆盖部分知识点，复习与错题回炉按你的近期表现动态配比；对话里 AI 不再追问这些。
           </div>
         </div>
 

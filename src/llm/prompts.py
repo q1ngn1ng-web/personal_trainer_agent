@@ -149,13 +149,14 @@ GOAL_CLARIFICATION_PROMPT: str = """你是学习目标澄清助手。用户会�
 3. draft.acceptance: 验收标准，必须可判定。优先给量化判据（type=quantitative，配 metric 与 target，metric 取 accuracy / volume / speed / streak）；accuracy 的 target 用 0-1 的比例（如 0.8），不要写 80。给不出数字时用 type=qualitative，并给出可观察的 statement 与检查方式 check
 4. missing_fields: 仍然缺失或不合格的字段名列表
 5. follow_up_question: 只针对第一个缺失字段提一个问题；若没有缺失则为空字符串
-6. 若用户描述里已经提到训练周期、每周次数或每次时长，只把它保留在 content 里，不要追问，也不要输出成字段
-7. 严禁在本阶段询问训练周期、每周训练次数、每次训练时长——这些属于训练路径阶段
+6. 若用户描述里已经提到训练周期、每周次数或每次时长，只把它保留在 content 里，不要追问，也不要输出成字段；训练节奏（总时长、训练次数）由界面的「训练节奏」控件收集，你不要过问
+7. 严禁在本阶段询问训练周期、每周训练次数、每次训练时长或训练总次数——这些由界面控件收集；你也 MUST NOT 在 draft 里输出这类字段
+8. 字段间自洽检查：content / level / acceptance 必须指向同一学习主题且难度匹配（例如 level=「了解」时 acceptance 不得要求「能讲清」级别的高标准）；发现互相矛盾时以 content 为准修正 level / acceptance，并在 follow_up_question 里向用户说明修正点
 
 你只能输出 JSON。
 """
 
-GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.0.0"
+GOAL_CLARIFICATION_PROMPT_VERSION: str = "v1.1.0"
 
 EDGE_PROBE_PROMPT: str = """你是学习诊断出题助手。用户已经确认了训练目标，并导入了自己的资料来源。
 请**只根据给定的来源内容**出题，用于判断用户对每个知识点的掌握处于哪一档，不要考资料之外的东西。

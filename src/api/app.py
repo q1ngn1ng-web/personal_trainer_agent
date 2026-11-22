@@ -352,6 +352,7 @@ def _training_payload(training: Any) -> dict[str, Any]:
         "org_id": data.get("org_id") or 1,
         "owner_user_id": data.get("owner_user_id"),
         "visibility": data.get("visibility") or "private",
+        "schedule_mode": data.get("schedule_mode") or "legacy_v21",
         "baseline_score": data.get("baseline_score") or 0,
         "created_at": data.get("created_at"),
         "last_active_at": data.get("last_active_at"),
@@ -1059,6 +1060,8 @@ def _quiz_result_payload(result: quiz_service.QuizResult) -> dict[str, Any]:
         "passed": result.passed,
         "extra_rounds": result.extra_rounds,
         "failed_items": result.failed_items,
+        # 终测（user-defined-training-plan）：未通过时追加的会话周期信息（None=非终测/未追加）
+        "cycle_appended": result.cycle_appended,
     }
 
 
@@ -1578,7 +1581,17 @@ def _require_user(viewer: Viewer | None) -> Viewer:
 
 
 def _clarify_payload(session: Any) -> dict[str, Any]:
+    from src.services import goal_clarification_service as _gcs
+
     draft = session.draft
+    pace = {
+        "horizon_days": draft.horizon_days or None,
+        "horizon_weeks": round(draft.horizon_days / 7) if draft.horizon_days else None,
+        "session_count": draft.session_count or None,
+        # 推荐值【待校准】：澄清步知识点未知，按等级给建议（user-defined-training-plan 1.3）
+        "recommended": _gcs.recommend_pace(draft.level or ""),
+        "ranges": {"horizon_weeks": [1, 8], "session_count": [2, 6]},
+    }
     return {
         "training_id": session.training_id,
         "topic": session.topic,
@@ -1592,6 +1605,7 @@ def _clarify_payload(session: Any) -> dict[str, Any]:
             "acceptance": draft.acceptance,
             "field_sources": draft.field_sources,
         },
+        "pace": pace,
         "missing_fields": list(session.missing_fields),
         "history": session.history,
         "notes": session.notes,
@@ -1604,6 +1618,13 @@ class WizardStartBody(BaseModel):
 
 class WizardAnswerBody(BaseModel):
     answer: str
+
+
+class WizardPaceBody(BaseModel):
+    """训练节奏（user-defined-training-plan）：UI 控件收集，非对话。"""
+
+    horizon_weeks: int  # 1-8 周（快照落 horizon_days = 周 × 7，范围 7-56）
+    session_count: int  # 2-6 次
 
 
 class SourceAddBody(BaseModel):
@@ -1657,6 +1678,25 @@ def wizard_clarify_answer(
     try:
         session = goal_clarification_service.continue_session(int(training_id), body.answer)
     except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _clarify_payload(session)
+
+
+@app.post("/api/wizard/{training_id}/pace")
+def wizard_set_pace(
+    training_id: int, body: WizardPaceBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """训练节奏（change user-defined-training-plan）：UI 控件收集，user_input 来源落快照。"""
+    _require_user(viewer)
+    from src.services import goal_clarification_service
+
+    try:
+        session = goal_clarification_service.set_pace(
+            int(training_id),
+            int(body.horizon_weeks) * 7,
+            int(body.session_count),
+        )
+    except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return _clarify_payload(session)
 

@@ -10,10 +10,23 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-GOAL_SCHEMA_VERSION: str = "1.0.0"
+GOAL_SCHEMA_VERSION: str = "1.1.0"
 
 #: 目标草案的必填字段
 GOAL_FIELDS: tuple[str, ...] = ("content", "level", "acceptance")
+
+#: 训练节奏字段（change user-defined-training-plan）：UI 控件收集，LLM 不得输出/追问
+PACE_FIELDS: tuple[str, ...] = ("horizon_days", "session_count")
+
+#: 节奏取值范围：总时长 1-56 天（UI 以周计），训练次数 2-6 次
+HORIZON_DAYS_MIN: int = 1
+HORIZON_DAYS_MAX: int = 56
+SESSION_COUNT_MIN: int = 2
+SESSION_COUNT_MAX: int = 6
+
+#: 节奏默认值（UI 卡片预填；无 UI 的流程在建议阶段自动补全，来源标 inferred）
+DEFAULT_HORIZON_DAYS: int = 14
+DEFAULT_SESSION_COUNT: int = 3
 
 #: 追问软限：到达后给出建议值，并提示可直接采用
 CLARIFY_SOFT_LIMIT: int = 2
@@ -224,20 +237,48 @@ def validate_acceptance(value: Any) -> AcceptanceCheck:
     return AcceptanceCheck(False, "invalid", "acceptance criteria is not judgeable")
 
 
+def validate_horizon_days(value: Any) -> int:
+    """总时长校验（天）：1-56；非法抛 ValueError。"""
+    try:
+        days = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("horizon_days 必须是整数天数") from exc
+    if not (HORIZON_DAYS_MIN <= days <= HORIZON_DAYS_MAX):
+        raise ValueError(f"horizon_days 取值范围 {HORIZON_DAYS_MIN}-{HORIZON_DAYS_MAX} 天")
+    return days
+
+
+def validate_session_count(value: Any) -> int:
+    """训练次数校验：2-6；非法抛 ValueError。"""
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("session_count 必须是整数次数") from exc
+    if not (SESSION_COUNT_MIN <= count <= SESSION_COUNT_MAX):
+        raise ValueError(f"session_count 取值范围 {SESSION_COUNT_MIN}-{SESSION_COUNT_MAX} 次")
+    return count
+
+
 @dataclass
 class GoalDraft:
-    """结构化目标草案。三个字段都是值，不是布尔标记。"""
+    """结构化目标草案。字段都是值，不是布尔标记。
+
+    节奏字段（horizon_days / session_count）由 UI 控件收集（user_input），
+    LLM 对话不追问也不输出（提示词第 6/7 条）。
+    """
 
     content: str = ""
     level: str = ""
     acceptance: Any = None
+    horizon_days: int = 0
+    session_count: int = 0
     field_sources: dict[str, str] = field(default_factory=dict)
 
     def value_of(self, name: str) -> Any:
         return getattr(self, name, None)
 
     def missing_fields(self) -> tuple[str, ...]:
-        """返回缺失或不合格的必填字段。"""
+        """返回缺失或不合格的必填字段（含节奏字段）。"""
         missing: list[str] = []
         if not str(self.content or "").strip():
             missing.append("content")
@@ -247,6 +288,10 @@ class GoalDraft:
             missing.append("level")
         if self.acceptance is None or not validate_acceptance(self.acceptance).ok:
             missing.append("acceptance")
+        if self.horizon_days < HORIZON_DAYS_MIN or self.horizon_days > HORIZON_DAYS_MAX:
+            missing.append("horizon_days")
+        if self.session_count < SESSION_COUNT_MIN or self.session_count > SESSION_COUNT_MAX:
+            missing.append("session_count")
         return tuple(missing)
 
     def is_complete(self) -> bool:
@@ -258,6 +303,8 @@ class GoalDraft:
             "content": str(self.content or "").strip(),
             "level": str(self.level or "").strip(),
             "acceptance": self.acceptance,
+            "horizon_days": int(self.horizon_days),
+            "session_count": int(self.session_count),
             "field_sources": dict(self.field_sources),
             "schema_version": GOAL_SCHEMA_VERSION,
             "clarification_rounds": int(clarification_rounds),
@@ -300,10 +347,30 @@ def merge_goal(
     if "content" in locked and locked_sources.get("content") is None:
         field_sources["content"] = GoalFieldSource.USER_INPUT.value
 
+    # 节奏字段只从用户侧（locked）进入：LLM MUST NOT 输出/追问（提示词第 6/7 条）
+    pace_resolved: dict[str, int] = {}
+    for name in PACE_FIELDS:
+        if name in locked and locked[name] not in (None, ""):
+            try:
+                pace_resolved[name] = (
+                    validate_horizon_days(locked[name])
+                    if name == "horizon_days"
+                    else validate_session_count(locked[name])
+                )
+                field_sources[name] = locked_sources.get(name, GoalFieldSource.USER_INPUT.value)
+            except ValueError:
+                pace_resolved[name] = 0
+                field_sources[name] = locked_sources.get(name, GoalFieldSource.USER_INPUT.value)
+        else:
+            pace_resolved[name] = 0
+            field_sources.setdefault(name, GoalFieldSource.INFERRED.value)
+
     return GoalDraft(
         content=resolved.get("content") or "",
         level=resolved.get("level") or "",
         acceptance=resolved.get("acceptance"),
+        horizon_days=pace_resolved["horizon_days"],
+        session_count=pace_resolved["session_count"],
         field_sources=field_sources,
     )
 
@@ -334,13 +401,20 @@ __all__ = [
     "ACCEPTANCE_METRICS",
     "CLARIFY_HARD_LIMIT",
     "CLARIFY_SOFT_LIMIT",
+    "DEFAULT_HORIZON_DAYS",
+    "DEFAULT_SESSION_COUNT",
     "GENERATION_READY_STATUSES",
     "GOAL_FIELDS",
     "GOAL_SCHEMA_VERSION",
+    "PACE_FIELDS",
     "GoalDraft",
     "GoalFieldSource",
+    "HORIZON_DAYS_MAX",
+    "HORIZON_DAYS_MIN",
     "InvalidTransitionError",
     "LEVELS",
+    "SESSION_COUNT_MAX",
+    "SESSION_COUNT_MIN",
     "STATUS_TRANSITIONS",
     "TrainingStatus",
     "AcceptanceCheck",
@@ -354,4 +428,6 @@ __all__ = [
     "normalize_status",
     "suggested_level",
     "validate_acceptance",
+    "validate_horizon_days",
+    "validate_session_count",
 ]

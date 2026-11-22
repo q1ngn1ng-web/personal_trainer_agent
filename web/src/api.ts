@@ -145,6 +145,7 @@ export type TrainingSummary = {
   status: string;
   org_id: number;
   owner_user_id?: number | null;
+  schedule_mode?: string;
   baseline_score: number;
 };
 

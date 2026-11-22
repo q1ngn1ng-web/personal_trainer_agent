@@ -8,6 +8,14 @@ export type ClarifyDraft = {
   field_sources: Record<string, string>;
 };
 
+export type PaceInfo = {
+  horizon_days: number | null;
+  horizon_weeks: number | null;
+  session_count: number | null;
+  recommended: { horizon_days: number; session_count: number };
+  ranges: { horizon_weeks: number[]; session_count: number[] };
+};
+
 export type ClarifySession = {
   training_id: number;
   topic: string;
@@ -16,6 +24,7 @@ export type ClarifySession = {
   rounds: number;
   can_confirm: boolean;
   draft: ClarifyDraft;
+  pace?: PaceInfo;
   missing_fields: string[];
   history: { role: string; content: string }[];
   notes: string[];
@@ -78,6 +87,11 @@ export const wizardApi = {
     }),
   clarifyState: (trainingId: number) =>
     request<ClarifySession>("/api/wizard/" + trainingId + "/clarify"),
+  setPace: (trainingId: number, horizonWeeks: number, sessionCount: number) =>
+    request<ClarifySession>("/api/wizard/" + trainingId + "/pace", {
+      method: "POST",
+      body: JSON.stringify({ horizon_weeks: horizonWeeks, session_count: sessionCount }),
+    }),
   answer: (trainingId: number, answer: string) =>
     request<ClarifySession>("/api/wizard/" + trainingId + "/answer", {
       method: "POST",

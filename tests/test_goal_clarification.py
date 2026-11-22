@@ -117,18 +117,32 @@ class TestAcceptanceValidation(unittest.TestCase):
 class TestGoalDraft(unittest.TestCase):
     def test_missing_fields(self) -> None:
         draft = GoalDraft(content="英语虚拟语气")
-        self.assertEqual(set(draft.missing_fields()), {"level", "acceptance"})
+        # 节奏字段（user-defined-training-plan）与三字段同属必填
+        self.assertEqual(
+            set(draft.missing_fields()), {"level", "acceptance", "horizon_days", "session_count"}
+        )
         self.assertFalse(draft.is_complete())
 
     def test_level_must_be_in_enum(self) -> None:
         draft = GoalDraft(content="x", level="随便学学", acceptance="10 题对 8 题")
         self.assertIn("level", draft.missing_fields())
 
+    def test_pace_out_of_range_is_missing(self) -> None:
+        draft = GoalDraft(
+            content="x", level="会用", acceptance="10 题对 8 题",
+            horizon_days=99, session_count=1,
+        )
+        self.assertEqual(set(draft.missing_fields()), {"horizon_days", "session_count"})
+        draft.horizon_days, draft.session_count = 14, 3
+        self.assertEqual(draft.missing_fields(), ())
+
     def test_complete_draft(self) -> None:
         draft = GoalDraft(
             content="英语虚拟语气",
             level="会用",
             acceptance={"type": "quantitative", "metric": "accuracy", "target": 0.8},
+            horizon_days=14,
+            session_count=3,
         )
         self.assertTrue(draft.is_complete())
         self.assertEqual(draft.missing_fields(), ())

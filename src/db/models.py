@@ -46,6 +46,7 @@ class Training(RowModel):
     org_id: int | None = None
     owner_user_id: int | None = None
     visibility: str = "private"
+    schedule_mode: str = "legacy_v21"
     goal_json: Any = None
     goal_confirmed_at: str | None = None
     clarification_rounds: int = 0

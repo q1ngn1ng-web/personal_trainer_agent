@@ -31,6 +31,10 @@ from src.core.plan import (
     select_today_slots,
     total_minutes,
 )
+from src.core.session_composition import (
+    ItemStat,
+    compose_sessions,
+)
 from zoneinfo import ZoneInfo
 from src.db.sqlite import get_connection
 
@@ -114,7 +118,214 @@ def _planned_minutes(item_type: str | None) -> int:
 def generate_plan(
     training_id: int, *, conn: sqlite3.Connection | None = None
 ) -> PlanSummary:
-    """为训练生成 5 轮训练计划与两周一次的测验任务（幂等）。"""
+    """排期生成入口（幂等）：按训练的 schedule_mode 分发。
+
+    * ``session_ratio``（user-defined-training-plan）：按 goal 快照的节奏参数
+      生成会话制计划（配比控制器组会话，终测把关）；
+    * 其余（默认 ``legacy_v21``）：ADR-0021 固定五轮，存量零迁移。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT schedule_mode, goal_json FROM trainings WHERE id = ?", (training_id,)
+        ).fetchone()
+    finally:
+        if own:
+            active.close()
+    if row is not None and str(row["schedule_mode"] or "") == "session_ratio":
+        horizon_days, session_count = _pace_from_goal(row["goal_json"])
+        return generate_plan_v2(
+            training_id, horizon_days=horizon_days, session_count=session_count, conn=conn
+        )
+    return generate_plan_v21(training_id, conn=conn)
+
+
+def _pace_from_goal(goal_json: Any) -> tuple[int, int]:
+    """从 goal 快照读节奏参数（缺失/非法回落默认值）。"""
+    from src.core.goal import DEFAULT_HORIZON_DAYS, DEFAULT_SESSION_COUNT
+
+    payload: dict[str, Any] = {}
+    if isinstance(goal_json, dict):
+        payload = goal_json
+    elif isinstance(goal_json, str) and goal_json.strip():
+        try:
+            loaded = json.loads(goal_json)
+            if isinstance(loaded, dict):
+                payload = loaded
+        except json.JSONDecodeError:
+            payload = {}
+    try:
+        horizon_days = int(payload.get("horizon_days") or DEFAULT_HORIZON_DAYS)
+    except (TypeError, ValueError):
+        horizon_days = DEFAULT_HORIZON_DAYS
+    try:
+        session_count = int(payload.get("session_count") or DEFAULT_SESSION_COUNT)
+    except (TypeError, ValueError):
+        session_count = DEFAULT_SESSION_COUNT
+    horizon_days = max(1, min(56, horizon_days))
+    session_count = max(2, min(6, session_count))
+    return horizon_days, session_count
+
+
+def _item_stats(active: sqlite3.Connection, training_id: int) -> list[ItemStat]:
+    """训练项的客观表现快照（配比控制器输入）：按当前路径顺序，attempts 聚合。"""
+    stats: dict[str, ItemStat] = {}
+    for index, item in enumerate(_path_items(active, training_id)):
+        key = str(item["item_key"] or "")
+        if not key:
+            continue
+        stats[key] = ItemStat(
+            item_key=key,
+            knowledge_point=str(item.get("knowledge_point") or ""),
+            minutes=_planned_minutes(item.get("item_type")),
+            ordinal=index,
+        )
+    rows = active.execute(
+        "SELECT item_key, result, created_at FROM practice_attempts "
+        "WHERE training_id = ? AND source IN ('llm', 'quiz', 'rule') ORDER BY id ASC",
+        (training_id,),
+    ).fetchall()
+    for row in rows:
+        stat = stats.get(str(row["item_key"]))
+        if stat is None:
+            continue  # 已从路径移除的项不参与分配
+        result = str(row["result"])
+        stat.attempts += 1
+        stat.ever_passed = stat.ever_passed or result == "pass"
+        stat.ever_failed = stat.ever_failed or result == "fail"
+        stat.last_result = result
+        stat.consecutive_passes = stat.consecutive_passes + 1 if result == "pass" else 0
+        stat.last_practiced = str(row["created_at"] or "")
+    return list(stats.values())
+
+
+def _pace_row_values(
+    training_id: int,
+    item_key: str,
+    round_index: int,
+    kind: str,
+    due: date,
+    anchor: date,
+    minutes: int,
+    now: str,
+) -> tuple[Any, ...]:
+    return (
+        training_id,
+        item_key,
+        round_index,
+        kind,
+        due.isoformat(),
+        anchor.isoformat(),
+        due.isoformat(),
+        "planned",
+        minutes,
+        now,
+    )
+
+
+def generate_plan_v2(
+    training_id: int,
+    *,
+    horizon_days: int,
+    session_count: int,
+    conn: sqlite3.Connection | None = None,
+) -> PlanSummary:
+    """会话制排期（user-defined-training-plan 2.3）：N 次会话 + 终测完成门。
+
+    * 分配由配比控制器纯函数给出（并集 100%、占比表、恒稳控制器、五星排序）；
+    * 会话日期在 horizon 内近似均匀摊开；允许提前练（任务动作不设到期门）；
+    * 周期小测（每 14 天）与终测并存；UNIQUE(training_id, item_key, round_index)
+      + INSERT OR IGNORE 保证幂等（重复生成不产生重复项）。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        training = active.execute(
+            "SELECT * FROM trainings WHERE id = ?", (training_id,)
+        ).fetchone()
+        if training is None:
+            raise ValueError(f"training not found: {training_id}")
+
+        anchor = parse_local_date(training["created_at"], local_today())
+        stats = _item_stats(active, training_id)
+        if not stats:
+            return PlanSummary(training_id=training_id, anchor_date=anchor)
+
+        composition = compose_sessions(
+            stats, session_count, anchor=anchor, horizon_days=horizon_days
+        )
+        now = _now()
+        rows: list[tuple[Any, ...]] = []
+        by_key = {stat.item_key: stat for stat in stats}
+        for index, (keys, due) in enumerate(zip(composition.sessions, composition.dates), start=1):
+            for key in keys:
+                stat = by_key[key]
+                rows.append(
+                    _pace_row_values(training_id, key, index, "train", due, anchor, stat.minutes, now)
+                )
+
+        # 周期小测（每 14 天）保留，与终测并存
+        quiz_dates = quiz_due_dates(anchor, max(composition.dates))
+        for quiz_date in quiz_dates:
+            rows.append(
+                _pace_row_values(
+                    training_id, f"quiz-{quiz_date.isoformat()}", 0, "assessment",
+                    quiz_date, anchor, 0, now,
+                )
+            )
+        # 终测：覆盖全部必修项（design D4），排在最后一个会话日
+        final_date = max(composition.dates)
+        rows.append(
+            _pace_row_values(
+                training_id, f"final-{final_date.isoformat()}", len(composition.sessions),
+                "assessment", final_date, anchor, 0, now,
+            )
+        )
+
+        before = active.execute(
+            "SELECT COUNT(*) AS n FROM plan_items WHERE training_id = ?", (training_id,)
+        ).fetchone()["n"]
+        active.executemany(
+            "INSERT OR IGNORE INTO plan_items (training_id, item_key, round_index, kind, due_date, "
+            "anchor_date, original_date, status, planned_minutes, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        after = active.execute(
+            "SELECT COUNT(*) AS n FROM plan_items WHERE training_id = ?", (training_id,)
+        ).fetchone()["n"]
+        active.execute(
+            "UPDATE trainings SET schedule_mode = 'session_ratio' WHERE id = ?", (training_id,)
+        )
+        if own:
+            active.commit()
+
+        logger.info(
+            "generate_plan_v2: training %s -> %d item(s) x %d session(s), horizon %d day(s)",
+            training_id,
+            len(stats),
+            len(composition.sessions),
+            horizon_days,
+        )
+        return PlanSummary(
+            training_id=training_id,
+            anchor_date=anchor,
+            rounds=len(composition.sessions),
+            item_count=len(stats),
+            created=int(after) - int(before),
+            quiz_dates=quiz_dates,
+            last_due_date=final_date,
+        )
+    finally:
+        if own:
+            active.close()
+
+
+def generate_plan_v21(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> PlanSummary:
+    """ADR-0021 固定五轮排期（legacy_v21，存量口径零迁移）。"""
     active = _connect(conn)
     own = conn is None
     try:
@@ -187,7 +398,7 @@ def generate_plan(
             active.commit()
 
         logger.info(
-            "generate_plan: training %s -> %d item(s) x %d round(s), %d quiz day(s)",
+            "generate_plan_v21: training %s -> %d item(s) x %d round(s), %d quiz day(s)",
             training_id,
             len(items),
             len(due_dates),
@@ -719,6 +930,7 @@ def complete_tasks(
     active = _connect(conn)
     own = conn is None
     updated = 0
+    session_done_trigger: tuple[int, int] | None = None
     try:
         for plan_id in plan_ids:
             row = active.execute(
@@ -741,12 +953,25 @@ def complete_tasks(
                         item_key,
                         practiced_on=effective_today,
                     )
+                    # 会话制排期：记下本项所属会话，收尾时检查"刚全部练完"→ 重组后续
+                    session_done_trigger = (training_id, int(row["round_index"]))
             else:
                 # 取消勾选：回到待做，但保留 practiced_at（不抹掉"确实练过"的证据）
                 active.execute(
                     "UPDATE plan_items SET status = 'planned' WHERE id = ?", (int(plan_id),)
                 )
             updated += 1
+        # 会话制排期（user-defined-training-plan D2/D5）：某会话刚全部练完 →
+        # 恒稳控制器按最近会话正确率重组后续未开始的会话（只换清单不挪日期）
+        if session_done_trigger is not None:
+            trigger_training, trigger_session = session_done_trigger
+            row = active.execute(
+                "SELECT schedule_mode FROM trainings WHERE id = ?", (trigger_training,)
+            ).fetchone()
+            if row is not None and str(row["schedule_mode"] or "") == "session_ratio" and _session_fully_practiced(
+                active, trigger_training, trigger_session
+            ):
+                recompose_future_sessions(trigger_training, conn=active)
         if own:
             active.commit()
     finally:
@@ -775,24 +1000,296 @@ def skip_task(
             active.close()
 
 
+def _session_accuracy(
+    active: sqlite3.Connection, training_id: int, session_index: int
+) -> float | None:
+    """最近一次会话的判分正确率（恒稳控制器输入口径）：该会话各训练项最近一次判分结果。"""
+    keys = [
+        str(r["item_key"])
+        for r in active.execute(
+            "SELECT DISTINCT item_key FROM plan_items "
+            "WHERE training_id = ? AND kind = 'train' AND round_index = ?",
+            (training_id, session_index),
+        ).fetchall()
+    ]
+    if not keys:
+        return None
+    placeholders = ", ".join("?" for _ in keys)
+    latest: dict[str, str] = {}
+    for row in active.execute(
+        f"SELECT item_key, result FROM practice_attempts "
+        f"WHERE training_id = ? AND item_key IN ({placeholders}) "
+        f"AND source IN ('llm', 'quiz', 'rule') ORDER BY id ASC",
+        (training_id, *keys),
+    ).fetchall():
+        latest[str(row["item_key"])] = str(row["result"])
+    if not latest:
+        return None
+    passes = sum(1 for result in latest.values() if result == "pass")
+    return passes / len(latest)
+
+
+def _session_fully_practiced(
+    active: sqlite3.Connection, training_id: int, session_index: int
+) -> bool:
+    """该会话是否已全部练过（至少 1 项 practiced 且无 planned 余项）。"""
+    row = active.execute(
+        "SELECT "
+        "SUM(CASE WHEN status = 'planned' THEN 1 ELSE 0 END) AS planned, "
+        "SUM(CASE WHEN status = 'practiced' THEN 1 ELSE 0 END) AS practiced "
+        "FROM plan_items WHERE training_id = ? AND kind = 'train' AND round_index = ?",
+        (training_id, session_index),
+    ).fetchone()
+    return bool(row) and int(row["practiced"] or 0) > 0 and int(row["planned"] or 0) == 0
+
+
+def recompose_future_sessions(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> bool:
+    """按恒稳控制器重组尚未开始（零 practiced）的后续会话（design D2 动态配比）。
+
+    触发：某会话刚全部练完（complete_tasks 钩子）。已练过的会话与覆盖不改动
+    （design D5），未来会话只换清单不挪日期（fixed_dates）。
+    返回是否发生了重组。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        mode = active.execute(
+            "SELECT schedule_mode FROM trainings WHERE id = ?", (training_id,)
+        ).fetchone()
+        if mode is None or str(mode["schedule_mode"] or "") != "session_ratio":
+            return False
+
+        buckets: dict[int, dict[str, int]] = {}
+        for row in active.execute(
+            "SELECT round_index, status, COUNT(*) AS n FROM plan_items "
+            "WHERE training_id = ? AND kind = 'train' GROUP BY round_index, status",
+            (training_id,),
+        ).fetchall():
+            bucket = buckets.setdefault(int(row["round_index"]), {})
+            bucket[str(row["status"])] = int(row["n"])
+        fully_done = [
+            index
+            for index, bucket in buckets.items()
+            if bucket.get("planned", 0) == 0 and bucket.get("practiced", 0) > 0
+        ]
+        if not fully_done:
+            return False
+        last_done = max(fully_done)
+        future = sorted(index for index in buckets if index > last_done)
+        if not future:
+            return False
+
+        from src.core.mastery import MASTERY_STREAK
+
+        stats = _item_stats(active, training_id)
+        by_key = {stat.item_key: stat for stat in stats}
+        if not stats:
+            return False
+
+        # 已覆盖 = 已完成会话（≤ last_done）里出现过的项；未覆盖项由未来会话补齐
+        covered_rows = active.execute(
+            "SELECT DISTINCT item_key FROM plan_items "
+            "WHERE training_id = ? AND kind = 'train' AND round_index <= ?",
+            (training_id, last_done),
+        ).fetchall()
+        covered = {str(r["item_key"]) for r in covered_rows}
+        # 未来会话的既有日期（重组不挪排期）
+        dates: dict[int, date] = {}
+        for row in active.execute(
+            "SELECT DISTINCT round_index, due_date FROM plan_items "
+            "WHERE training_id = ? AND kind = 'train' AND round_index > ?",
+            (training_id, last_done),
+        ).fetchall():
+            dates[int(row["round_index"])] = parse_local_date(row["due_date"])
+        fixed_dates = [dates[index] for index in future if index in dates]
+
+        accuracy = _session_accuracy(active, training_id, last_done)
+        stable = [
+            stat.item_key
+            for stat in stats
+            if stat.consecutive_passes >= MASTERY_STREAK or stat.item_key in covered
+        ]
+        composition = compose_sessions(
+            stats,
+            len(future),
+            anchor=local_today(),
+            horizon_days=max(1, (max(dates.values()) - min(dates.values())).days if dates else 14),
+            accuracy=accuracy,
+            stable_keys=stable,
+            pre_covered=sorted(covered),
+            fixed_dates=fixed_dates or None,
+        )
+
+        for index in future:
+            active.execute(
+                "DELETE FROM plan_items WHERE training_id = ? AND kind = 'train' "
+                "AND round_index = ? AND status = 'planned'",
+                (training_id, index),
+            )
+        now = _now()
+        anchor_row = active.execute(
+            "SELECT created_at FROM trainings WHERE id = ?", (training_id,)
+        ).fetchone()
+        anchor = parse_local_date(anchor_row["created_at"] if anchor_row else None, local_today())
+        rows: list[tuple[Any, ...]] = []
+        for keys, index in zip(composition.sessions, future):
+            due = dates.get(index, local_today())
+            for key in keys:
+                stat = by_key.get(key)
+                minutes = stat.minutes if stat else _planned_minutes(None)
+                rows.append(
+                    _pace_row_values(training_id, key, index, "train", due, anchor, minutes, now)
+                )
+        active.executemany(
+            "INSERT OR IGNORE INTO plan_items (training_id, item_key, round_index, kind, due_date, "
+            "anchor_date, original_date, status, planned_minutes, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        if own:
+            active.commit()
+        logger.info(
+            "recompose_future_sessions: training %s sessions %s recomposed (accuracy=%s)",
+            training_id,
+            future,
+            accuracy,
+        )
+        return True
+    finally:
+        if own:
+            active.close()
+
+
+def append_session_cycle(
+    training_id: int, *, conn: sqlite3.Connection | None = None
+) -> dict[str, Any] | None:
+    """终测未通过 → 追加一轮同规格会话周期（design D4，user-defined-training-plan 2.4）。
+
+    N 次会话重新配比：已稳定项（连续达标 streak）进入已知巩固池；周期小测与
+    终测随新一轮排期继续。仅对 session_ratio 模式生效；返回轮次信息或 None。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        training = active.execute(
+            "SELECT schedule_mode, goal_json, created_at FROM trainings WHERE id = ?",
+            (training_id,),
+        ).fetchone()
+        if training is None or str(training["schedule_mode"] or "") != "session_ratio":
+            return None
+
+        from src.core.mastery import MASTERY_STREAK
+
+        horizon_days, session_count = _pace_from_goal(training["goal_json"])
+        stats = _item_stats(active, training_id)
+        if not stats:
+            return None
+        by_key = {stat.item_key: stat for stat in stats}
+
+        base = active.execute(
+            "SELECT COALESCE(MAX(round_index), 0) AS max_index FROM plan_items "
+            "WHERE training_id = ? AND kind = 'train'",
+            (training_id,),
+        ).fetchone()["max_index"]
+        last_due = active.execute(
+            "SELECT COALESCE(MAX(due_date), ?) AS last_due FROM plan_items "
+            "WHERE training_id = ? AND kind = 'train'",
+            (local_today().isoformat(), training_id),
+        ).fetchone()["last_due"]
+        cycle_anchor = parse_local_date(last_due, local_today())
+
+        # 最近一次会话正确率 → 恒稳控制器；已稳定项进已知巩固池
+        accuracy = _session_accuracy(active, training_id, int(base))
+        stable = [stat.item_key for stat in stats if stat.consecutive_passes >= MASTERY_STREAK]
+        composition = compose_sessions(
+            stats,
+            session_count,
+            anchor=cycle_anchor,
+            horizon_days=horizon_days,
+            accuracy=accuracy,
+            stable_keys=stable,
+        )
+
+        now = _now()
+        rows: list[tuple[Any, ...]] = []
+        for position, (keys, due) in enumerate(zip(composition.sessions, composition.dates), start=1):
+            index = int(base) + position
+            for key in keys:
+                stat = by_key.get(key)
+                rows.append(
+                    _pace_row_values(
+                        training_id, key, index, "train", due, cycle_anchor,
+                        stat.minutes if stat else _planned_minutes(None), now,
+                    )
+                )
+        quiz_dates = quiz_due_dates(cycle_anchor, max(composition.dates))
+        for quiz_date in quiz_dates:
+            rows.append(
+                _pace_row_values(
+                    training_id, f"quiz-{quiz_date.isoformat()}", 0, "assessment",
+                    quiz_date, cycle_anchor, 0, now,
+                )
+            )
+        final_date = max(composition.dates)
+        rows.append(
+            _pace_row_values(
+                training_id, f"final-{final_date.isoformat()}", int(base) + session_count,
+                "assessment", final_date, cycle_anchor, 0, now,
+            )
+        )
+        active.executemany(
+            "INSERT OR IGNORE INTO plan_items (training_id, item_key, round_index, kind, due_date, "
+            "anchor_date, original_date, status, planned_minutes, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        if own:
+            active.commit()
+        logger.info(
+            "append_session_cycle: training %s +%d session(s) from %s, accuracy=%s",
+            training_id,
+            session_count,
+            cycle_anchor,
+            accuracy,
+        )
+        return {
+            "appended_sessions": session_count,
+            "first_due": min(composition.dates).isoformat(),
+            "last_due": final_date.isoformat(),
+            "accuracy": accuracy,
+        }
+    finally:
+        if own:
+            active.close()
+
+
 def drawable_questions(
     training_id: int,
     *,
     today: date | None = None,
     limit: int = 0,
     conn: sqlite3.Connection | None = None,
+    include_cooldown: bool = False,
 ) -> list[dict[str, Any]]:
-    """冷却期已过的题目（可供抽取测验题）。不到 14 天的题目 MUST NOT 出现在这里。"""
+    """冷却期已过的题目（可供抽取测验题）。不到 14 天的题目 MUST NOT 出现在这里。
+
+    ``include_cooldown=True`` 仅供终测（trigger='final'）绕过冷却期——终测要覆盖
+    全部必修项，冷却期不得把近期练过的题挡在门外。
+    """
     effective_today = today or local_today()
     active = _connect(conn)
     own = conn is None
     try:
         sql = (
             "SELECT * FROM question_bank WHERE training_id = ? AND status = 'active' "
-            "AND (cooldown_until IS NULL OR cooldown_until <= ?) "
-            "ORDER BY practiced_count DESC, last_practiced_at"
         )
-        params: list[Any] = [training_id, effective_today.isoformat()]
+        params: list[Any] = [training_id]
+        if not include_cooldown:
+            sql += "AND (cooldown_until IS NULL OR cooldown_until <= ?) "
+            params.append(effective_today.isoformat())
+        sql += "ORDER BY practiced_count DESC, last_practiced_at"
         if limit:
             sql += " LIMIT ?"
             params.append(int(limit))
@@ -838,15 +1335,19 @@ __all__ = [
     "ROUND_OFFSETS",
     "TYPE_MINUTES",
     "PlanSummary",
+    "append_session_cycle",
     "complete_tasks",
     "drawable_questions",
     "ensure_plan",
     "generate_plan",
+    "generate_plan_v2",
+    "generate_plan_v21",
     "has_plan",
     "item_id_for",
     "item_key_for",
     "next_due_date",
     "plan_progress",
+    "recompose_future_sessions",
     "register_in_question_bank",
     "skip_task",
     "today_summary",

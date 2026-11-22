@@ -54,6 +54,7 @@ _TRAINING_FIELDS = {
     "created_at",
     "last_active_at",
     "visibility",
+    "schedule_mode",
 }
 
 
