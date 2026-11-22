@@ -87,6 +87,14 @@ export const wizardApi = {
     }),
   clarifyState: (trainingId: number) =>
     request<ClarifySession>("/api/wizard/" + trainingId + "/clarify"),
+  updateDraftFields: (
+    trainingId: number,
+    body: { content?: string; level?: string; acceptance?: unknown }
+  ) =>
+    request<ClarifySession>("/api/wizard/" + trainingId + "/draft", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   setPace: (trainingId: number, horizonWeeks: number, sessionCount: number) =>
     request<ClarifySession>("/api/wizard/" + trainingId + "/pace", {
       method: "POST",

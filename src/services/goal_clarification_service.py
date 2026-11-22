@@ -151,10 +151,13 @@ def _build_session(
         locked_sources={"content": GoalFieldSource.USER_INPUT.value, **(locked_sources or {})},
     )
 
-    # 用户回答过的字段：LLM 未标 inferred 时视为 user_reply
+    # 用户回答过的字段：来源仍是推断（或缺失）时归为 user_reply；
+    # 用户已显式编辑过的（user_input）不得降级（card 编辑与对话补充不互相覆盖）
     if rounds > 0:
         for name in previous_missing:
-            if merged.value_of(name) not in (None, "") and merged.field_sources.get(name) != GoalFieldSource.INFERRED.value:
+            if merged.value_of(name) not in (None, "") and merged.field_sources.get(
+                name, GoalFieldSource.INFERRED.value
+            ) == GoalFieldSource.INFERRED.value:
                 merged.field_sources[name] = GoalFieldSource.USER_REPLY.value
 
     missing = merged.missing_fields()
@@ -246,8 +249,34 @@ def start_session(topic: str) -> ClarificationSession:
     return session
 
 
+def _user_locked_fields(state: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """从持久化状态里取出「用户显式给过值」的字段（user_input/user_reply 来源）。
+
+    这些字段在重建草案时作为 locked 传入——**LLM 输出 MUST NOT 覆盖用户显式值**
+    （ADR-0004 铁律）。修复：此前 continue_session 只锁 content，用户设过的节奏/
+    等级/验收标准每轮被 LLM 草案冲掉（用户感知为"没改的内容也在变"）。
+    推断（inferred）来源的字段不锁——留给 LLM 在下一轮继续完善。
+    """
+    sources = dict(state.get("field_sources") or {})
+    locked: dict[str, Any] = {}
+    locked_sources: dict[str, str] = {}
+    for name in ("content", "level", "acceptance", "horizon_days", "session_count"):
+        value = state.get(name)
+        if value in (None, "", 0):
+            continue
+        source = sources.get(name, GoalFieldSource.INFERRED.value)
+        if source == GoalFieldSource.INFERRED.value and name not in ("horizon_days", "session_count"):
+            continue
+        locked[name] = value
+        locked_sources[name] = source if source != GoalFieldSource.INFERRED.value else GoalFieldSource.USER_INPUT.value
+    return locked, locked_sources
+
+
 def continue_session(training_id: int, answer: str) -> ClarificationSession:
-    """把用户回答并入会话，进入下一轮澄清。"""
+    """把用户回答并入会话，进入下一轮澄清。
+
+    用户已显式给值的字段（含节奏卡片设置）全程锁定，不随 LLM 草案重置。
+    """
     training = queries.get_training(training_id)
     if training is None:
         raise ValueError(f"training not found: {training_id}")
@@ -262,6 +291,7 @@ def continue_session(training_id: int, answer: str) -> ClarificationSession:
     known = {name: state.get(name) for name in ("content", "level", "acceptance") if state.get(name)}
     result = _call_llm(training.topic, known, history, rounds)
     output = result.get("output_json") or {}
+    locked, locked_sources = _user_locked_fields(state)
     session = _build_session(
         training,
         training.topic,
@@ -270,6 +300,8 @@ def continue_session(training_id: int, answer: str) -> ClarificationSession:
         history=history,
         previous_missing=previous_missing,
         fallback_used=not output,
+        locked=locked,
+        locked_sources=locked_sources,
     )
     _persist(training_id, session)
     return session
@@ -363,6 +395,74 @@ def set_pace(training_id: int, horizon_days: int, session_count: int) -> Clarifi
     return session
 
 
+def update_draft_fields(training_id: int, values: dict[str, Any]) -> ClarificationSession:
+    """用户在澄清卡片直接编辑语义字段（content/level/acceptance）——**不走 LLM**。
+
+    校验通过的字段以 user_input 来源写入草案，重算 missing_fields/can_confirm；
+    任一字段非法整批拒绝。节奏字段仍走 set_pace（含 schedule_mode 切换）。
+    """
+    from src.core.goal import LEVELS, validate_acceptance
+
+    training = queries.get_training(training_id)
+    if training is None:
+        raise ValueError(f"training not found: {training_id}")
+    if str(normalize_status(training.status)) not in (
+        TrainingStatus.DRAFT.value,
+        TrainingStatus.PENDING_CONFIRM.value,
+    ):
+        raise ValueError("澄清会话已结束，不能再修改目标草案")
+
+    updates: dict[str, Any] = {}
+    if values.get("content") is not None:
+        content = str(values["content"]).strip()
+        if len(content) < 4:
+            raise ValueError("学习内容太短——多用一句话完整描述")
+        updates["content"] = content
+    if values.get("level") is not None:
+        level = str(values["level"]).strip()
+        if level not in LEVELS:
+            raise ValueError("目标等级只能是「了解 / 会用 / 熟练 / 能讲清」之一")
+        updates["level"] = level
+    if values.get("acceptance") is not None:
+        check = validate_acceptance(values["acceptance"])
+        if not check.ok:
+            raise ValueError(f"验收标准不可判定：{check.reason}")
+        updates["acceptance"] = check.normalized if check.normalized is not None else values["acceptance"]
+    if not updates:
+        raise ValueError("没有提供任何可更新的字段")
+
+    state = _load_state(training)
+    sources = dict(state.get("field_sources") or {})
+    for name, value in updates.items():
+        state[name] = value
+        sources[name] = GoalFieldSource.USER_INPUT.value
+    state["field_sources"] = sources
+
+    locked = {"content": training.topic}
+    locked_sources = {"content": GoalFieldSource.USER_INPUT.value}
+    user_locked, user_locked_sources = _user_locked_fields(state)
+    # 本次编辑的字段必须以新值锁定（覆盖 state 里的旧值）
+    locked.update(user_locked)
+    locked_sources.update(user_locked_sources)
+    locked.update(updates)
+    for name in updates:
+        locked_sources[name] = GoalFieldSource.USER_INPUT.value
+
+    session = _build_session(
+        training,
+        training.topic,
+        state,
+        rounds=int(training.clarification_rounds or 0),
+        history=list(state.get("history") or []),
+        previous_missing=(),
+        fallback_used=False,
+        locked=locked,
+        locked_sources=locked_sources,
+    )
+    _persist(training_id, session)
+    return session
+
+
 def recommend_pace(level: str, knowledge_point_count: int | None = None) -> dict[str, int]:
     """按等级（与可选的知识点数量）给节奏推荐值【待校准】：澄清步知识点未知，先按等级。"""
     sessions = _LEVEL_SESSION_RECOMMEND.get(str(level or "").strip(), DEFAULT_SESSION_COUNT)
@@ -406,5 +506,6 @@ __all__ = [
     "load_session",
     "recommend_pace",
     "set_pace",
+    "update_draft_fields",
     "start_session",
 ]

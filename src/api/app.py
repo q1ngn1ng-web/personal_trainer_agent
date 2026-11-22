@@ -1897,6 +1897,32 @@ def wizard_set_pace(
     return _clarify_payload(session)
 
 
+class DraftFieldsBody(BaseModel):
+    """澄清草案的字段编辑（用户在卡片上直接改，不走 LLM）。"""
+
+    content: str | None = None
+    level: str | None = None
+    acceptance: Any = None
+
+
+@app.post("/api/wizard/{training_id}/draft")
+def update_draft_fields_view(
+    training_id: int, body: DraftFieldsBody, viewer: Viewer | None = Depends(current_viewer)
+) -> dict[str, Any]:
+    """编辑澄清草案字段：user_input 来源落快照，重算 missing_fields/can_confirm。"""
+    _require_user(viewer)
+    from src.services import goal_clarification_service
+
+    values = body.model_dump(exclude_none=True)
+    if not values:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="没有提供任何字段")
+    try:
+        session = goal_clarification_service.update_draft_fields(int(training_id), values)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _clarify_payload(session)
+
+
 @app.post("/api/wizard/{training_id}/confirm")
 def wizard_clarify_confirm(training_id: int, viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
     _require_user(viewer)

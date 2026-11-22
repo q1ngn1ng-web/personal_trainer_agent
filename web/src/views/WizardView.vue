@@ -26,10 +26,72 @@ async function onPaceChange() {
   paceBusy.value = true;
   try {
     session.value = await wizardApi.setPace(tid.value, paceWeeks.value, paceSessions.value);
+    syncDraftControls();
   } catch (e: any) {
     error.value = e.message || "节奏保存失败";
   } finally {
     paceBusy.value = false;
+  }
+}
+
+// 草案字段编辑（change 澄清编辑）：content/level/acceptance 与节奏一样可直接改
+const draftContent = ref("");
+const draftLevel = ref("");
+const draftAcceptance = ref("");
+const draftBusy = ref(false);
+const LEVEL_OPTIONS = ["了解", "会用", "熟练", "能讲清"];
+
+function formatAcceptance(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  const v = value as any;
+  if (v.type === "quantitative") {
+    const metricLabel: Record<string, string> = {
+      accuracy: "正确率", volume: "完成量", speed: "速度", streak: "连续通过",
+    };
+    const target = v.metric === "accuracy" ? `${Math.round(Number(v.target) * 100)}%` : String(v.target);
+    return `量化判据：${metricLabel[v.metric] || v.metric} 达到 ${target}`;
+  }
+  if (v.type === "qualitative") {
+    return `质性判据：${v.statement || ""}${v.check ? `（检查方式：${v.check}）` : ""}`;
+  }
+  return String(value);
+}
+
+function syncDraftControls() {
+  const draft = session.value?.draft;
+  if (!draft) return;
+  draftContent.value = draft.content || "";
+  draftLevel.value = draft.level || "";
+  draftAcceptance.value = formatAcceptance(draft.acceptance);
+}
+
+async function saveDraftFields() {
+  if (!tid.value || draftBusy.value) return;
+  draftBusy.value = true;
+  try {
+    const body: { content?: string; level?: string; acceptance?: unknown } = {};
+    if (draftContent.value.trim() && draftContent.value.trim() !== (session.value?.draft.content || "")) {
+      body.content = draftContent.value.trim();
+    }
+    if (draftLevel.value && draftLevel.value !== (session.value?.draft.level || "")) {
+      body.level = draftLevel.value;
+    }
+    const rawAcceptance = draftAcceptance.value.trim();
+    if (rawAcceptance && rawAcceptance !== formatAcceptance(session.value?.draft.acceptance)) {
+      body.acceptance = rawAcceptance;
+    }
+    if (!Object.keys(body).length) {
+      toast("草案没有改动");
+      return;
+    }
+    session.value = await wizardApi.updateDraftFields(tid.value, body);
+    syncDraftControls();
+    toast("草案已更新（AI 不会再覆盖你改过的字段）");
+  } catch (e: any) {
+    toast(e.message || "草案保存失败");
+  } finally {
+    draftBusy.value = false;
   }
 }
 
@@ -89,6 +151,7 @@ async function startClarify() {
   try {
     session.value = await wizardApi.start(topic.value.trim());
     syncPaceControls();
+    syncDraftControls();
   } catch (e: any) {
     error.value = e.message || "启动失败";
   } finally {
@@ -104,6 +167,7 @@ async function sendAnswer() {
     session.value = await wizardApi.answer(tid.value, answer.value.trim());
     answer.value = "";
     syncPaceControls();
+    syncDraftControls();
   } catch (e: any) {
     error.value = e.message || "提交失败";
   } finally {
@@ -319,11 +383,30 @@ const STATE_LABEL: Record<string, string> = {
         </div>
 
         <div class="draft-box">
-          <div class="row"><span class="k">学习内容</span><span>{{ session.draft.content || '（待补全）' }}</span></div>
-          <div class="row"><span class="k">目标等级</span><span>{{ session.draft.level || '（待补全）' }}</span></div>
-          <div class="row"><span class="k">验收标准</span><span>{{ String(session.draft.acceptance ?? '') || '（待补全）' }}</span></div>
+          <div class="card-head" style="margin-bottom: 8px;">
+            <div class="card-title" style="font-size: 14px;">目标草案（可直接编辑，AI 不会覆盖你改过的字段）</div>
+            <button class="btn sm" :disabled="draftBusy" @click="saveDraftFields">
+              {{ draftBusy ? '保存中…' : '保存修改' }}
+            </button>
+          </div>
+          <div class="row" style="align-items: center; gap: 8px;">
+            <span class="k" style="flex-shrink: 0;">学习内容</span>
+            <input v-model="draftContent" class="input" style="flex: 1; padding: 5px 9px; font-size: 13.5px;" placeholder="学习内容（待补全）" />
+          </div>
+          <div class="row" style="align-items: center; gap: 8px; margin-top: 6px;">
+            <span class="k" style="flex-shrink: 0;">目标等级</span>
+            <select v-model="draftLevel" class="input" style="width: auto; padding: 5px 9px; font-size: 13.5px;">
+              <option value="">（待定——AI 建议）</option>
+              <option v-for="lv in LEVEL_OPTIONS" :key="lv" :value="lv">{{ lv }}</option>
+            </select>
+          </div>
+          <div style="margin-top: 6px;">
+            <span class="k" style="font-size: 12.5px; color: var(--muted);">验收标准（AI 先给一版，不满意直接改）</span>
+            <textarea v-model="draftAcceptance" class="textarea" style="min-height: 52px; margin-top: 4px; font-size: 13px;"
+              placeholder="怎样才算学会？给一个能验证的说法，比如「10 题对 8 题」或「能不看稿讲清核心内容」"></textarea>
+          </div>
           <div v-if="session.missing_fields.length" style="font-size: 12.5px; color: var(--warn); margin-top: 4px;">
-            还缺：{{ session.missing_fields.map((f) => FIELD_LABEL[f] || f).join('、') }}（追问上限内，也可以直接自己回答）
+            还缺：{{ session.missing_fields.map((f) => FIELD_LABEL[f] || f).join('、') }}（可直接在上面改，也可以继续对话）
           </div>
         </div>
 

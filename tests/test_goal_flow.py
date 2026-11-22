@@ -1,6 +1,7 @@
 """澄清流程的端到端冒烟测试（使用临时库，LLM 不可用时走降级路径）。"""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -148,6 +149,112 @@ class TestGoalClarificationFallback(unittest.TestCase):
         self.assertIn("missing_fields", payload)
         self.assertTrue(payload["follow_up_question"])
         self.assertEqual(payload["confidence"], 0.0)
+
+
+class TestDraftFieldPersistence(unittest.TestCase):
+    """用户显式值跨轮保持（2026-11-22 用户报"没改的内容也在变"的回归钉子）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old_db = os.environ.get("DB_PATH")
+        os.environ["DB_PATH"] = str(Path(self._tmp.name) / "persist.db")
+        init_db()
+
+        from src.llm import client as client_module
+
+        self._client = client_module
+        self._orig = client_module._call_api
+        # LLM stub：每轮都给"全新"草案（覆盖性最强），用户值必须不被冲掉
+        self._calls = 0
+
+        def fake_call_api(messages, *args, **kwargs):  # noqa: ANN001, ANN003
+            self._calls += 1
+            return json.dumps(
+                {
+                    "draft": {
+                        "content": "英语虚拟语气（AI 重写版）",
+                        "level": "熟练",
+                        "acceptance": {"type": "quantitative", "metric": "accuracy", "target": 0.9, "statement": "改错题正确率达标"},
+                    },
+                    "missing_fields": ["horizon_days", "session_count"],
+                    "follow_up_question": "",
+                    "confidence": 0.9,
+                    "field_sources": {"level": "inferred", "acceptance": "inferred"},
+                },
+                ensure_ascii=False,
+            ), 10, 20
+
+        client_module._call_api = fake_call_api
+
+    def tearDown(self) -> None:
+        self._client._call_api = self._orig
+        if self._old_db is None:
+            os.environ.pop("DB_PATH", None)
+        else:
+            os.environ["DB_PATH"] = self._old_db
+        self._tmp.cleanup()
+
+    def test_user_pace_survives_continue_session(self) -> None:
+        """用户设 2 周 3 次后继续对话：节奏绝不能被重置（用户原话场景）。"""
+        from src.services import goal_clarification_service as svc
+
+        session = svc.start_session("我想学英语虚拟语气")
+        svc.set_pace(session.training_id, 14, 3)
+        after = svc.continue_session(session.training_id, "会用，能讲清两种时态的差别")
+        self.assertEqual(after.draft.horizon_days, 14, "2 周必须保持")
+        self.assertEqual(after.draft.session_count, 3, "3 次必须保持")
+        self.assertEqual(
+            after.draft.field_sources.get("horizon_days"), "user_input", "来源仍是用户"
+        )
+
+    def test_user_edited_fields_survive_and_reject_llm(self) -> None:
+        """用户编辑过的 level/acceptance：LLM 每轮给的新值不得覆盖。"""
+        from src.services import goal_clarification_service as svc
+
+        session = svc.start_session("我想学英语虚拟语气")
+        svc.update_draft_fields(
+            session.training_id,
+            {
+                "level": "会用",
+                "acceptance": {"type": "quantitative", "metric": "accuracy", "target": 0.8},
+            },
+        )
+        after = svc.continue_session(session.training_id, "补充：每周三次")
+        self.assertEqual(after.draft.level, "会用", "用户改过的等级不被 LLM 覆盖")
+        self.assertEqual(
+            after.draft.acceptance.get("target"), 0.8, "用户改过的验收不被 LLM 覆盖"
+        )
+        self.assertEqual(
+            after.draft.field_sources.get("level"), "user_input", "来源标记保持 user_input"
+        )
+
+    def test_inferred_fields_still_refine(self) -> None:
+        """推断字段（用户没给过的）仍由 LLM 完善——不把 AI 的手绑死。"""
+        from src.services import goal_clarification_service as svc
+
+        session = svc.start_session("我想学英语虚拟语气")
+        svc.set_pace(session.training_id, 14, 3)
+        after = svc.continue_session(session.training_id, "会用")
+        # level 来源是 inferred（用户没给）→ LLM 草案的新值应该生效
+        self.assertEqual(after.draft.level, "熟练", "未编辑字段仍由 AI 迭代")
+
+    def test_update_draft_fields_validation(self) -> None:
+        from src.services import goal_clarification_service as svc
+
+        session = svc.start_session("我想学英语虚拟语气")
+        with self.assertRaises(ValueError):
+            svc.update_draft_fields(session.training_id, {"level": "随便"})
+        with self.assertRaises(ValueError):
+            svc.update_draft_fields(session.training_id, {"content": "短"})
+        with self.assertRaises(ValueError):
+            svc.update_draft_fields(session.training_id, {"acceptance": "差不多就行"})
+        updated = svc.update_draft_fields(
+            session.training_id,
+            {"content": "英语虚拟语气：if only 与 wish 的用法对比", "level": "能讲清"},
+        )
+        self.assertEqual(updated.draft.level, "能讲清")
+        self.assertIn("if only", updated.draft.content)
+        self.assertEqual(updated.action, "ask", "字段缺失仍会继续追问")
 
 
 if __name__ == "__main__":
