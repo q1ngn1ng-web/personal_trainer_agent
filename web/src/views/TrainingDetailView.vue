@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   api, type AssessmentStart, type AssessmentSubmit, type PathResponse,
   type SessionSummary, type WeeklyReviewResponse,
@@ -10,6 +10,7 @@ import { authState } from "../auth";
 import TaskCard from "../components/TaskCard.vue";
 
 const route = useRoute();
+const router = useRouter();
 const trainingId = Number(route.params.id);
 
 const section = ref<"path" | "plan" | "review" | "sources" | "quiz">("path");
@@ -414,7 +415,15 @@ const typeLabel: Record<string, string> = {
           </p>
         </div>
         <div v-if="planLoading" class="loading-center" style="padding: 18px 0;"><span class="spinner"></span></div>
-        <div v-else-if="!planRounds.length" class="card" style="color: var(--muted);">还没有训练轮次——完成向导后这里会显示五轮计划。</div>
+        <div v-else-if="!planRounds.length" class="card" style="color: var(--muted);">
+          <template v-if="training?.status === 'confirmed'">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span>目标已确认，但训练还没生成完——回到「新建训练」继续（资料来源 → 理解探测 → 激活），进度已自动保存。</span>
+              <button class="btn primary sm" @click="router.push('/wizard')">继续完成创建</button>
+            </div>
+          </template>
+          <template v-else>还没有训练轮次——完成向导后这里会展示训练计划。</template>
+        </div>
         <div v-else>
           <div v-for="round in planRounds" :key="round.plan_id">
             <TaskCard :task="round" :session-mode="isSessionMode" @refresh="loadPlan" />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { wizardApi, type ClarifySession, type ProbePaper, type ProbeGrade } from "../api_wizard";
 import type { SourceSummary } from "../api";
@@ -137,6 +137,26 @@ const activated = ref(false);
 
 const tid = computed(() => session.value?.training_id ?? null);
 
+// 进度持久化（用户报"刷新后回不到创建页"）：tid+step 存 localStorage，挂载时恢复
+const RESUME_KEY = "wizard-in-progress";
+const resumed = ref(false);
+function saveProgress(step: number) {
+  if (tid.value) localStorage.setItem(RESUME_KEY, JSON.stringify({ tid: tid.value, step }));
+}
+function clearProgress() {
+  localStorage.removeItem(RESUME_KEY);
+}
+
+function abandonDraft() {
+  clearProgress();
+  session.value = null;
+  sources.value = [];
+  step.value = 1;
+  topic.value = "";
+  resumed.value = false;
+  toast("已放弃该草稿——重新开始即可（草稿仍可在「我的训练」里删除）");
+}
+
 function toast(msg: string) {
   (window as any).__toast?.(msg);
 }
@@ -152,6 +172,7 @@ async function startClarify() {
     session.value = await wizardApi.start(topic.value.trim());
     syncPaceControls();
     syncDraftControls();
+    saveProgress(1);
   } catch (e: any) {
     error.value = e.message || "启动失败";
   } finally {
@@ -183,6 +204,7 @@ async function confirmGoal() {
     const res = await api.sources(tid.value);
     sources.value = res.sources;
     step.value = 2;
+    saveProgress(2);
   } catch (e: any) {
     error.value = e.message || "确认失败";
   } finally {
@@ -248,6 +270,7 @@ function onFileChange(e: Event) {
 function gotoProbe() {
   step.value = 3;
   error.value = "";
+  saveProgress(3);
 }
 
 // 第 3 步：探测
@@ -295,6 +318,7 @@ async function activateAndPath() {
     await wizardApi.activate(tid.value);
     activated.value = true;
     step.value = 4;
+    clearProgress();
   } catch (e: any) {
     error.value = e.message || "激活失败";
   } finally {
@@ -313,6 +337,42 @@ async function generatePath() {
     busy.value = false;
   }
 }
+
+onMounted(async () => {
+  const saved = localStorage.getItem(RESUME_KEY);
+  if (!saved) return;
+  try {
+    const { tid: savedTid, step: savedStep } = JSON.parse(saved);
+    const ts = await api.trainings();
+    const t = ts.trainings.find((x) => x.id === savedTid);
+    if (!t) {
+      localStorage.removeItem(RESUME_KEY);
+      return;
+    }
+    if (t.status === "draft" || t.status === "pending_confirm") {
+      // 澄清中：恢复会话与草案（含节奏/字段编辑），从第 1 步继续
+      session.value = await wizardApi.clarifyState(savedTid);
+      step.value = 1;
+      syncPaceControls();
+      syncDraftControls();
+      resumed.value = true;
+      toast("已回到上次的创建进度");
+    } else if (t.status === "confirmed") {
+      // 目标已确认：恢复到资料来源步（探测可重新生成）
+      session.value = await wizardApi.clarifyState(savedTid);
+      const res = await api.sources(savedTid);
+      sources.value = res.sources;
+      step.value = Math.max(2, Math.min(savedStep || 2, 2));
+      resumed.value = true;
+      toast("已回到资料来源步骤——完成理解探测即可激活训练");
+    } else {
+      // 已激活/完成：向导使命结束
+      localStorage.removeItem(RESUME_KEY);
+    }
+  } catch (e: any) {
+    localStorage.removeItem(RESUME_KEY);
+  }
+});
 
 const STATE_LABEL: Record<string, string> = {
   mastered: "已掌握（跳过）",
@@ -346,6 +406,9 @@ const STATE_LABEL: Record<string, string> = {
       </template>
 
       <template v-else>
+        <div v-if="resumed" style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+          <button class="btn ghost sm" @click="abandonDraft">放弃这个草稿，重新开始</button>
+        </div>
         <div class="chat-box">
           <div class="chat-line ai">
             <div class="who">AI 教练</div>
