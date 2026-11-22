@@ -180,11 +180,21 @@ def require_viewer(viewer: Viewer | None = Depends(current_viewer)) -> Viewer:
 
 
 def _viewer_payload(viewer: Viewer) -> dict[str, Any]:
+    """会话身份 + 基本信息（名称 / 注册邮箱，个人中心展示用；附加字段）。"""
+    conn = queries.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT email, display_name FROM users WHERE id = ?", (int(viewer.user_id),)
+        ).fetchone()
+    finally:
+        conn.close()
     return {
         "user_id": viewer.user_id,
         "org_id": viewer.org_id,
         "role": viewer.role.value,
         "department_ids": sorted(viewer.department_ids),
+        "email": str(row["email"]) if row is not None and row["email"] else "",
+        "display_name": str(row["display_name"]) if row is not None and row["display_name"] else "",
     }
 
 
