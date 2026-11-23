@@ -205,5 +205,44 @@ class TestPlanItemsMetrics(_EndpointBase):
             self.assertIn("difficulty_tier", i, "difficulty_tier 字段必须在场（值可空）")
 
 
+class TestPlanItemActionsBeyondToday(_EndpointBase):
+    """动作端点不设到期门（端点级钉子）：未到期提前练 / 重新作答都必须能定位。
+
+    修前 _find_task 只扫 today_tasks（到期 ≤ 今天且未完成）——训练 144 未到期
+    填空题 POST answer 404「找不到该训练项」（2026-11-23 日志实锤，plan_id=829）。
+    """
+
+    def _seed_future_item(self) -> int:
+        conn = self._conn()
+        now = datetime.now().isoformat()
+        try:
+            cur = conn.execute(
+                "INSERT INTO plan_items (training_id, item_key, round_index, kind, due_date, "
+                "anchor_date, original_date, status, planned_minutes, question, question_type, created_at) "
+                "VALUES (?, 'future-key', 1, 'train', date('now', '+7 day'), "
+                "date('now'), date('now', '+7 day'), 'planned', 10, 'RDB 的默认策略是___', 'fill', ?)",
+                (self.training_id, now),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def test_future_item_question_and_skip_work(self) -> None:
+        plan_id = self._seed_future_item()
+
+        resp = self.client.post(f"/api/plan-items/{plan_id}/question")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["question"], "RDB 的默认策略是___")
+
+        skip = self.client.post(f"/api/plan-items/{plan_id}/skip", json={"reason": "测试提前练跳过"})
+        self.assertEqual(skip.status_code, 200, skip.text)
+
+    def test_missing_plan_id_still_404(self) -> None:
+        resp = self.client.post("/api/plan-items/999999/question")
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()["detail"], "找不到该训练项")
+
+
 if __name__ == "__main__":
     unittest.main()

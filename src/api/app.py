@@ -864,13 +864,14 @@ def training_sources(
 
 
 def _find_task(plan_id: int) -> Any:
-    for task in plan_service.today_tasks():
-        if task.plan_id == int(plan_id):
-            return task
-    for training in queries.list_trainings():
-        for task in plan_service.today_tasks(training_id=int(training.id)):
-            if task.plan_id == int(plan_id):
-                return task
+    """动作端点按主键直查：不设到期门（未到期提前练 / 已完成重新作答都能定位）。
+
+    修前只在 today_tasks（到期日 ≤ 今天且未完成）里扫——训练 144 的未到期填空题
+    作答 404「找不到该训练项」即此因（2026-11-23 日志 POST /api/plan-items/829/answer）。
+    """
+    task = plan_service.find_task_by_plan_id(int(plan_id))
+    if task is not None:
+        return task
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到该训练项")
 
 

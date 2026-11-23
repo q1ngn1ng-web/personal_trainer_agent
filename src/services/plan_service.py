@@ -507,6 +507,36 @@ def _row_to_task(
     )
 
 
+def find_task_by_plan_id(
+    plan_id: int, *, conn: sqlite3.Connection | None = None
+) -> PlannedTask | None:
+    """按 plan_items 主键直查任务（任务动作端点不设到期门）。
+
+    ``today_tasks`` 只覆盖「到期日 ≤ 今天且未完成」的轮次——提前练（未到期）、
+    重新作答（已 practiced）都会落空。动作端点（question/answer/practice-only/
+    skip/points/explanation）按主键定位，任何到期日与状态都能找到；
+    行不存在（如会话重组后前端拿着旧 plan_id）返回 None，由调用方 404。
+    """
+    active = _connect(conn)
+    own = conn is None
+    try:
+        row = active.execute(
+            "SELECT p.*, t.topic AS training_topic FROM plan_items p "
+            "JOIN trainings t ON t.id = p.training_id WHERE p.id = ?",
+            (int(plan_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_task(
+            row,
+            metadata=_item_metadata(active, int(row["training_id"])),
+            training_topic=str(row["training_topic"] or ""),
+        )
+    finally:
+        if own:
+            active.close()
+
+
 def today_tasks(
     *,
     training_id: int | None = None,
