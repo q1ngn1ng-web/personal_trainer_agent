@@ -55,3 +55,16 @@ openspec：`training-views-rework`（已实施）。
 1. **侧栏悬停行为重做**（`7cc2803`）：上一版按拍板做了"tooltip 延迟 600ms"，用户澄清真实诉求——悬停 rail（含「练」logo）**自动展开**显示文字（73→197px 平滑过渡）、移开 0.5s 收起；头像悬停自动下拉、移开 0.5s 消失（点击开合保留）。Playwright 实测四态全过。
 2. **「找不到该训练项」404**（`603657f`，带教现场排查，接线缺口第七例）：用户答训练 144 的填空题反复 404。排查路径：`journalctl -u trainer-api --since "2 hours ago" | grep 404` → 定位 `POST /api/plan-items/829/answer` → 只读查库 → 829 存在、planned、**due=2026-11-27 未到期** → 读代码：`_find_task` 只扫 `today_tasks`（到期≤今天且未完成），与「动作端点不设到期门、可提前练」的端点文档直接矛盾——用户在新训练路径视图里提前练未到期场次，判分端点找不到任务。修复：`plan_service.find_task_by_plan_id` 主键直查 + `_find_task` 换用（顺带消灭了原来 O(全部训练×today_tasks) 的全表扫描）；可见性校验（403）不变。钉子 +2（未到期 question/skip 200、不存在 id 404），全量 415+30。**教学模式**：用户要求"带我去找、学会看日志调试"——journalctl 过滤 + uvicorn 访问日志定位请求 + 只读 SQLite 验证数据假设 + 读代码对照文档矛盾，全程命令可复用。
 
+## 补记二（同日深夜，填空题判分三连修）
+
+用户实测训练 144 报三问题，四层断裂一次挖齐（判分层→生成层→存储层→渲染层）：
+
+1. **多空填空全对判 0 分**（"内存|单线程" fail 且无得分显示）：`grade_fill` 旧实现把**整条作答与参考答案全文精确比对**——多空作答永远不等于叙述性参考答案，必 0；且 `ensure_question` 对 fill **从不校验也不固化 options 答案键**（只处理 choice），prompt 也从不要求填空给每空答案。修复三层：
+   - 判分：`grade_fill_keyed`（作答按 `|` 分空逐空比对，**得分=命中空占比部分给分**，全中才 pass）+ `fill_blanks_of`（options 即每空答案键：key=空序号、text=标准答案、多写法 `;` 分隔）+ `fill_key_from_reference`（**旧约定保留**：参考答案本身是 `"RDB|AOF"` 形式的 pipe 键时同样是合法键——test_today_flow 钉住，全错位 0 分、对一半 0.5 分）+ `_fill_grade_result` 统一口径（grade_objective 与 grade_question 共用）；**无任何键、参考答案是叙述文、作答含多空 → 返回 None 交回 LLM 语义判分**（不伪造 0 分——与 choice 无键降级 qa 同精神）；无键单空保留旧精确比对（测验 dump.rdb 类干净答案键仍零 LLM）。
+   - 生成：train_question prompt **v1.1.0→v1.2.0**（第 7 条：题干必须 `___` 标空 + options 每空一项答案键，空数=键数）；`ensure_question` fill 分支校验（无空位线、或键数与空数不匹配 → 降级 qa；options 键与 pipe 参考答案两种形态都认）。
+   - 渲染：TaskCard `isFill` 加空数条件（标 fill 但题干无空位线 → 按问答处理，修"请把每个空都填上"死锁）；已完成面板补得分行（`task.last_score`，此前只有即时结果面板有分数）。
+2. **伪填空**（831"填一种即可"被标 fill，提交被"请把每个空都填上"挡死）：题干无空位线照存。存量修复：库先备份 `/tmp/trainer.db.bak-*`，`plan_items` 17 行无 `_{3,}` 标记的 fill→qa（波及训练 50/69/83/84/85/87/144；question_bank 0 行）。
+3. **API 设计答疑（不改代码）**：`/api/plan-items/{id}/question` 与"题目归属计划"——plan_items 本身就是归属表（training_id+item_key+round_index + UNIQUE），题目按 ADR-0021 设计**内联随计划项固化**（同知识点每轮新题、判分锚定当轮要点可复现）；questionId 不是独立资源，POST …/question 语义是"幂等确保该计划项有题"；集合嵌套（/trainings/{id}/plan-items）+ 单项扁平（/plan-items/{id}）是常见 REST 实践。question_bank（测验抽题池）才是"可复用题目资源"的雏形。
+
+钉子：test_grading_service +5（keyed 部分给分/缺空算错/无键多空回退/无键单空保留/坏键拒绝）、test_choice_dispatch +1（伪 fill 降级 qa）并升级 fill 夹具带答案键（零 LLM 契约不变）、prompt 契约 v1.2.0 同步。判分口径变化申报：**旧无键填空的存量 fail（829/830/833）不追溯改写**（attempts 是事实源），用户点"重新作答并判分"即走新口径。
+
