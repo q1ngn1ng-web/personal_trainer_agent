@@ -502,5 +502,97 @@ class TestLegacyIsolation(unittest.TestCase):
         self.assertNotEqual(training.status, "completed")
 
 
+class TestDashboardVisibilityScoping(unittest.TestCase):
+    """仪表盘指标 MUST 按可见集计算（2026-11-23 用户报 q2ng 数字泄漏）。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old_db = os.environ.get("DB_PATH")
+        os.environ["DB_PATH"] = str(Path(self._tmp.name) / "scoping.db")
+        init_db()
+
+        from fastapi.testclient import TestClient
+
+        from src.api.app import app
+
+        self.client = TestClient(__import__("src.api.app", fromlist=["app"]).app)
+        self.client.post(
+            "/api/auth/register",
+            json={"email": "a@example.com", "password": "password8", "display_name": "A"},
+        )
+        # 用户 A 建两个活跃训练
+        for index in range(2):
+            resp = self.client.post("/api/wizard/start", json={"topic": f"A 的训练 {index}（超过四字描述）"})
+            tid_new = resp.json()["training_id"]
+            conn = queries.get_connection()
+            try:
+                conn.execute(
+                    "UPDATE trainings SET owner_user_id = (SELECT id FROM users WHERE email = 'a@example.com'), "
+                    "status = 'active' WHERE id = ?", (tid_new,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        # 用户 B 注册（无训练）
+        self.b = TestClient(__import__("src.api.app", fromlist=["app"]).app)
+        self.b.post(
+            "/api/auth/register",
+            json={"email": "b@example.com", "password": "password8", "display_name": "B"},
+        )
+
+    def tearDown(self) -> None:
+        if self._old_db is None:
+            os.environ.pop("DB_PATH", None)
+        else:
+            os.environ["DB_PATH"] = self._old_db
+        self._tmp.cleanup()
+
+    def test_metrics_scoped_to_visible(self) -> None:
+        resp = self.client.get("/api/dashboard")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["total_all"], 2, "A 只看到自己的 2 个训练（非全系统）")
+        self.assertEqual(body["total_active"], 2)
+        # B 无训练：指标必须为 0，而不是全系统的数字
+        resp_b = self.b.get("/api/dashboard")
+        self.assertEqual(resp_b.json()["total_all"], 0)
+        self.assertEqual(resp_b.json()["total_active"], 0)
+        # 热力也按可见集：A 的作答不应计入 B 的热力
+        conn = queries.get_connection()
+        try:
+            uid = conn.execute("SELECT id FROM users WHERE email = 'a@example.com'").fetchone()[0]
+            tid = conn.execute("SELECT id FROM trainings WHERE owner_user_id = ?", (uid,)).fetchone()[0]
+            conn.execute(
+                "INSERT INTO practice_attempts (training_id, item_key, result, source, created_at) "
+                "VALUES (?, 'k', 'pass', 'llm', '2026-11-23T10:00:00')", (tid,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        acts_a = self.client.get("/api/dashboard").json()["activity"]
+        acts_b = self.b.get("/api/dashboard").json()["activity"]
+        self.assertEqual(sum(a["count"] for a in acts_a), 1, "A 热力计入自己的作答")
+        self.assertEqual(sum(a["count"] for a in acts_b), 0, "B 热力不计入 A 的作答（跨用户泄漏修复）")
+
+    def test_archive_flow_from_detail(self) -> None:
+        """训练完成 → 归档（项目完结）：详情页动作 + 状态展示。"""
+        conn = queries.get_connection()
+        try:
+            tid = conn.execute(
+                "SELECT id FROM trainings WHERE owner_user_id = "
+                "(SELECT id FROM users WHERE email = 'a@example.com') LIMIT 1"
+            ).fetchone()[0]
+            conn.execute("UPDATE trainings SET status = 'completed' WHERE id = ?", (tid,))
+            conn.commit()
+        finally:
+            conn.close()
+        resp = self.client.post(f"/api/trainings/{tid}/archive")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["status"], "archived")
+        # 归档后仍对 owner 可见（数据保留），状态=已归档
+        row = next(t for t in self.client.get("/api/trainings").json()["trainings"] if t["id"] == tid)
+        self.assertEqual(row["status"], "archived")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

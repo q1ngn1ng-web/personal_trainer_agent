@@ -7,6 +7,8 @@ import {
   type SessionSummary, type WeeklyReviewResponse,
   type BlockedSource, type QuizOutcome, type QuizState, type SourceSummary, type TodayTask, type TrainingSummary,
 } from "../api";
+import Button from "../components/ui/Button.vue";
+import Badge from "../components/ui/Badge.vue";
 import { authState } from "../auth";
 import TaskCard from "../components/TaskCard.vue";
 
@@ -345,7 +347,16 @@ const typeLabel: Record<string, string> = {
 <template>
   <div>
     <div class="page-head">
-      <h1 class="page-title">{{ training ? training.topic : '训练详情' }}</h1>
+      <h1 class="page-title">
+        {{ training ? training.topic : '训练详情' }}
+        <Badge v-if="isArchived" tone="info" class="align-middle ml-2">已归档 · 项目完结</Badge>
+      </h1>
+      <div v-if="canArchive" class="mt-2">
+        <Button variant="default" size="sm" :disabled="archiving" @click="archiveTraining">
+          {{ archiving ? '归档中…' : '归档（项目完结）' }}
+        </Button>
+      </div>
+      <p v-if="isArchived" class="page-sub">该训练已归档——数据全部保留、随时可查看；不会再出现在今日待办中。</p>
       <p class="page-sub" v-if="pathData && pathData.path">
         <span v-if="isSessionMode">会话制排期 · 按你设定的节奏分配 · 终测把关完成</span>
         <template v-else>

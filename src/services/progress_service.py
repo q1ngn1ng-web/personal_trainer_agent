@@ -244,10 +244,20 @@ def _knowledge_coverage(training_id: int) -> tuple[int, list[dict[str, Any]]]:
     return item_count, points
 
 
-def compute_home_dashboard(*, today: date | None = None) -> HomeDashboard:
-    """Aggregate the home-page snapshot across all trainings."""
+def compute_home_dashboard(
+    *, today: date | None = None, visible_ids: set[int] | None = None
+) -> HomeDashboard:
+    """Aggregate the home-page snapshot across all trainings.
+
+    ``visible_ids``：当前账号可见的训练集（member-invite/share-gate 之后的可见性口径）——
+    指标（活跃/总数/平均基线）MUST 按可见集计算，否则跨用户数字泄漏
+    （2026-11-23 用户报：q2ng 仪表盘显示全系统 10 个训练，自己的列表却是空的）。
+    ``None`` = 个人版免登录，不限制。
+    """
     ref_today = today or date.today()
     trainings = list_trainings()
+    if visible_ids is not None:
+        trainings = [t for t in trainings if int(t.id) in visible_ids]
     if not trainings:
         return HomeDashboard()
 
@@ -337,11 +347,17 @@ def get_p1_summary(training_id: int) -> P1Summary:
 
 
 
-def daily_activity(days: int = 91, *, conn: Any | None = None) -> list[dict[str, Any]]:
+def daily_activity(
+    days: int = 91,
+    *,
+    training_ids: set[int] | list[int] | None = None,
+    conn: Any | None = None,
+) -> list[dict[str, Any]]:
     """每日作答热力（GitHub 贡献图风格的数据源）：``[{date, count}]``。
 
     口径：``practice_attempts`` 按**服务器本地日期**分组的逐日条数（一题一次判分
     计 1）；返回覆盖近 ``days`` 天的连续区间（零天补 0），按日期升序。
+    ``training_ids``：按可见训练集过滤（修跨用户热力泄漏）；None=不过滤。
     纯 SQL，只读。
     """
     from src.db.sqlite import get_connection as _connect
@@ -349,10 +365,20 @@ def daily_activity(days: int = 91, *, conn: Any | None = None) -> list[dict[str,
     active = conn or _connect()
     own = conn is None
     try:
-        rows = active.execute(
-            "SELECT date(created_at, 'localtime') AS d, COUNT(*) AS n "
-            "FROM practice_attempts GROUP BY d"
-        ).fetchall()
+        if training_ids is not None:
+            # 空集也是有效过滤（= 看不到任何训练 → 热力全 0），不能用 truthy 判断
+            ids = [int(t) for t in training_ids]
+            placeholders = ", ".join("?" for _ in ids)
+            rows = active.execute(
+                f"SELECT date(created_at, 'localtime') AS d, COUNT(*) AS n "
+                f"FROM practice_attempts WHERE training_id IN ({placeholders}) GROUP BY d",
+                ids,
+            ).fetchall()
+        else:
+            rows = active.execute(
+                "SELECT date(created_at, 'localtime') AS d, COUNT(*) AS n "
+                "FROM practice_attempts GROUP BY d"
+            ).fetchall()
     finally:
         if own:
             active.close()

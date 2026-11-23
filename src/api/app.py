@@ -373,8 +373,10 @@ def _load_training_for(viewer: Viewer | None, training_id: int) -> Any:
 @app.get("/api/dashboard")
 def dashboard(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]:
     """跨训练进度仪表盘（第一版 Streamlit 首页的 Vue 迁移）。"""
-    snap = compute_home_dashboard()
     visible_ids = _visible_training_ids(viewer)
+    # 指标+热力 MUST 按可见集计算（修：此前用全系统训练计数——q2ng 看到别人训练的数字）
+    snap = compute_home_dashboard(visible_ids=visible_ids)
+    activity = daily_activity(91, training_ids=visible_ids)
     trainings = []
     for p in snap.trainings:
         if visible_ids is not None and p.training_id not in visible_ids:
@@ -405,8 +407,8 @@ def dashboard(viewer: Viewer | None = Depends(current_viewer)) -> dict[str, Any]
         "total_active": snap.total_active,
         "total_all": snap.total_all,
         "avg_baseline": snap.avg_baseline,
-        # 每日作答热力（近 91 天，零天补 0）：GitHub 贡献图风格
-        "activity": daily_activity(91),
+        # 每日作答热力（近 91 天，零天补 0）：GitHub 贡献图风格——按可见训练集过滤
+        "activity": activity,
     }
 
 
