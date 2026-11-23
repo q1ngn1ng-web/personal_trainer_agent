@@ -70,6 +70,10 @@ export type TodayTask = {
   verdict: string | null;
   status: "planned" | "practiced" | "skipped";
   judging?: boolean;
+  // 训练路径场次视图（plan-items 端点附带）：最近一次判分得分（0-1）与掌握度（0-1）
+  last_score?: number | null;
+  mastery?: number | null;
+  difficulty_tier?: number | null;
 };
 
 export type PointSpec = {
@@ -169,6 +173,7 @@ export type TrainingSummary = {
 
 export type PathItem = {
   id: number;
+  item_key?: string;
   ordinal: number;
   title: string;
   item_type: string | null;
@@ -218,6 +223,8 @@ export type SourceSummary = {
   department_id: number | null;
   enabled: number;
   parse_status: string;
+  chunk_count?: number | null;
+  parse_error?: string | null;
   origin_url: string | null;
   owner_user_id?: number | null;
 };

@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { wizardApi, type ClarifySession, type ProbePaper, type ProbeGrade } from "../api_wizard";
 import type { SourceSummary } from "../api";
 import { api } from "../api";
+import { sourceStatusView, sourcesReady, readinessHint } from "../lib/sourceStatus";
 
 const router = useRouter();
 const step = ref(1);
@@ -267,7 +268,19 @@ function onFileChange(e: Event) {
   srcFile.value = input.files && input.files[0] ? input.files[0] : null;
 }
 
-function gotoProbe() {
+// 资料就绪判定（探测出题的硬前提）：至少一份启用+解析成功+有切片
+const probeReady = computed(() => sourcesReady(sources.value));
+
+async function gotoProbe() {
+  // 进入探测步前重拉资料状态，避免拿着旧状态做门控
+  if (tid.value) {
+    try {
+      const res = await api.sources(tid.value);
+      sources.value = res.sources;
+    } catch {
+      /* 网络失败时按现有列表判定 */
+    }
+  }
   step.value = 3;
   error.value = "";
   saveProgress(3);
@@ -498,7 +511,8 @@ const STATE_LABEL: Record<string, string> = {
     <div v-else-if="step === 2" class="card">
       <div class="card-title" style="margin-bottom: 6px;">给训练配资料</div>
       <p style="color: var(--muted); font-size: 13.5px; margin-bottom: 14px;">
-        出题与探测只依据这些资料（不考资料之外的内容）。三种来源，加多少都行，也可以先跳过。
+        出题与探测只依据这些资料（不考资料之外的内容）。三种来源，加多少都行——
+        <b>至少一份资料解析成功（有切片）才能进入理解探测</b>。
       </p>
 
       <div class="section-switch" style="margin-bottom: 14px;">
@@ -523,19 +537,27 @@ const STATE_LABEL: Record<string, string> = {
       </template>
 
       <div v-if="sources.length" style="margin-top: 18px;">
-        <div style="font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px;">已添加 {{ sources.length }} 份</div>
-        <div v-for="s in sources" :key="s.id" class="list-item" style="cursor: default;">
-          <span>{{ s.type === 'user_paste' ? '粘贴' : s.type === 'web_url' ? '链接' : s.type === 'user_upload' ? '文件' : 'AI 生成' }}</span>
+        <div style="font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px;">
+          已添加 {{ sources.length }} 份 · 每份资料走到哪一步：
+          上传 ✓ → 解析 ✓ → 切片（见各条状态）
+        </div>
+        <div v-for="s in sources" :key="s.id" class="list-item" style="cursor: default; align-items: flex-start;">
+          <span style="margin-top: 2px;">{{ s.type === 'user_paste' ? '粘贴' : s.type === 'web_url' ? '链接' : s.type === 'user_upload' ? '文件' : 'AI 生成' }}</span>
           <div style="flex: 1; min-width: 0;">
             <div style="font-size: 14px;">{{ s.title }}</div>
-            <div style="font-size: 12px; color: var(--faint);">{{ s.type }} · {{ s.parse_status }}</div>
+            <div
+              v-if="sourceStatusView(s).hint"
+              style="font-size: 12px; color: var(--warn); margin-top: 2px;"
+            >{{ sourceStatusView(s).hint }}</div>
           </div>
+          <span class="badge" :class="sourceStatusView(s).cls">{{ sourceStatusView(s).label }}</span>
         </div>
       </div>
 
-      <div style="display: flex; gap: 8px; margin-top: 16px;">
+      <div style="display: flex; gap: 8px; margin-top: 16px; align-items: center; flex-wrap: wrap;">
         <button class="btn ghost sm" @click="step = 1">← 上一步</button>
-        <button class="btn primary" @click="gotoProbe">下一步：理解探测 →</button>
+        <button class="btn primary" :disabled="!probeReady || busy" @click="gotoProbe">下一步：理解探测 →</button>
+        <span v-if="!probeReady" style="font-size: 12.5px; color: var(--warn);">{{ readinessHint(sources) }}</span>
       </div>
     </div>
 
@@ -548,12 +570,19 @@ const STATE_LABEL: Record<string, string> = {
       </p>
 
       <template v-if="!probePaper && !probeSkipped">
-        <button class="btn primary" :disabled="busy" @click="generateProbe">
+        <div v-if="!probeReady" class="error-tip" style="margin-bottom: 12px;">
+          {{ readinessHint(sources) }}
+          <button class="btn ghost sm" style="margin-left: 8px;" @click="step = 2">← 回资料来源</button>
+        </div>
+        <button class="btn primary" :disabled="busy || !probeReady" @click="generateProbe">
           {{ busy ? 'AI 出题中…' : '开始探测出题' }}
         </button>
         <button class="btn text" style="margin-left: 8px;" :disabled="busy" @click="skipProbe">
           跳过探测（按中位难度起步）
         </button>
+        <p v-if="!probeReady" style="font-size: 12.5px; color: var(--faint); margin-top: 8px;">
+          没有资料时跳过探测，训练路径会为空——建议先回上一步补资料。
+        </p>
       </template>
 
       <template v-else-if="probePaper && !probeGraded">

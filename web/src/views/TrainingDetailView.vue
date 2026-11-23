@@ -11,6 +11,7 @@ import Button from "../components/ui/Button.vue";
 import Badge from "../components/ui/Badge.vue";
 import { authState } from "../auth";
 import TaskCard from "../components/TaskCard.vue";
+import { sourceStatusView } from "../lib/sourceStatus";
 
 const route = useRoute();
 const router = useRouter();
@@ -99,6 +100,16 @@ const isSessionMode = computed(() => training.value?.schedule_mode === "session_
 const summary = ref<SessionSummary | null>(null);
 const summaryLoading = ref(false);
 watch(section, async (name) => {
+  if (name === "plan" && !questionListLoaded.value) {
+    questionListLoaded.value = true;
+    try {
+      const res = await api.questionsOverview(trainingId);
+      questionList.value = res.questions;
+    } catch (e: any) {
+      toast(e.message || "题库加载失败");
+    }
+    return;
+  }
   if (name !== "review" || summary.value || summaryLoading.value) return;
   summaryLoading.value = true;
   try {
@@ -114,6 +125,10 @@ const planRounds = ref<TodayTask[]>([]);
 const planLoading = ref(false);
 const regenerating = ref(false);
 const loading = ref(true);
+
+// 题库总览（完整计划 tab 懒加载——此前模板引用了未定义的 questionList 致渲染中断）
+const questionList = ref<Awaited<ReturnType<typeof api.questionsOverview>>["questions"]>([]);
+const questionListLoaded = ref(false);
 
 // 测验流程状态
 const assessment = ref<AssessmentStart | null>(null);
@@ -159,9 +174,36 @@ async function skipReview() {
   }
 }
 
-// 从训练路径条目跳转到完整计划，并自动展开该训练项最早的未完成轮次
-function openItemInPlan(itemKey: string) {
-  section.value = "plan";
+// 归档（项目完结）：数据保留、移出今日待办——ui-redesign 迁移时丢了 script 侧接线
+const archiving = ref(false);
+const isArchived = computed(() => training.value?.status === "archived");
+const canArchive = computed(
+  () =>
+    isOwner.value &&
+    !!training.value &&
+    !isArchived.value &&
+    ["active", "completed"].includes(training.value.status)
+);
+async function archiveTraining() {
+  archiving.value = true;
+  try {
+    await api.archiveTraining(trainingId);
+    toast("已归档——数据全部保留，随时可查看");
+    await load();
+  } catch (e: any) {
+    toast(e.message || "归档失败");
+  } finally {
+    archiving.value = false;
+  }
+}
+
+// 从完整计划（阶段条目）跳到训练路径，自动展开该训练项最早的未完成场次作答
+function practiceItem(itemKey: string) {
+  if (!itemKey) {
+    toast("该条目缺少题目键，无法定位练习");
+    return;
+  }
+  section.value = "path";
   const first =
     planRounds.value.find((r) => r.item_key === itemKey && r.status === "planned") ||
     planRounds.value.find((r) => r.item_key === itemKey);
@@ -185,11 +227,86 @@ async function regeneratePlan() {
   }
 }
 
+// 训练路径 = 按场次（round_index）分组的全部训练：每次训练的聚合分数
+// 由该场各题最近一次判分得分（last_score）平均而来（口径 source∈llm/quiz/rule，后端算好）
+type SessionGroup = {
+  round: number;
+  due: string;
+  items: TodayTask[];
+  planned: number;
+  status: "pending" | "in_progress" | "done";
+  knowledgePoints: number;
+  aggScore: number | null;
+  graded: number;
+};
+
+const sessions = computed<SessionGroup[]>(() => {
+  const groups = new Map<number, TodayTask[]>();
+  for (const r of planRounds.value) {
+    const list = groups.get(r.round_index) || [];
+    list.push(r);
+    groups.set(r.round_index, list);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([round, items]) => {
+      const planned = items.filter((r) => r.status === "planned").length;
+      const gradedItems = items.filter((r) => r.last_score != null);
+      const avg = gradedItems.length
+        ? gradedItems.reduce((sum, r) => sum + (r.last_score as number), 0) / gradedItems.length
+        : null;
+      return {
+        round,
+        due: items.map((r) => r.due_date).sort()[0],
+        items,
+        planned,
+        status:
+          planned === 0
+            ? ("done" as const)
+            : items.some((r) => r.status !== "planned")
+              ? ("in_progress" as const)
+              : ("pending" as const),
+        knowledgePoints: new Set(items.map((r) => r.knowledge_point).filter(Boolean)).size,
+        aggScore: avg == null ? null : Math.round(avg * 100),
+        graded: gradedItems.length,
+      };
+    });
+});
+
+const openSessions = ref<Set<number>>(new Set());
+
+function toggleSession(round: number) {
+  const next = new Set(openSessions.value);
+  if (next.has(round)) next.delete(round);
+  else next.add(round);
+  openSessions.value = next;
+}
+
+// 去练习定位：目标题所在场次自动展开（TaskCard 的 auto-open 负责展开题目并滚动定位）
+watch(openPlanId, (id) => {
+  if (id == null) return;
+  const hit = planRounds.value.find((r) => r.plan_id === id);
+  if (hit && !openSessions.value.has(hit.round_index)) {
+    const next = new Set(openSessions.value);
+    next.add(hit.round_index);
+    openSessions.value = next;
+  }
+});
+
+function togglePlanCard(planId: number) {
+  openPlanId.value = openPlanId.value === planId ? null : planId;
+}
+
 async function loadPlan() {
   planLoading.value = true;
   try {
     const res = await api.planItems(trainingId);
     planRounds.value = res.items;
+    // 默认展开第一个未完成的场次
+    if (!openSessions.value.size && sessions.value.length) {
+      const firstOpen = sessions.value.find((g) => g.status !== "done") || sessions.value[0];
+      openSessions.value = new Set([firstOpen.round]);
+    }
   } catch (e: any) {
     toast(e.message || "计划加载失败");
   } finally {
@@ -381,12 +498,12 @@ const typeLabel: Record<string, string> = {
 
       <div class="section-content">
 
-      <!-- ============ 完整计划（含提前练） ============ -->
+      <!-- ============ 完整计划：阶段全貌 + 整体进度 + 题库总览 ============ -->
       <template v-if="section === 'plan'">
         <div class="card">
           <div class="card-head">
-            <div class="card-title">{{ isSessionMode ? '训练计划（会话制）' : '训练计划（全部轮次）' }}</div>
-            <span class="badge gray">{{ planRounds.length }} 项</span>
+            <div class="card-title">完整计划 · 阶段与知识点全貌</div>
+            <span class="badge gray">{{ planRounds.length }} 项训练</span>
             <button class="btn sm ghost" :disabled="regenerating" @click="regeneratePlan">
               {{ regenerating ? '补齐中…' : '补齐缺失轮次' }}
             </button>
@@ -428,25 +545,57 @@ const typeLabel: Record<string, string> = {
           </div>
           <p style="font-size: 13px; color: var(--muted); margin-top: 6px;">
             {{ isSessionMode
-              ? '按你设定的节奏分次安排：每次覆盖部分知识点，复习与错题回炉按近期表现动态配比；终测通过即完成。未到期的会话可以提前练。'
-              : '按到期日排序。未到期的轮次也可以提前练——展开即可作答。' }}
+              ? '按你设定的节奏分次安排：每次训练贯穿各阶段的知识点，复习与错题回炉按近期表现动态配比；终测通过即完成。'
+              : '训练按轮次排期，覆盖路径的全部知识点。' }}
+            具体作答请到「训练路径」，未到期的场次也可以提前练。
           </p>
         </div>
-        <div v-if="planLoading" class="loading-center" style="padding: 18px 0;"><span class="spinner"></span></div>
-        <div v-else-if="!planRounds.length" class="card" style="color: var(--muted);">
-          <template v-if="training?.status === 'confirmed'">
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <span>目标已确认，但训练还没生成完——回到「新建训练」继续（资料来源 → 理解探测 → 激活），进度已自动保存。</span>
-              <button class="btn primary sm" @click="router.push('/wizard')">继续完成创建</button>
-            </div>
-          </template>
-          <template v-else>还没有训练轮次——完成向导后这里会展示训练计划。</template>
+        <div v-if="pathData && pathData.progress" class="card" style="margin-top: 14px;">
+          <div class="card-head">
+            <div class="card-title">整体进度</div>
+            <span v-if="pathData.progress.mastered" class="badge ok">已达标</span>
+            <span v-else-if="pathData.progress.quiz_passed" class="badge brand">测验已过 · 补齐剩余项</span>
+            <span v-else class="badge gray">进行中</span>
+          </div>
+          <div class="progress" style="margin: 10px 0 8px;"><i :style="{ width: progressPct + '%' }"></i></div>
+          <div style="display: flex; gap: 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap;">
+            <span>达标 <b>{{ pathData.progress.passed_items }}/{{ pathData.progress.total_items }}</b> 项</span>
+            <span>已练 {{ pathData.progress.practiced_items }} 项</span>
+          </div>
+          <p v-if="pathData.progress.reason" style="font-size: 13px; color: var(--faint); margin-top: 8px;">
+            {{ pathData.progress.reason }}
+          </p>
         </div>
-        <div v-else>
-          <div v-for="round in planRounds" :key="round.plan_id">
-            <TaskCard :task="round" :session-mode="isSessionMode" @refresh="loadPlan" />
+
+        <div v-if="pathData && pathData.stages.length">
+          <div v-for="st in pathData.stages" :key="st.id" class="card stage" style="padding: 0; overflow: hidden; margin-top: 14px;">
+            <div class="stage-head" style="padding: 13px 20px 6px;" @click="toggleStage(st.id)">
+              <span class="badge gray">阶段 {{ st.ordinal }}</span>
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 600;">{{ st.title }}</div>
+                <div v-if="st.goal" style="font-size: 12.5px; color: var(--muted);">{{ st.goal }}</div>
+              </div>
+              <span style="color: var(--faint); font-size: 12.5px;">{{ st.estimated_minutes }}′ · {{ st.items.length }} 项</span>
+              <ChevronDown v-if="openStages.has(st.id)" class="ico-svg" style="color: var(--faint);" />
+              <ChevronRight v-else class="ico-svg" style="color: var(--faint);" />
+            </div>
+            <div v-if="openStages.has(st.id)" style="padding: 0 20px 14px;">
+              <div v-for="it in st.items" :key="it.id" class="list-item" @click="practiceItem(it.item_key)">
+                <span :style="{ color: 'var(--' + ((itemStatus[it.status] || itemStatus.planned).cls === 'ok' ? 'ok' : (itemStatus[it.status] || itemStatus.planned).cls === 'info' ? 'info' : 'faint') + ')' }">
+                  {{ (itemStatus[it.status] || itemStatus.planned).ico }}
+                </span>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 14px;">{{ it.title }}</div>
+                  <div v-if="it.knowledge_point" style="font-size: 12px; color: var(--faint);">{{ it.knowledge_point }}</div>
+                </div>
+                <span v-if="it.item_type" class="badge gray">{{ typeLabel[it.item_type] || it.item_type }}</span>
+                <span v-if="it.difficulty_tier" class="badge gray">难度 {{ it.difficulty_tier }}</span>
+                <span class="badge brand">去练习 →</span>
+              </div>
+            </div>
           </div>
         </div>
+        <div v-else class="card empty" style="margin-top: 14px;"><Compass class="ico-svg ico-svg-lg" style="margin: 0 auto 8px;" />路径尚未生成</div>
 
         <div v-if="questionList.length" class="card" style="margin-top: 14px;">
           <div class="card-head">
@@ -465,54 +614,75 @@ const typeLabel: Record<string, string> = {
         </div>
       </template>
 
-      <!-- ============ 路径 ============ -->
+      <!-- ============ 训练路径：按场次组织（第 N 次训练），每场聚合分数 ============ -->
       <template v-if="section === 'path'">
-        <div v-if="pathData && pathData.progress" class="card">
-          <div class="card-head">
-            <div class="card-title">整体进度</div>
-            <span v-if="pathData.progress.mastered" class="badge ok">已达标</span>
-            <span v-else-if="pathData.progress.quiz_passed" class="badge brand">测验已过 · 补齐剩余项</span>
-            <span v-else class="badge gray">进行中</span>
-          </div>
-          <div class="progress" style="margin: 10px 0 8px;"><i :style="{ width: progressPct + '%' }"></i></div>
-          <div style="display: flex; gap: 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap;">
-            <span>达标 <b>{{ pathData.progress.passed_items }}/{{ pathData.progress.total_items }}</b> 项</span>
-            <span>已练 {{ pathData.progress.practiced_items }} 项</span>
-          </div>
-          <p v-if="pathData.progress.reason" style="font-size: 13px; color: var(--faint); margin-top: 8px;">
-            {{ pathData.progress.reason }}
-          </p>
+        <div v-if="planLoading" class="loading-center"><span class="spinner"></span></div>
+        <div v-else-if="!sessions.length" class="card" style="color: var(--muted);">
+          <template v-if="training?.status === 'confirmed'">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span>目标已确认，但训练还没生成完——回到「新建训练」继续（资料来源 → 理解探测 → 激活），进度已自动保存。</span>
+              <button class="btn primary sm" @click="router.push('/wizard')">继续完成创建</button>
+            </div>
+          </template>
+          <template v-else>还没有训练场次——完成向导后这里会展示每次训练的题目与分数。</template>
         </div>
-
-        <div v-if="pathData && pathData.stages.length">
-          <div v-for="st in pathData.stages" :key="st.id" class="card stage" style="padding: 0; overflow: hidden;">
-            <div class="stage-head" style="padding: 13px 20px 6px;" @click="toggleStage(st.id)">
-              <span class="badge gray">阶段 {{ st.ordinal }}</span>
+        <template v-else>
+          <div
+            v-for="g in sessions"
+            :key="g.round"
+            class="card stage"
+            style="padding: 0; overflow: hidden; margin-bottom: 14px;"
+          >
+            <div class="stage-head" style="padding: 13px 20px 6px; align-items: center;" @click="toggleSession(g.round)">
+              <span class="badge gray">{{ isSessionMode ? `第 ${g.round} 次训练` : `第 ${g.round} 轮` }}</span>
               <div style="flex: 1; min-width: 0;">
-                <div style="font-weight: 600;">{{ st.title }}</div>
-                <div v-if="st.goal" style="font-size: 12.5px; color: var(--muted);">{{ st.goal }}</div>
+                <div style="font-size: 12.5px; color: var(--muted);">计划 {{ g.due }} · {{ g.items.length }} 题 · 覆盖 {{ g.knowledgePoints }} 个知识点</div>
               </div>
-              <span style="color: var(--faint); font-size: 12.5px;">{{ st.estimated_minutes }}′ · {{ st.items.length }} 项</span>
-              <ChevronDown v-if="openStages.has(st.id)" class="ico-svg" style="color: var(--faint);" />
+              <span class="badge" :class="g.status === 'done' ? 'ok' : g.status === 'in_progress' ? 'info' : 'gray'">
+                {{ g.status === 'done' ? '已完成' : g.status === 'in_progress' ? '进行中' : '未开始' }}
+              </span>
+              <span
+                v-if="g.graded"
+                class="badge"
+                :class="(g.aggScore ?? 0) >= 80 ? 'ok' : (g.aggScore ?? 0) >= 60 ? 'info' : 'warn'"
+                title="本次训练中各题最近判分得分的平均值"
+              >{{ g.aggScore }} 分</span>
+              <ChevronDown v-if="openSessions.has(g.round)" class="ico-svg" style="color: var(--faint);" />
               <ChevronRight v-else class="ico-svg" style="color: var(--faint);" />
             </div>
-            <div v-if="openStages.has(st.id)" style="padding: 0 20px 14px;">
-              <div v-for="it in st.items" :key="it.id" class="list-item" @click="openItemInPlan(it.item_key)">
-                <span :style="{ color: 'var(--' + ((itemStatus[it.status] || itemStatus.planned).cls === 'ok' ? 'ok' : (itemStatus[it.status] || itemStatus.planned).cls === 'info' ? 'info' : 'faint') + ')' }">
-                  {{ (itemStatus[it.status] || itemStatus.planned).ico }}
-                </span>
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 14px;">{{ it.title }}</div>
-                  <div v-if="it.knowledge_point" style="font-size: 12px; color: var(--faint);">{{ it.knowledge_point }}</div>
+            <div v-if="openSessions.has(g.round)" style="padding: 0 20px 14px;">
+              <div v-for="round in g.items" :key="round.plan_id">
+                <div class="list-item" style="cursor: pointer;" @click="togglePlanCard(round.plan_id)">
+                  <span :style="{ color: 'var(--' + ((itemStatus[round.status] || itemStatus.planned).cls === 'ok' ? 'ok' : (itemStatus[round.status] || itemStatus.planned).cls === 'info' ? 'info' : 'faint') + ')' }">
+                    {{ (itemStatus[round.status] || itemStatus.planned).ico }}
+                  </span>
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 14px;">{{ round.title }}</div>
+                    <div v-if="round.knowledge_point" style="font-size: 12px; color: var(--faint);">{{ round.knowledge_point }}</div>
+                  </div>
+                  <span v-if="round.mastery != null" style="display: inline-flex; align-items: center; gap: 6px;" title="掌握度">
+                    <span style="display: inline-block; width: 52px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden;">
+                      <i style="display: block; height: 100%; background: var(--brand);" :style="{ width: Math.round(round.mastery * 100) + '%' }"></i>
+                    </span>
+                    <span style="font-size: 12px; color: var(--faint);">{{ Math.round(round.mastery * 100) }}%</span>
+                  </span>
+                  <span v-if="round.item_type" class="badge gray">{{ typeLabel[round.item_type] || round.item_type }}</span>
+                  <span v-if="round.difficulty_tier" class="badge gray">难度 {{ round.difficulty_tier }}</span>
+                  <span v-if="round.last_score != null" class="badge" :class="round.last_score >= 0.8 ? 'ok' : round.last_score >= 0.6 ? 'info' : 'warn'">{{ Math.round(round.last_score * 100) }} 分</span>
+                  <span v-if="round.verdict" class="badge" :class="round.verdict === 'pass' ? 'ok' : 'warn'">{{ round.verdict === 'pass' ? '通过' : '未通过' }}</span>
                 </div>
-                <span v-if="it.item_type" class="badge gray">{{ typeLabel[it.item_type] || it.item_type }}</span>
-                <span v-if="it.difficulty_tier" class="badge gray">难度 {{ it.difficulty_tier }}</span>
-                <span class="badge brand">去练习 →</span>
+                <TaskCard
+                  v-if="openPlanId === round.plan_id"
+                  :task="round"
+                  :auto-open="true"
+                  :session-mode="isSessionMode"
+                  style="margin: 8px 0 14px;"
+                  @refresh="loadPlan"
+                />
               </div>
             </div>
           </div>
-        </div>
-        <div v-else class="card empty"><Compass class="ico-svg ico-svg-lg" style="margin: 0 auto 8px;" />路径尚未生成</div>
+        </template>
       </template>
 
       <!-- ============ 周复盘 ============ -->
@@ -619,9 +789,10 @@ const typeLabel: Record<string, string> = {
             </div>
             <span class="badge" :class="s.enabled ? 'ok' : 'gray'">{{ s.enabled ? '启用' : '停用' }}</span>
           </div>
-          <div style="display: flex; gap: 12px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap;">
+          <div style="display: flex; gap: 12px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap; align-items: center;">
             <span>类型 {{ s.type }}</span>
-            <span>解析 {{ s.parse_status }}</span>
+            <span class="badge" :class="sourceStatusView(s).cls">{{ sourceStatusView(s).label }}</span>
+            <span v-if="sourceStatusView(s).hint" style="color: var(--warn);">{{ sourceStatusView(s).hint }}</span>
             <span v-if="s.origin_url" style="max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               {{ s.origin_url }}
             </span>

@@ -454,6 +454,7 @@ def training_path(training_id: int, viewer: Viewer | None = Depends(current_view
         items = [
             {
                 "id": item.id,
+                "item_key": item.item_key,
                 "ordinal": item.ordinal,
                 "title": item.title,
                 "item_type": item.item_type,
@@ -756,6 +757,35 @@ def regenerate_plan(
     return {"ok": True, "count": len(rounds), "created": summary.created}
 
 
+def _plan_progress_metrics(training_id: int) -> tuple[dict[tuple[int, str], float], dict[str, float]]:
+    """训练路径场次视图的展示指标（读时聚合，零新表，事实源仍是 practice_attempts）：
+    每个计划项（item_key × 轮次）最近一次判分得分（0-1）+ 每个知识点的掌握度（0-1）。"""
+    conn = queries.get_connection()
+    try:
+        last_scores: dict[tuple[int, str], float] = {}
+        for row in conn.execute(
+            "SELECT a.item_key AS item_key, a.round_index AS round_index, a.score AS score "
+            "FROM practice_attempts a "
+            "JOIN (SELECT item_key, round_index, MAX(id) AS max_id "
+            "      FROM practice_attempts "
+            "      WHERE training_id = ? AND round_index IS NOT NULL AND score IS NOT NULL "
+            "        AND source IN ('llm','quiz','rule') "
+            "      GROUP BY item_key, round_index) m ON m.max_id = a.id",
+            (int(training_id),),
+        ).fetchall():
+            last_scores[(int(row["round_index"]), str(row["item_key"]))] = float(row["score"])
+        mastery: dict[str, float] = {
+            str(row["item_key"]): float(row["mastery"])
+            for row in conn.execute(
+                "SELECT item_key, mastery FROM learner_knowledge WHERE training_id = ?",
+                (int(training_id),),
+            ).fetchall()
+        }
+        return last_scores, mastery
+    finally:
+        conn.close()
+
+
 @app.get("/api/trainings/{training_id}/plan-items")
 def training_plan_items(
     training_id: int, viewer: Viewer | None = Depends(current_viewer)
@@ -763,13 +793,19 @@ def training_plan_items(
     """完整训练计划：全部训练轮次（含未到期），按到期日排序——支持查看全貌与提前练。
 
     任务动作端点（answer/practice-only/skip）不设到期门，未来轮次可直接提交作答。
+    训练路径场次视图（前端按轮次分组）所需：每项 last_score / mastery。
     """
     _load_training_for(viewer, training_id)
     tasks = plan_service.training_plan_items(int(training_id))
-    return {
-        "count": len(tasks),
-        "items": [_task_payload(task) for task in tasks],
-    }
+    last_scores, mastery = _plan_progress_metrics(int(training_id))
+    items: list[dict[str, Any]] = []
+    for task in tasks:
+        payload = _task_payload(task)
+        payload["last_score"] = last_scores.get((task.round_index, task.item_key))
+        payload["mastery"] = mastery.get(task.item_key)
+        payload["difficulty_tier"] = getattr(task, "difficulty_tier", None)
+        items.append(payload)
+    return {"count": len(items), "items": items}
 
 
 @app.get("/api/trainings/{training_id}/sources")
@@ -788,6 +824,18 @@ def training_sources(
             row for row in rows if can_view_source(viewer, row, shares_by_source.get(int(row["id"])))
         ]
     training = queries.get_training(int(training_id))
+    conn = queries.get_connection()
+    try:
+        chunk_counts: dict[int, int] = {
+            int(r["source_id"]): int(r["n"])
+            for r in conn.execute(
+                "SELECT source_id, COUNT(*) AS n FROM source_chunks "
+                "WHERE source_id IN (%s) GROUP BY source_id"
+                % (", ".join(str(int(row["id"])) for row in rows) or "0")
+            ).fetchall()
+        }
+    finally:
+        conn.close()
     return {
         "training_visibility": getattr(training, "visibility", None) or "private",
         "training_shared_user_ids": queries.list_training_shared_user_ids(int(training_id)),
@@ -800,6 +848,9 @@ def training_sources(
                 "department_id": row.get("department_id"),
                 "enabled": row.get("enabled"),
                 "parse_status": row.get("parse_status"),
+                # 资料就绪可视化：切片数 + 失败原因（探测出题的硬前提是"启用且 ok 且有切片"）
+                "chunk_count": chunk_counts.get(int(row["id"]), 0),
+                "parse_error": row.get("parse_error"),
                 "origin_url": row.get("origin_url"),
                 "imported_at": row.get("imported_at"),
                 "owner_user_id": row.get("owner_user_id"),
