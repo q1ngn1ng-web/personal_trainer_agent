@@ -71,7 +71,7 @@ watch(menuOpen, (open) => {
   }
 });
 
-// 侧栏悬停展开：鼠标进入 rail（含左上「练」logo）即展开显示文字，移开 0.5s 收起
+// 侧栏悬停展开：鼠标进入 rail（含左上「练」logo）即展开显示文字，移开 0.1s 收起
 const railOpen = ref(false);
 let railCloseTimer = 0;
 function openRail() {
@@ -80,7 +80,7 @@ function openRail() {
 }
 function scheduleRailClose() {
   window.clearTimeout(railCloseTimer);
-  railCloseTimer = window.setTimeout(() => (railOpen.value = false), 500);
+  railCloseTimer = window.setTimeout(() => (railOpen.value = false), 100);
 }
 
 onBeforeUnmount(() => {

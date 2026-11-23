@@ -107,6 +107,82 @@ graph TD
 - `core/*` 是纯模块（无 IO），提供枚举、数据类、纯函数。
 - `llm/` 暴露唯一入口 `client.complete()`；其他模块**禁止**直接 `requests.post(...)`。
 
+
+
+
+```mermaid
+flowchart TB
+    B["🖥️ 浏览器<br/>Vue3 SPA · 6 视图 · 零组件库 / 零状态管理<br/>router 守卫 + authState 登录态 + 手写 TS 客户端"]
+
+    subgraph API["① 单进程 FastAPI（src/api/app.py · uvicorn :8501 · 无 nginx）"]
+        direction TB
+        MW["🚪 中间件 enforce_auth<br/>TRAINER_AUTH=1（默认）→ 未登录 401<br/>TRAINER_AUTH=0 → 放行，viewer=None"]
+        R["业务路由 /api/*<br/>· auth：注册 / 登录 / 发码 / 验证<br/>· wizard：四步向导<br/>· today + plan-items：question / answer / skip / explanation<br/>· quiz + assessments：测验闭环<br/>· signals：四失信号<br/>· org / assignments：企业版预留"]
+        STATIC["/assets 静态托管 + SPA fallback<br/>（必须最后注册，否则吞掉 /api/*）"]
+    end
+
+    E401(("401 请先登录"))
+    B -->|"同源 HTTP :8501（Cookie tc_session 自动携带）"| MW
+    B -.->|"非 /api 路径（/、/login、/trainings/3…）"| STATIC
+    MW -->|401| E401
+    MW --> R
+
+    subgraph SVC["② Services 业务编排层（33 个服务，按训练生命周期分组）"]
+        direction LR
+        S1["创建链<br/>goal_clarification<br/>→ source / doc_parser / web_source<br/>→ edge → path → plan"]
+        S2["执行链<br/>answer · grading · attempt<br/>question · quiz"]
+        S3["收尾链<br/>mastery · memory · signal<br/>explanation"]
+        S4["账户组<br/>auth · org · assignment<br/>（后两者无测试·决策后置）"]
+    end
+    R -->|"只调服务层，不直连 DB / LLM"| SVC
+
+    subgraph CORE["③ core/ 纯规则（无 I/O · 可单测）"]
+        C1["goal 状态机 · plan 排期<br/>mastery 达标 · permissions RBAC<br/>source 切片"]
+    end
+    subgraph LLM["④ llm/ LLM 设施"]
+        L1["client.complete() 唯一出口<br/>prompts + schema registry（15 个）<br/>retry 反馈注入 · fallback 静态降级<br/>★ 统一审计：成功 / 降级 / 失败落 llm_calls"]
+    end
+    subgraph DBL["⑤ db/ 持久化"]
+        D1["sqlite：init_db + migrate<br/>queries / models<br/>tables.sql（33 表唯一来源）"]
+    end
+
+    SVC --> CORE
+    SVC --> LLM
+    SVC --> DBL
+
+    DS[("DeepSeek API<br/>temperature 0.2")]
+    STORE[("data/trainer.db<br/>SQLite + FTS5 虚表<br/>workspace/training_*/md")]
+    LLM -->|"HTTPS · JSON（严格 schema 约束）"| DS
+    DBL --> STORE
+```
+
+
+
+业务闭环图
+
+```mermaid
+flowchart TD
+    REG["注册登录"] --> CLR["❶ 澄清目标<br/>≤3 轮追问 · 用户值 > 模型值"]
+    CLR --> SRC["❷ 导入资料<br/>解析 → 切片（heading_path）→ FTS5"]
+    SRC --> PROBE["❸ 探测边缘<br/>≤8 知识点 · 规则判三态<br/>mastered / edge / unreached"]
+    PROBE --> PATH["❹ 生成路径<br/>模型出骨架 · 规则管预算"]
+    PATH --> PLAN["❺ 五轮计划<br/>+1/3/7/15/30 天 · 锚定创建日"]
+    PLAN --> Q["❻ 今日出题<br/>懒生成 · 要点随题固化"]
+    Q --> ANS["❼ 作答判分<br/>模型：逐条四态 hit/partial/wrong/missing<br/>规则：覆盖率×正确性 + 必答否决 + 0.8 阈值<br/>记忆块注入：只给语境，不改口径"]
+    ANS -->|"连续 2 次 pass"| PAS["训练项 passed"]
+    PLAN -.->|"每 14 天插入测验项"| QUIZ["❾ 测验<br/>14 天冷却 + 优先变式题"]
+    QUIZ -->|"未通过 → 追加第 6 轮补练（次日到期）"| Q
+    QUIZ -->|"通过 + 全部训练项 passed"| DONE["🎯 训练 completed"]
+    PAS --> DONE
+
+    ANS --> ATT["practice_attempts 留档<br/>作答原文 + 规则错因（尝试级）"]
+    ATT --> MEM["记忆聚合（纯 SQL）<br/>薄弱点 / 错因分布"]
+    MEM -->|"学习者背景注入判分"| ANS
+    MEM --> EXP["🔍 深度解析<br/>按题对比历史作答 → 改进动作"]
+    SIG["四失信号<br/>太难 / 太简单 / 太多 / 太窄"] --> ARB["规则裁决<br/>客观表现压制主观<br/>同类 2 次才结构性调整 · 每日 ≤1 次"]
+```
+
+
 ---
 
 ## 3. 关键业务流程图

@@ -19,6 +19,7 @@ export type PaceInfo = {
 export type ClarifySession = {
   training_id: number;
   topic: string;
+  title?: string;
   question: string;
   action: "ask" | "suggest" | "close" | string;
   rounds: number;
