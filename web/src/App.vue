@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { authState, bootstrapAuth, logout } from "./auth";
 import {
@@ -36,7 +36,7 @@ watch(
 
 const isLoginPage = computed(() => route.name === "login");
 
-// 头像菜单
+// 头像菜单：点击开合；打开后点外部 / Esc 即关闭
 const menuOpen = ref(false);
 function toggleMenu() {
   menuOpen.value = !menuOpen.value;
@@ -44,6 +44,25 @@ function toggleMenu() {
 function closeMenu() {
   menuOpen.value = false;
 }
+function onDocClick() {
+  menuOpen.value = false;
+}
+function onEsc(e: KeyboardEvent) {
+  if (e.key === "Escape") menuOpen.value = false;
+}
+watch(menuOpen, (open) => {
+  if (open) {
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onEsc);
+  } else {
+    document.removeEventListener("click", onDocClick);
+    document.removeEventListener("keydown", onEsc);
+  }
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onDocClick);
+  document.removeEventListener("keydown", onEsc);
+});
 
 const themePref = ref<ThemePref>(getPref());
 const ThemeIcon = computed(() =>
@@ -111,9 +130,9 @@ async function doLogout() {
             class="absolute left-[-14px] top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-primary"
           />
           <component :is="n.ico" class="h-5 w-5" />
-          <!-- hover tooltip：图标右侧浮层 -->
+          <!-- hover tooltip：图标右侧浮层（悬停 600ms 才浮现，移开立即消失） -->
           <span
-            class="pointer-events-none absolute left-[52px] z-50 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs text-text opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100"
+            class="pointer-events-none absolute left-[52px] z-50 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs text-text opacity-0 shadow-sm transition-opacity delay-0 duration-150 group-hover:delay-[600ms] group-hover:opacity-100"
           >{{ n.label }}</span>
         </router-link>
       </nav>
@@ -127,7 +146,7 @@ async function doLogout() {
         >
           <ThemeIcon class="h-4 w-4" />
           <span
-            class="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs text-text opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100"
+            class="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs text-text opacity-0 shadow-sm transition-opacity delay-0 duration-150 group-hover:delay-[600ms] group-hover:opacity-100"
           >主题：{{ prefLabel[themePref] }}</span>
         </button>
         <button
@@ -136,7 +155,7 @@ async function doLogout() {
         >
           <span class="text-[13px] font-medium">?</span>
           <span
-            class="pointer-events-none absolute left-[46px] z-50 w-64 whitespace-normal rounded-md border border-line bg-surface p-2 text-xs leading-relaxed text-muted opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100"
+            class="pointer-events-none absolute left-[46px] z-50 w-64 whitespace-normal rounded-md border border-line bg-surface p-2 text-xs leading-relaxed text-muted opacity-0 shadow-sm transition-opacity delay-0 duration-150 group-hover:delay-[600ms] group-hover:opacity-100"
           >意图驱动的自适应训练：目标澄清 → 边缘定位 → 路径 → 每日训练 → 测验达标。判分 = 要点清单 × 规则层，可解释。</span>
         </button>
       </div>

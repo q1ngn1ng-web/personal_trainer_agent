@@ -30,6 +30,7 @@ watch(
 const question = ref<string | null>(props.task.question);
 const questionMeta = ref<{ question_type: string | null; options: { key: string; text: string }[] | null; reference_answer?: string } | null>(null);
 const loadingQ = ref(false);
+const qFailed = ref(false);
 const answer = ref(props.task.answer_text || "");
 const selectedKey = ref("");
 const skipOpen = ref(false);
@@ -92,6 +93,7 @@ function expand() {
 async function ensureQuestionLoaded() {
   if (question.value || loadingQ.value) return;
   loadingQ.value = true;
+  qFailed.value = false;
   try {
     const res = await api.question(props.task.plan_id);
     question.value = res.question;
@@ -102,6 +104,7 @@ async function ensureQuestionLoaded() {
       pointsLoaded.value = true;
     }
   } catch (e: any) {
+    qFailed.value = true;
     toast(e.message || "出题失败");
   } finally {
     loadingQ.value = false;
@@ -248,6 +251,18 @@ async function skip() {
       </div>
       <template v-else>
         <div v-if="question" class="whitespace-pre-wrap rounded-md bg-surface-2 p-3 text-[14px] leading-relaxed">{{ question }}</div>
+        <!-- 出题失败兜底：此前失败后只剩一排按钮，页面"看起来空白" -->
+        <div
+          v-else-if="qFailed && !done"
+          class="flex flex-col items-start gap-2 rounded-md border border-warn/30 bg-warn-weak p-3 text-[13.5px] text-text"
+        >
+          <span>题目生成失败——可重试，或先用「只练不判」记录练习。</span>
+          <button
+            class="rounded-md border border-line bg-surface px-3 py-1.5 text-[13px] text-text hover:bg-surface-2 disabled:opacity-50"
+            :disabled="loadingQ"
+            @click="ensureQuestionLoaded"
+          >{{ loadingQ ? '生成中…' : '重试出题' }}</button>
+        </div>
 
         <div v-if="question && !done" class="my-2">
           <button class="text-[13px] text-primary hover:underline" @click="togglePoints">
