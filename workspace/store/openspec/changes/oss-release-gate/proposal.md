@@ -27,6 +27,8 @@
 4. **没有 LICENSE**：根目录无许可证文件——法律上不是开源，他人无权使用、修改、分发。
 5. **公网暴露面**：服务直接监听 `0.0.0.0:8501` 明文 HTTP（无 443、ufw inactive），
    注册接口公开、未见限流；任何注册用户都能触发消耗作者 API 额度的 LLM 调用。
+   同属多用户隔离问题的还有：「用户偏好」三个键存在全局的 `app_settings` 里、
+   没有用户维度——任何一个账号改动，所有用户一起变。
 
 另有三处小缺陷随本 change 一并修（都在演示路径上或影响正确性）：澄清对话历史里
 追问原文是空串、学习者模型衰减与"当天"口径的时区基准、基线出题提示词错别字。
@@ -48,7 +50,7 @@ FastAPI + Vue 的真实启动方式；`.env.example` 与 AGENTS.md 更正失实�
 good first issue 清单、部署样例。
 
 **E. 暴露面护栏（tasks 4.x，条件触发）**：注册开关、限流、每用户每日 LLM 上限、
-通用 500 的可读错误。**视频不放演示地址时，4.x 不阻断发布。**
+通用 500 的可读错误、用户偏好按用户隔离。**视频不放演示地址时，4.x 不阻断发布。**
 
 ### 关键取舍
 
@@ -77,7 +79,8 @@ good first issue 清单、部署样例。
 
 ### Modified Capabilities
 
-- `coach-memory`：会话小结不依赖不存在的列、"当天"口径接回 `local_today()`
+- `coach-memory`：会话小结不依赖不存在的列、"当天"口径接回 `local_today()`、
+  用户偏好按用户隔离
 - `goal-clarification`：追问原文随对话历史留存
 - `learner-memory`：掌握度衰减按真实流逝时间计算
 
@@ -87,7 +90,7 @@ good first issue 清单、部署样例。
   `src/services/learner_service.py`、`src/llm/prompts.py`（仅基线提示词错别字 + 版本号）、
   `tests/test_coach_memory.py` / `tests/test_goal_clarification.py` / `tests/test_learner_model.py`
   / `tests/test_prompt_schema_contract.py`（版本钉）；4.x 另涉 `src/api/app.py`、
-  `src/services/auth_service.py`
+  `src/services/auth_service.py`、`src/services/preferences_service.py`
 - **仓库文件**：`README.md`、`AGENTS.md`、`requirements.txt`、`.env.example`、`.gitignore`、
   `LICENSE`、`.github/`、`deploy/`
 - **数据**：零迁移、零新表

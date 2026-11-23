@@ -3,7 +3,7 @@
 ## 变更摘要
 
 - 登记 openspec change **`oss-release-gate`**（仅提案，未实施；`openspec validate` 与
-  `--strict` 均通过，0/30 任务）。本会话**不写业务代码**，实施移交另一会话。
+  `--strict` 均通过，0/31 任务）。本会话**不写业务代码**，实施移交另一会话。
 - 来源：2026-11-23 应作者要求做的一次项目设计评审——为 B 站系列视频与 GitHub 开源
   评估就绪度，并回应"它没有被设计成 agent、没有记忆机制与上下文管理"的担忧。
 - 任务分四段：1.x 录制前必须绿（3 个演示路径上的缺陷）；2.x 公开仓库前必须绿
@@ -32,6 +32,7 @@
 | 衰减多算时区偏移 | `learner_service.py:37,151` | 东八区下流逝时间多算 8 小时 |
 | "当天"口径分叉 | `session_summary.py:89` 用 SQLite `localtime`，未走 `local_today()` | 部署在 UTC 服务器时跨日错位 |
 | 提示词错别字 | `src/llm/prompts.py:36` "哟怒火" | 已随 7481b45 进主干 |
+| 用户偏好全站共享 | `preferences_service.py` 的读写都不带用户参数，`PUT /api/preferences` 不传当前用户，`answer_service.py:626` 读的也是全局键 | 任一账号改动「连败提示 / 每日时长 / 题型倾向」，所有用户一起变 |
 
 **开源就绪度**
 

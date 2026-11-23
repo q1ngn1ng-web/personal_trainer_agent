@@ -106,6 +106,7 @@
 | 凭据明文：HTTP 下密码与 Cookie 明文传输 | 无 443 | nginx 反代 + 证书；HTTPS 下 `TRAINER_COOKIE_SECURE=1`；uvicorn 只监听 127.0.0.1 |
 | 撞库 / 爆破登录 | 无限流 | 登录、注册、出题、判分、澄清端点按 IP 限流（进程内令牌桶，429 + Retry-After） |
 | 开放注册 | 默认开 | `TRAINER_REGISTER_OPEN` 开关（默认 1 保持现状） |
+| 越权改他人偏好：`preferences_service` 的读写都不带用户参数，`PUT /api/preferences` 不传当前用户，`submit_answer` 判断连败提示时读的也是全局键 | 偏好键无用户维度 | 偏好键带用户标识；读取顺序为「用户键 → 存量全局键 → 默认值」，写入只写用户键（无需迁移存量） |
 
 单进程部署，令牌桶放进程内存即可；多实例时再换 Redis。限流阈值写成环境变量，给默认值。
 

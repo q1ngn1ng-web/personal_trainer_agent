@@ -101,3 +101,8 @@
       便于观众报 bug 时直接贴。
 - [ ] 4.5 部署走 HTTPS：nginx 反代 + 证书，`TRAINER_COOKIE_SECURE=1`，uvicorn 只监听
       127.0.0.1（样例见 3.6）。
+- [ ] 4.6 用户偏好按用户隔离（`src/services/preferences_service.py`、`src/api/app.py` 的
+      `GET/PUT /api/preferences`、`src/services/answer_service.py:626`）：键带用户标识，
+      读取顺序「用户键 → 存量全局键 → 默认值」，写入只写用户键（design D8）。
+      测试：双账号互不改写（A 关掉连败提示后 B 的 `submit_answer` 仍返回 `coach_hint`）；
+      未带用户标识的存量值仍能被读到。
