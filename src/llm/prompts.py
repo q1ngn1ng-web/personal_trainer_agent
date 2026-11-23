@@ -304,13 +304,14 @@ TRAIN_QUESTION_PROMPT: str = """你是训练出题助手。请针对给定知识
 4. **按题型出题**：`question_type` 取 choice / fill / qa 之一。定义类知识点用 fill，辨析类用 choice，理解类用 qa；
 5. **要点清单**：输出 `points`，每条含 `point_id`（p1、p2…）、`text`（这条要点是什么）、`weight`（0.5—5 的相对权重，越关键越大）、`is_required`（是否必答；由你建议，用户可改）。qa 至少 3 条；fill / choice 至少 1 条；
 6. **选择题**：输出 `options`，至少 3 个，每个含 `key`（A/B/C…）、`text`、`is_correct`，且**有且仅有一个** `is_correct` 为 true；干扰项 MUST 取自上面的资料片段，MUST NOT 编造资料里没有的说法；
-7. 只输出 JSON，字段见 schema。
+7. **填空题**：题干用连续三个下划线 `___` 标记每个空（两空就两处 `___`）；同时输出 `options` 作为**每空答案键**——每个空一项：`key` 为空序号（"1"、"2"…），`text` 为该空的标准答案（同空多个可接受写法用分号 `;` 分隔，如 `内存;基于内存`），`is_correct` 一律 true。空数与 options 项数必须一致，否则该题会被降级为问答题；
+8. 只输出 JSON，字段见 schema。
 
 请按以下 JSON Schema 严格输出（不要任何额外文字、不要 markdown 围栏、不要前后缀）:
 {schema}
 """
 
-TRAIN_QUESTION_PROMPT_VERSION: str = "v1.1.0"
+TRAIN_QUESTION_PROMPT_VERSION: str = "v1.2.0"
 
 
 PROMPT_REGISTRY: dict[str, tuple[str, str]] = {

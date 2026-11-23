@@ -52,7 +52,21 @@ def _fill_payload() -> dict:
         "reference_answer": "dump.rdb",
         "difficulty": 1,
         "question_type": "fill",
+        # train_question v1.2.0 契约：fill 的 options = 每空答案键
+        # （key=空序号、text=标准答案，同空多个可接受写法用 ; 分隔）
+        "options": [{"key": "1", "text": "dump.rdb;dump.rdb 文件", "is_correct": True}],
         "points": [{"point_id": "p1", "text": "dump.rdb", "weight": 1, "is_required": True}],
+    }
+
+
+def _fill_no_key_payload() -> dict:
+    """题干没有空位线、options 也没有答案键的"伪填空"（训练 144 实测形态）。"""
+    return {
+        "question": "Redis 的 Hash 类型在元素较少时底层用哪种紧凑结构？（填一种即可）",
+        "reference_answer": "ziplist 或 listpack",
+        "difficulty": 1,
+        "question_type": "fill",
+        "points": [{"point_id": "p1", "text": "答出 ziplist/listpack", "weight": 5, "is_required": True}],
     }
 
 
@@ -213,6 +227,29 @@ class TestFillDispatch(_ObjectiveDispatchBase):
         self.assertTrue(outcome["graded"])
         self.assertEqual(outcome["verdict"], "fail")
         self.assertEqual(outcome["score"], 0.0)
+
+
+class TestFillValidation(_ObjectiveDispatchBase):
+    """fill 生成侧校验（2026-11-23 修复）：没有空位线/答案键的伪填空必须降级 qa。
+
+    修前 ensure_question 对 fill 不校验也不固化 options——题干没有空位的"伪填空"
+    照存（前端渲染不出空、提交被"请把每个空都填上"挡死），判分时无键可比对必 0 分。
+    """
+
+    PAYLOAD_FACTORY = staticmethod(_fill_no_key_payload)
+
+    def test_fill_without_markers_or_key_downgrades_to_qa(self) -> None:
+        answer_service.ensure_question(self.task.plan_id)
+        conn = queries.get_connection()
+        try:
+            row = conn.execute(
+                "SELECT question_type, options FROM plan_items WHERE id = ?",
+                (self.task.plan_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row["question_type"], "qa", "无空位线且无答案键 → 降级 qa 语义判分")
+        self.assertIsNone(row["options"])
 
 
 class TestPlanItemsEndpoint(unittest.TestCase):

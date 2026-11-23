@@ -218,3 +218,81 @@ def test_migrate_adds_grading_columns_to_old_db(tmp_path) -> None:
     assert "question_type" in items
     assert any(name.startswith("question_bank") for name in applied)
     assert again == []
+
+
+# ------------------------------------------------ 多空填空判分（2026-11-23 修复）
+# 训练 144 实锤 bug：多空填空作答 "内存|单线程" 全对被判 fail 0 分——旧 grade_fill
+# 把整条作答与参考答案全文精确比对。钉住新口径：有每空答案键 → 逐空比对部分给分；
+# 无键多空 → 返回 None 交回语义判分（不伪造 0 分）；无键单空 → 保留精确比对。
+
+
+def test_fill_keyed_multi_blank_partial_score() -> None:
+    from src.services.grading_service import fill_blanks_of, grade_fill_keyed
+
+    options = [
+        {"key": "1", "text": "内存;基于内存", "is_correct": True},
+        {"key": "2", "text": "单线程", "is_correct": True},
+    ]
+    blanks = fill_blanks_of(options)
+    assert blanks == [["内存", "基于内存"], ["单线程"]]
+
+    verdict, reason, score = grade_fill_keyed("内存|单线程", blanks=blanks)
+    assert verdict == HIT and score == 1.0
+
+    verdict, reason, score = grade_fill_keyed("内存|多线程", blanks=blanks)
+    assert verdict == WRONG
+    assert score == 0.5, "两空对一空应给部分分"
+    assert "第 2 空" in reason
+
+
+def test_fill_keyed_missing_blank_counts_as_wrong() -> None:
+    from src.services.grading_service import fill_blanks_of, grade_fill_keyed
+
+    blanks = fill_blanks_of([{"key": "1", "text": "内存", "is_correct": True}])
+    verdict, _reason, score = grade_fill_keyed("", blanks=blanks)
+    assert verdict == WRONG and score == 0.0
+
+
+def test_fill_without_key_multi_answer_falls_back_to_semantic() -> None:
+    from src.services.grading_service import grade_objective
+
+    result = grade_objective(
+        "fill", "内存|单线程",
+        expected="第一空应填“内存”（叙述性参考答案）……",
+        correct_key=None,
+        options=None,
+    )
+    assert result is None, "无答案键的多空作答不具备机判条件，必须交回语义链路"
+
+
+def test_fill_without_key_single_answer_keeps_exact_compare() -> None:
+    from src.services.grading_service import grade_objective
+
+    result = grade_objective("fill", "dump.rdb", expected="dump.rdb", correct_key=None, options=None)
+    assert result is not None and result.passed and result.score == 1.0
+
+
+def test_fill_blanks_of_rejects_malformed_keys() -> None:
+    from src.services.grading_service import fill_blanks_of
+
+    assert fill_blanks_of(None) is None
+    # choice 形态的 options（key=A/B/C）不是填空答案键
+    assert fill_blanks_of([{"key": "A", "text": "x", "is_correct": True}]) is None
+    # 某空缺答案 → 整体无键
+    assert fill_blanks_of([{"key": "1", "text": " ", "is_correct": True}]) is None
+
+
+def test_fill_pipe_joined_reference_answer_is_keyed() -> None:
+    """旧约定：参考答案本身是 "RDB|AOF" 形式的 pipe 键 → 逐空机判，顺序错 fail。"""
+    from src.services.grading_service import grade_objective
+
+    ok = grade_objective("fill", "RDB|AOF", expected="RDB|AOF", correct_key=None, options=None)
+    assert ok is not None and ok.passed and ok.score == 1.0
+
+    swapped = grade_objective("fill", "AOF|RDB", expected="RDB|AOF", correct_key=None, options=None)
+    assert swapped is not None
+    assert not swapped.passed, "顺序错必须判不通过"
+    assert swapped.score == 0.0, "两空全部错位，0 分"
+
+    partial = grade_objective("fill", "RDB|不知道", expected="RDB|AOF", correct_key=None, options=None)
+    assert partial is not None and not partial.passed and partial.score == 0.5

@@ -89,7 +89,10 @@ def grade_choice(
 def grade_fill(
     answer: Any, *, expected: Any, accepted: Sequence[Any] | None = None
 ) -> tuple[str, str]:
-    """填空题判分：归一化后精确比对。**不调用任何大模型。**"""
+    """填空题判分（单空、无答案键的兜底口径）：归一化后精确比对。**不调用任何大模型。**
+
+    多空填空走 :func:`grade_fill_keyed`（按每空答案键逐空比对，部分给分）。
+    """
     given = normalize_text(answer)
     if not given:
         return WRONG, "未作答"
@@ -97,6 +100,50 @@ def grade_fill(
     if any(given == normalize_text(item) for item in candidates):
         return HIT, "填空正确"
     return WRONG, "填空错误"
+
+
+def fill_blanks_of(raw: Any) -> list[list[str]] | None:
+    """从 ``options`` 解析填空题的**每空答案键**。
+
+    约定（train_question v1.2.0 起）：每个空一项，``key`` 为空序号（"1"、"2"…），
+    ``text`` 为该空的标准答案——同空多个可接受写法用 ``;`` 分隔（不能用 ``|``，
+    那是作答的分空分隔符）。任一空缺序号或缺答案即整体视为无键（返回 None）：
+    没有答案键的填空不具备机判条件。
+    """
+    options = parse_options(raw)
+    if not options:
+        return None
+    entries: list[tuple[int, list[str]]] = []
+    for entry in options:
+        key = str(entry.get("key") or "").strip()
+        text = str(entry.get("text") or "").strip()
+        if not key.isdigit() or not text:
+            return None
+        variants = [v for v in (p.strip() for p in text.split(";")) if v]
+        if not variants:
+            return None
+        entries.append((int(key), variants))
+    entries.sort(key=lambda kv: kv[0])
+    return [variants for _, variants in entries]
+
+
+def grade_fill_keyed(answer: Any, *, blanks: Sequence[Sequence[str]]) -> tuple[str, str, float]:
+    """带答案键的多空填空判分：作答按 ``|`` 分空，逐空归一化精确比对。
+
+    得分 = 命中空数 / 总空数（**部分给分**），全部命中才算通过。
+    **不调用任何大模型。**
+    """
+    parts = [p for p in str(answer or "").split("|")]
+    results = []
+    for i, variants in enumerate(blanks):
+        given = normalize_text(parts[i]) if i < len(parts) else ""
+        results.append(bool(given) and any(given == normalize_text(v) for v in variants))
+    hit = sum(1 for ok in results if ok)
+    score = hit / len(blanks)
+    if all(results):
+        return HIT, f"{len(blanks)} 空全部答对", score
+    missed = "、".join(f"第 {i + 1} 空" for i, ok in enumerate(results) if not ok)
+    return WRONG, f"{len(blanks)} 空答对 {hit} 空（{missed}与标准答案不符）", score
 
 
 def parse_options(raw: Any) -> list[dict[str, Any]] | None:
@@ -120,6 +167,54 @@ def correct_key_of(raw: Any) -> str | None:
     return correct[0] if len(correct) == 1 else None
 
 
+def fill_key_from_reference(expected: Any) -> list[list[str]] | None:
+    """参考答案本身是竖线拼接的简洁答案键（如 ``"RDB|AOF"``）→ 每空一项的键。
+
+    沿用既有约定（test_today_flow 钉住）：出题模型给出 pipe 拼接的简洁参考答案时
+    本身就是每空标准答案。任一段为空或只有一段则不算键（叙述性参考答案走别的口径）。
+    """
+    if expected is None:
+        return None
+    parts = [p.strip() for p in str(expected).split("|")]
+    if len(parts) < 2 or not all(parts):
+        return None
+    return [[p] for p in parts]
+
+
+def _fill_grade_result(
+    answer: Any, *, expected: Any, options: Any
+) -> "GradeResult | None":
+    """填空判分统一口径（grade_objective 与 grade_question 共用）。
+
+    * 有每空答案键（``options`` 按约定存每空标准答案，v1.2.0 起生成侧固化）→
+      逐空比对，部分给分；
+    * 无 options 键但参考答案本身是 ``"RDB|AOF"`` 形式的 pipe 键 → 同样逐空比对
+      （旧约定，test_today_flow::test_fill_inline_join_grading 钉住）；
+    * 无键且参考答案是叙述文、作答含 ``|``（多空）→ 不具备机判条件，返回 None
+      交回语义判分链路——2026-11-23 修复：此前整串与参考答案全文精确比对，
+      多空填空必 0 分（训练 144 "内存|单线程" 全对被判 fail 的根因）；
+    * 无键单空 → 保留旧口径：与参考答案精确比对（答案本身即标准词时成立）。
+    """
+    blanks = fill_blanks_of(options)
+    if blanks is None:
+        blanks = fill_key_from_reference(expected)
+    if blanks:
+        verdict, reason, score = grade_fill_keyed(answer, blanks=blanks)
+    elif "|" in str(answer or ""):
+        return None
+    else:
+        verdict, reason = grade_fill(answer, expected=expected)
+        score = 1.0 if verdict == HIT else 0.0
+    return GradeResult(
+        question_type="fill",
+        verdict=verdict,
+        passed=verdict == HIT,
+        score=score,
+        graded_by="rule",
+        reason=reason,
+    )
+
+
 def grade_objective(
     question_type: str,
     answer: Any,
@@ -136,19 +231,18 @@ def grade_objective(
     kind = str(question_type or DEFAULT_QUESTION_TYPE)
     if kind == "choice":
         verdict, reason = grade_choice(answer, correct_key=correct_key, options=options)
-    elif kind == "fill":
-        verdict, reason = grade_fill(answer, expected=expected)
-    else:
-        return None
-    passed = verdict == HIT
-    return GradeResult(
-        question_type=kind,
-        verdict=verdict,
-        passed=passed,
-        score=1.0 if passed else 0.0,
-        graded_by="rule",
-        reason=reason,
-    )
+        passed = verdict == HIT
+        return GradeResult(
+            question_type=kind,
+            verdict=verdict,
+            passed=passed,
+            score=1.0 if passed else 0.0,
+            graded_by="rule",
+            reason=reason,
+        )
+    if kind == "fill":
+        return _fill_grade_result(answer, expected=expected, options=options)
+    return None
 
 
 # ---------------------------------------------------------------- 主观题评分
@@ -322,16 +416,7 @@ def grade_question(
         )
 
     if kind == "fill":
-        verdict, reason = grade_fill(answer, expected=expected_answer)
-        passed = verdict == HIT
-        return GradeResult(
-            question_type=kind,
-            verdict=verdict,
-            passed=passed,
-            score=1.0 if passed else 0.0,
-            graded_by="rule",
-            reason=reason,
-        )
+        return _fill_grade_result(answer, expected=expected_answer, options=options)
 
     specs = list(points or ())
     outcome = score_points(specs, point_verdicts or {})
@@ -508,6 +593,9 @@ __all__ = [
     "WRONG",
     "grade_choice",
     "grade_fill",
+    "grade_fill_keyed",
+    "fill_blanks_of",
+    "fill_key_from_reference",
     "grade_question",
     "load_points",
     "normalize_text",

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -23,7 +24,13 @@ from src.db.sqlite import get_connection
 from src.llm.client import DEEPSEEK_MODEL, PROMPT_REGISTRY, complete
 from src.llm.schema import SCHEMA_REGISTRY
 from src.services import attempt_service, grading_cache, memory_service, plan_service
-from src.services.grading_service import correct_key_of, grade_objective, parse_options
+from src.services.grading_service import (
+    correct_key_of,
+    fill_blanks_of,
+    fill_key_from_reference,
+    grade_objective,
+    parse_options,
+)
 
 logger = logging.getLogger("src.services.answer_service")
 
@@ -234,6 +241,28 @@ def ensure_question(
                     normalized_options = parse_options(output.get("options"))
                     if normalized_options and correct_key_of(json.dumps(normalized_options, ensure_ascii=False)):
                         options_json = json.dumps(normalized_options, ensure_ascii=False)
+                    else:
+                        question_type = "qa"
+                elif question_type == "fill":
+                    # 填空题校验（2026-11-23 修复）：题干必须用 ___ 标空，且具备
+                    # 每空答案键——options（key=空序号、text=标准答案，多写法用 ;
+                    # 分隔）或旧约定的 pipe 拼接参考答案（"RDB|AOF"）——空数与键数
+                    # 一致才固化；否则降级 qa——此前 fill 从不校验也不存键，题干
+                    # 没有空位的"伪填空"照存、判分时无键可比对必 0 分。
+                    normalized_options = parse_options(output.get("options"))
+                    blanks = fill_blanks_of(
+                        json.dumps(normalized_options, ensure_ascii=False)
+                        if normalized_options
+                        else None
+                    )
+                    marker_count = len(re.findall(r"_{3,}", question))
+                    pipe_key = fill_key_from_reference(answer)
+                    keyed = (blanks and marker_count == len(blanks)) or (
+                        pipe_key and marker_count == len(pipe_key)
+                    )
+                    if keyed:
+                        if blanks:
+                            options_json = json.dumps(normalized_options, ensure_ascii=False)
                     else:
                         question_type = "qa"
         except Exception as exc:  # 模型不可用不该让用户没题可做（失败审计由客户端写入）

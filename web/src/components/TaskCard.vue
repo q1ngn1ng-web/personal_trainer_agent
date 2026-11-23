@@ -37,7 +37,9 @@ const skipOpen = ref(false);
 const skipReason = ref("");
 const isFill = computed(() => {
   const qtype = (questionMeta.value?.question_type ?? props.task.question_type) || "qa";
-  return qtype === "fill";
+  // 题型标了 fill 但题干没有空位线（历史脏数据）→ 按问答处理，
+  // 否则提交永远被"请把每个空都填上"挡死（训练 144 实测 bug）
+  return qtype === "fill" && fillSegments.value.length > 1;
 });
 const fillSegments = computed(() => (question.value || "").split(/_{3,}/));
 const fillBlankCount = computed(() => Math.max(fillSegments.value.length - 1, 0));
@@ -344,6 +346,7 @@ async function skip() {
           </template>
           <template v-else>
             <b>{{ task.verdict === 'pass' ? '✓ 通过' : '✗ 未通过' }}</b>
+            <span v-if="task.last_score != null" class="ml-2 font-semibold">得分 {{ Math.round(task.last_score * 100) }}</span>
             <div v-if="task.answer_text" class="mt-2 text-[13px] text-muted"><b class="text-text">我的作答</b>：{{ task.answer_text }}</div>
             <div v-if="task.reference_answer" class="mt-2 text-[13px] text-muted"><b class="text-text">参考答案</b>：{{ task.reference_answer }}</div>
           </template>
