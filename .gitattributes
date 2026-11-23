@@ -1,0 +1,5 @@
+
+# 将 frontend 目录下的所有文件标记为非第三方、非生成文件，并强制检测
+web/** linguist-vendored=false
+web/** linguist-generated=false
+web/** linguist-detectable=true
