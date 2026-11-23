@@ -36,13 +36,24 @@ watch(
 
 const isLoginPage = computed(() => route.name === "login");
 
-// 头像菜单：点击开合；打开后点外部 / Esc 即关闭
+// 头像菜单：悬停自动展开（移开 0.5s 收起），点击可开合，点外部 / Esc 即关闭
 const menuOpen = ref(false);
+let menuCloseTimer = 0;
 function toggleMenu() {
+  window.clearTimeout(menuCloseTimer);
   menuOpen.value = !menuOpen.value;
 }
 function closeMenu() {
+  window.clearTimeout(menuCloseTimer);
   menuOpen.value = false;
+}
+function openMenuOnHover() {
+  window.clearTimeout(menuCloseTimer);
+  menuOpen.value = true;
+}
+function scheduleMenuClose() {
+  window.clearTimeout(menuCloseTimer);
+  menuCloseTimer = window.setTimeout(() => (menuOpen.value = false), 500);
 }
 function onDocClick() {
   menuOpen.value = false;
@@ -59,7 +70,22 @@ watch(menuOpen, (open) => {
     document.removeEventListener("keydown", onEsc);
   }
 });
+
+// 侧栏悬停展开：鼠标进入 rail（含左上「练」logo）即展开显示文字，移开 0.5s 收起
+const railOpen = ref(false);
+let railCloseTimer = 0;
+function openRail() {
+  window.clearTimeout(railCloseTimer);
+  railOpen.value = true;
+}
+function scheduleRailClose() {
+  window.clearTimeout(railCloseTimer);
+  railCloseTimer = window.setTimeout(() => (railOpen.value = false), 500);
+}
+
 onBeforeUnmount(() => {
+  window.clearTimeout(menuCloseTimer);
+  window.clearTimeout(railCloseTimer);
   document.removeEventListener("click", onDocClick);
   document.removeEventListener("keydown", onEsc);
 });
@@ -108,55 +134,63 @@ async function doLogout() {
   </div>
   <router-view v-else-if="isLoginPage" />
   <div v-else class="flex min-h-screen bg-bg text-text">
-    <!-- 72px 图标 rail（design D4） -->
-    <aside class="sticky top-0 flex h-screen w-[72px] flex-shrink-0 flex-col items-center border-r border-line bg-surface">
+    <!-- 图标 rail：悬停自动展开显示文字（移开 0.5s 收起），design D4 演进 -->
+    <aside
+      class="sticky top-0 flex h-screen flex-shrink-0 flex-col border-r border-line bg-surface transition-[width] duration-200 ease-in-out"
+      :class="railOpen ? 'w-[196px] items-stretch' : 'w-[72px] items-center'"
+      @mouseenter="openRail"
+      @mouseleave="scheduleRailClose"
+    >
       <router-link
         :to="{ name: 'today' }"
-        class="mt-3 mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-[15px] font-semibold text-white"
+        class="flex items-center gap-2.5"
+        :class="railOpen ? 'px-5 pt-4 pb-1' : 'mt-3 mb-2'"
         title="训练教练 · 回首页"
-      >练</router-link>
+      >
+        <span class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary text-[15px] font-semibold text-white">练</span>
+        <span v-if="railOpen" class="text-sm font-semibold text-text">训练教练</span>
+      </router-link>
 
-      <nav class="flex flex-col items-center gap-1">
+      <nav class="flex flex-col gap-1 pt-2" :class="railOpen ? 'px-3' : 'items-center'">
         <router-link
           v-for="n in navs"
           :key="n.name"
           :to="{ name: n.name }"
-          class="group relative flex h-11 w-11 items-center justify-center rounded-lg transition-colors"
-          :class="route.name === n.name ? 'text-primary' : 'text-faint hover:bg-surface-2 hover:text-text'"
+          class="relative flex h-11 items-center rounded-lg transition-colors"
+          :class="cn(
+            railOpen ? 'w-full justify-start gap-3 px-3' : 'w-11 justify-center',
+            route.name === n.name ? 'text-primary' : 'text-faint hover:bg-surface-2 hover:text-text',
+          )"
         >
           <!-- active 左缘 2px 青绿指示条 -->
           <span
             v-if="route.name === n.name"
-            class="absolute left-[-14px] top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-primary"
+            class="absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-primary"
+            :class="railOpen ? 'left-[-11px]' : 'left-[-14px]'"
           />
-          <component :is="n.ico" class="h-5 w-5" />
-          <!-- hover tooltip：图标右侧浮层（悬停 600ms 才浮现，移开立即消失） -->
-          <span
-            class="pointer-events-none absolute left-[52px] z-50 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs text-text opacity-0 shadow-sm transition-opacity delay-0 duration-150 group-hover:delay-[600ms] group-hover:opacity-100"
-          >{{ n.label }}</span>
+          <component :is="n.ico" class="h-5 w-5 flex-shrink-0" />
+          <span v-if="railOpen" class="truncate text-sm">{{ n.label }}</span>
         </router-link>
       </nav>
 
-      <!-- rail 底部：主题三态 + 关于 mini（原侧栏关于区块压缩） -->
-      <div class="mt-auto mb-3 flex flex-col items-center gap-1">
+      <!-- rail 底部：主题三态 + 关于 mini -->
+      <div class="mt-auto flex flex-col gap-1" :class="railOpen ? 'px-3 pb-4' : 'mb-3 items-center'">
         <button
-          class="group relative flex h-9 w-9 items-center justify-center rounded-lg text-faint transition-colors hover:bg-surface-2 hover:text-text"
+          class="relative flex h-9 items-center rounded-lg text-faint transition-colors hover:bg-surface-2 hover:text-text"
+          :class="railOpen ? 'w-full justify-start gap-3 px-3' : 'w-9 justify-center'"
           :title="'主题：' + prefLabel[themePref] + '（点击切换）'"
           @click="toggleTheme"
         >
-          <ThemeIcon class="h-4 w-4" />
-          <span
-            class="pointer-events-none absolute left-[46px] z-50 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs text-text opacity-0 shadow-sm transition-opacity delay-0 duration-150 group-hover:delay-[600ms] group-hover:opacity-100"
-          >主题：{{ prefLabel[themePref] }}</span>
+          <ThemeIcon class="h-4 w-4 flex-shrink-0" />
+          <span v-if="railOpen" class="text-sm">主题：{{ prefLabel[themePref] }}</span>
         </button>
         <button
-          class="group relative flex h-9 w-9 items-center justify-center rounded-lg text-faint transition-colors hover:bg-surface-2 hover:text-text"
+          class="relative flex h-9 items-center rounded-lg text-faint transition-colors hover:bg-surface-2 hover:text-text"
+          :class="railOpen ? 'w-full justify-start gap-3 px-3' : 'w-9 justify-center'"
           title="训练教练：意图驱动 → 澄清 → 边缘定位 → 路径 → 每日训练 → 测验达标；判分 = 要点清单 × 规则层，可解释"
         >
-          <span class="text-[13px] font-medium">?</span>
-          <span
-            class="pointer-events-none absolute left-[46px] z-50 w-64 whitespace-normal rounded-md border border-line bg-surface p-2 text-xs leading-relaxed text-muted opacity-0 shadow-sm transition-opacity delay-0 duration-150 group-hover:delay-[600ms] group-hover:opacity-100"
-          >意图驱动的自适应训练：目标澄清 → 边缘定位 → 路径 → 每日训练 → 测验达标。判分 = 要点清单 × 规则层，可解释。</span>
+          <span class="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[13px] font-medium">?</span>
+          <span v-if="railOpen" class="text-left text-xs leading-4 text-muted">训练教练是什么</span>
         </button>
       </div>
     </aside>
@@ -165,7 +199,12 @@ async function doLogout() {
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="sticky top-0 z-40 flex h-[52px] items-center justify-between border-b border-line bg-surface/90 px-5 backdrop-blur">
         <div class="text-[15px] font-semibold">{{ pageTitle }}</div>
-        <div class="relative" @click.stop>
+        <div
+          class="relative"
+          @click.stop
+          @mouseenter="openMenuOnHover"
+          @mouseleave="scheduleMenuClose"
+        >
           <button
             class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[13px] font-semibold text-white"
             @click="toggleMenu"
