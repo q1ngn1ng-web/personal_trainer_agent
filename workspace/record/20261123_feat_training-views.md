@@ -49,3 +49,9 @@ openspec：`training-views-rework`（已实施）。
 
 - 并行会话在飞改动（docs/architecture.md、src/templates/* 删除、api_wizard.ts、share-gate-confirmations.md）全程未触碰，提交只含自己的 8 个文件；
 - 联动申报：①详情页资料 tab 与向导共用 sourceStatus 映射（同一信息两处展示）；②`_task_payload` 保持未动（新增字段在 plan-items 端点合并）；③归档/题库总览按"接线恢复"处理而非新功能（api.ts 与后端端点均已存在）。
+
+## 补记（同日晚，用户实测后两笔）
+
+1. **侧栏悬停行为重做**（`7cc2803`）：上一版按拍板做了"tooltip 延迟 600ms"，用户澄清真实诉求——悬停 rail（含「练」logo）**自动展开**显示文字（73→197px 平滑过渡）、移开 0.5s 收起；头像悬停自动下拉、移开 0.5s 消失（点击开合保留）。Playwright 实测四态全过。
+2. **「找不到该训练项」404**（`603657f`，带教现场排查，接线缺口第七例）：用户答训练 144 的填空题反复 404。排查路径：`journalctl -u trainer-api --since "2 hours ago" | grep 404` → 定位 `POST /api/plan-items/829/answer` → 只读查库 → 829 存在、planned、**due=2026-11-27 未到期** → 读代码：`_find_task` 只扫 `today_tasks`（到期≤今天且未完成），与「动作端点不设到期门、可提前练」的端点文档直接矛盾——用户在新训练路径视图里提前练未到期场次，判分端点找不到任务。修复：`plan_service.find_task_by_plan_id` 主键直查 + `_find_task` 换用（顺带消灭了原来 O(全部训练×today_tasks) 的全表扫描）；可见性校验（403）不变。钉子 +2（未到期 question/skip 200、不存在 id 404），全量 415+30。**教学模式**：用户要求"带我去找、学会看日志调试"——journalctl 过滤 + uvicorn 访问日志定位请求 + 只读 SQLite 验证数据假设 + 读代码对照文档矛盾，全程命令可复用。
+
